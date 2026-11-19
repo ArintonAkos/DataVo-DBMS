@@ -22,7 +22,8 @@ public partial class StorageContext
     /// </summary>
     /// <remarks>
     /// <paramref name="lower"/> and <paramref name="upper"/> bound only the committed rows walked; overlay rows are
-    /// always offered, so the visitor must test the predicates the range was derived from.
+    /// always offered (with a bound, also the transaction's updates of rows outside it, which may have moved into
+    /// it), so the visitor must test the predicates the range was derived from.
     /// </remarks>
     /// <returns>
     /// False when the scan cannot run here (staged LSM writes), so the caller takes the general path.
@@ -46,7 +47,42 @@ public partial class StorageContext
         ScanCommittedRows(tableName, databaseName, lower, upper, ref scan, VisitCommittedRow, typedColumns);
         if (!scan.Stopped)
         {
-            VisitUnseenOverlayRows(ref scan);
+            VisitUnseenOverlayRows(ref scan, offerUnseenUpdates: lower is not null || upper is not null);
+        }
+
+        state = scan.State;
+        return true;
+    }
+
+    /// <summary>
+    /// Streams the rows of a key range visible to the current MVCC snapshot, as <see cref="ScanVisibleRows{TState}"/>
+    /// does for a whole table, but walking only <paramref name="committedRows"/> (the stored rows whose committed key
+    /// is in the range, in row order) instead of every stored row. Rows the walk cannot reach are offered from the
+    /// overlay: retained images of rows deleted or re-keyed since the snapshot began, the transaction's own updates
+    /// of rows whose committed key is outside the range, and its buffered inserts. The visitor must test the
+    /// predicates the range was derived from. Without a snapshot this is <see cref="VisitRowsByKey{TState}"/>.
+    /// </summary>
+    /// <returns>False when the read cannot run here (staged LSM writes), so the caller takes the general path.</returns>
+    internal bool VisitVisibleRowsInKeyRange<TState>(string tableName, string databaseName, IReadOnlyList<RowKey> committedRows, ref TState state, RawRowVisitor<TState> visit, bool[]? typedColumns = null)
+    {
+        TransactionSnapshot? snapshot = MvccExecutionScope.CurrentSnapshot;
+        if (snapshot is null)
+        {
+            return VisitRowsByKey(tableName, databaseName, committedRows, ref state, visit, typedColumns);
+        }
+
+        if (LsmEngine is { } lsm && lsm.HasStagedWrites(databaseName, tableName))
+        {
+            return false;
+        }
+
+        RuntimeQueryDiagnosticsScope.RecordTableRead(tableName, committedRows.Count);
+        DataVoEngine engine = DataVoEngine.Current();
+        var scan = new SnapshotScan<TState>(state, visit, engine, snapshot, tableName, databaseName, BuildSnapshotOverlay(engine, tableName, databaseName, snapshot));
+        VisitStoredRowsByKey(tableName, databaseName, committedRows, ref scan, VisitCommittedRow, typedColumns);
+        if (!scan.Stopped)
+        {
+            VisitUnseenOverlayRows(ref scan, offerUnseenUpdates: true);
         }
 
         state = scan.State;
@@ -354,13 +390,23 @@ public partial class StorageContext
 
     /// <summary>
     /// Offers the overlay rows the committed walk did not reach: retained images of rows no longer stored (or
-    /// outside the walked key range), then the transaction's buffered inserts under their reserved keys.
+    /// outside the walked key range), then the transaction's buffered inserts under their reserved keys. With
+    /// <paramref name="offerUnseenUpdates"/> (a walk of only some stored rows), the transaction's own updates of
+    /// visible rows the walk skipped are offered too, since the update may have moved a row into the range.
     /// </summary>
-    private static void VisitUnseenOverlayRows<TState>(ref SnapshotScan<TState> scan)
+    private static void VisitUnseenOverlayRows<TState>(ref SnapshotScan<TState> scan, bool offerUnseenUpdates)
     {
         foreach ((RowKey rowId, OverlayEntry entry) in scan.Overlay.Entries)
         {
-            if (!entry.Seen && !entry.Deleted && entry.Image is { } image && !Offer(ref scan, rowId, entry.Update ?? image, default))
+            if (entry.Seen || entry.Deleted)
+            {
+                continue;
+            }
+
+            byte[]? row = entry.Image is { } image ? entry.Update ?? image
+                : offerUnseenUpdates && entry.Update is { } update && IsVisibleToSnapshot(ref scan, rowId) ? update
+                : null;
+            if (row is not null && !Offer(ref scan, rowId, row, default))
             {
                 return;
             }

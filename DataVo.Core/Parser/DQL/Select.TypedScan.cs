@@ -241,6 +241,19 @@ internal partial class Select
                 return state.Aggregates is not null ? FinishAggregates(state) : FinishRows(state);
             }
 
+            // A range on the InMemory engine's integer primary key walks only the committed rows in it, and the
+            // snapshot's overlay supplies the rows that walk cannot see.
+            if (clustered is null
+                && TryPrimaryKeyRangeRows(engine, tableName, databaseName, columns, primaryKeys, predicates) is { } snapshotRange)
+            {
+                if (!engine.StorageContext.VisitVisibleRowsInKeyRange(tableName, databaseName, snapshotRange, ref state, RowVisitorOf(state), state.TypedReadMask))
+                {
+                    return null;
+                }
+
+                return state.Aggregates is not null ? FinishAggregates(state) : FinishRows(state);
+            }
+
             // Inside a transaction a non-indexed read streams the snapshot.
             return ScanSnapshotRows(engine, tableName, databaseName, lower, upper, state);
         }
@@ -304,7 +317,11 @@ internal partial class Select
             return null;
         }
 
-        RuntimeQueryDiagnosticsScope.RecordTableScan(tableName, (int)Math.Min(state.Sequence, int.MaxValue));
+        if (lower is null && upper is null)
+        {
+            RuntimeQueryDiagnosticsScope.RecordTableScan(tableName, (int)Math.Min(state.Sequence, int.MaxValue));
+        }
+
         return state.Aggregates is not null ? FinishAggregates(state) : FinishRows(state);
     }
 
