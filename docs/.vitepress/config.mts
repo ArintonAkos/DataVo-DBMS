@@ -35,9 +35,11 @@ export default withMermaid(
         { text: "Quickstart", link: "/manual/tutorial/quickstart" },
         { text: "SQL", link: "/manual/sql-language/supported-sql" },
         { text: "Benchmarks", link: "/manual/performance/benchmarks" },
+        { text: "Blog", link: "/blog/" },
         { text: "AI Access", link: "/manual/reference/ai-access" },
       ],
-      sidebar: [
+      sidebar: {
+        "/manual/": [
         {
           text: "Preface",
           collapsed: false,
@@ -131,7 +133,20 @@ export default withMermaid(
             { text: "AI Access And MCP", link: "/manual/reference/ai-access" },
           ],
         },
-      ],
+        ],
+        "/blog/": [
+          {
+            text: "Engineering Blog",
+            items: [
+              { text: "All Posts", link: "/blog/" },
+              {
+                text: "Part 1: Where It Wins and Where It Loses",
+                link: "/blog/part-1-where-it-wins-and-where-it-loses",
+              },
+            ],
+          },
+        ],
+      },
       socialLinks: [
         { icon: "github", link: "https://github.com/ArintonAkos/DataVo-DBMS" },
       ],
