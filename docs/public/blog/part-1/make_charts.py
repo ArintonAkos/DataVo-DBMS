@@ -332,9 +332,47 @@ def chart5():
     save(fig, "05-sql-matrix-vs-sqlite.png")
 
 
+# =============================================================================
+# Chart 6: Incremental View Maintenance (complex-vip: 50,000 updates + 3-table join reads)
+# Source: 2026-11-12/complex-vip.md (M4 Pro), linux-x64-net10-benchmark.log, windows-x64-net10-benchmark.log
+# =============================================================================
+def chart6():
+    # Total time in seconds across 50,000 insert+read iterations
+    data = {
+        "Apple M4 Pro\n(12 Nov)": {"DataVo (IVM)": 0.1917, "DuckDB (recompute)": 34.339, "SQLite (recompute)": 126.064},
+        "Linux x64 CI\n(20 Nov)": {"DataVo (IVM)": 0.5999, "DuckDB (recompute)": 112.920, "SQLite (recompute)": 237.074},
+        "Windows x64 CI\n(20 Nov)": {"DataVo (IVM)": 0.5455, "DuckDB (recompute)": 135.540, "SQLite (recompute)": 247.797},
+    }
+    colors = {"DataVo (IVM)": BLUE, "DuckDB (recompute)": GREY, "SQLite (recompute)": ORANGE}
+    fig, ax = plt.subplots(figsize=(11.5, 4.8))
+    w = 0.25
+    plats = list(data.keys())
+    for i, plat in enumerate(plats):
+        for j, eng in enumerate(["DataVo (IVM)", "DuckDB (recompute)", "SQLite (recompute)"]):
+            v = data[plat][eng]
+            x = i + (j - 1) * w
+            ax.bar(x, v, w * 0.9, color=colors[eng], zorder=3)
+            lbl = f"{v * 1000:.0f} ms" if v < 1.0 else f"{v:,.1f} s"
+            ax.text(x, v * 1.18, lbl, ha="center", va="bottom", fontsize=8.8, color=INK, fontweight="bold" if j == 0 else "normal")
+    ax.set_yscale("log")
+    ax.set_ylim(0.08, 900)
+    ax.set_xticks(range(len(plats)))
+    ax.set_xticklabels(plats, fontsize=9.5)
+    ax.set_ylabel("total time for 50,000 updates + reads (s, log scale)")
+    ax.grid(axis="y", color=GRID, zorder=0)
+    ax.legend(handles=[Patch(color=colors[k], label=k) for k in colors], loc="upper left", frameon=False, ncol=3, fontsize=9)
+    fig.suptitle("Incremental view vs recomputing a 3-table JOIN + GROUP BY (50,000 updates)", fontsize=13,
+                 fontweight="bold", x=0.01, ha="left", y=1.01)
+    fig.tight_layout(rect=(0, 0.06, 1, 0.97))
+    footer(fig, "complex-vip scenario: 10,000 orders, 1,000 accounts, 50 markets preloaded, then 50,000 insert+read iterations. "
+                "DataVo maintains the join incrementally via Z-set deltas; DuckDB and SQLite re-run the prepared query each time. Log y-axis.")
+    save(fig, "06-incremental-views-complex-vip.png")
+
+
 if __name__ == "__main__":
     chart1()
     chart2()
     chart3()
     chart4()
     chart5()
+    chart6()
