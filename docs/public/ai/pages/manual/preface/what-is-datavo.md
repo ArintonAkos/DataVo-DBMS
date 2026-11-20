@@ -87,3 +87,15 @@ USING HNSW;
 DataVo was built for local-first .NET applications, game tooling, simulations, and retrieval workloads that keep embeddings next to relational data. On a single machine, with data in the operating system's page cache, the v0.4 engine is faster than SQLite on primary-key and secondary-index lookups, low-cardinality `GROUP BY`, inner and `LEFT` joins on integer keys, aggregates a columnar index can answer, and filtered vector search. SQLite is still faster on `GROUP BY` over a key it can read in index order, on full scans with `OR` or `LIKE`, and on an unindexed `ORDER BY ... LIMIT`; DuckDB is one to three orders of magnitude faster than both on whole-table analytics. [DataVo vs SQLite](/manual/performance/datavo-vs-sqlite) gives the numbers and the reasons.
 
 It is not a client/server database. One process owns a database directory at a time (`datavo.lock` enforces it), there is no network protocol, no replication, no stored procedures or triggers, and transactions do not provide serializable isolation for arbitrary multi-row predicates. Its SQL is its own dialect, not PostgreSQL's or SQLite's. The [SQL compatibility matrix](/manual/sql-language/sql-compatibility), [Limits](/manual/reference/limits) and [Unsupported Features](/manual/reference/unsupported-features) state these boundaries precisely.
+
+## Commercial Add-On: DataVo Sync
+
+While DataVo itself is an MIT-licensed embedded database, teams needing **offline-first bidirectional synchronization with PostgreSQL** can license **DataVo Sync**, a separate proprietary commercial add-on. It connects PostgreSQL logical replication (`pgoutput`) to embedded DataVo clients over WebSocket/HTTP using wire v2 + Brotli, Z-set delta compaction, per-column conflict resolution, and crash-recoverable write-back.
+
+In end-to-end Linux x64 CI benchmarks (20 November 2026, PostgreSQL 17.12, 2 vCPU):
+
+- **100k warm initial sync:** **605 ms** (`InMemory`) and **706–726 ms** (`Lsm`) vs **702–909 ms** (SQLite/JSON) and **1,167 ms** (ElectricSQL `1.8.1`).
+- **Wire footprint & allocations:** **45.5 B/row** (8.0× smaller than ElectricSQL's `362.7 B/row`) and **36.4–49.1 MB** client allocations (5.1–6.9× lower than ElectricSQL's `251.4 MB`).
+- **Concurrency:** sustains **1,000 concurrent WebSocket clients** (`12,754 rows/s`) on a 2-vCPU VM, with **4.06–5.19 µs** local point lookups and **81–243 ms** offline-burst convergence across PostgreSQL and peers.
+
+For licensing or early-access inquiries, reach out to `@ArintonAkos` on GitHub.

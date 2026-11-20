@@ -37,7 +37,7 @@ Two storage engines are under active development. **InMemory** packs rows into c
 
 On one machine with warm caches, the v0.4 engine is faster than SQLite on key lookups and ranges, low-cardinality `GROUP BY`, integer-key joins, columnar aggregates and filtered vector search, and slower on index-ordered `GROUP BY`, unindexed top-k and `OR`/`LIKE` full scans. DuckDB is far faster than both on whole-table analytics. Every number is checked against an oracle before it is timed.
 
-DataVo is not a client/server database: one process owns a database directory, there is no wire protocol or replication, and transactions are snapshot-isolated rather than serializable.
+DataVo is not a client/server database: one process owns a database directory, there is no wire protocol or replication, and transactions are snapshot-isolated rather than serializable. For teams requiring offline-first bidirectional sync with PostgreSQL, **DataVo Sync** is available separately as a commercial add-on (605 ms 100k warm sync, 45.5 B/row wire v2 + Brotli, 1,000-client verified scaling).
 
 ## What to read first
 

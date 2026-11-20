@@ -45,6 +45,15 @@ All figures are from one Apple M4 Pro (macOS 26.3, .NET 10.0.3, arm64), one run 
 
 Cross-platform runs on GitHub Actions (four-core virtual machines) are in [Part III of the results page](docs/manual/performance/benchmarks.md#part-iii-platforms). DataVo's lead over SQLite on scans is 2 to 2.8 times smaller on x64 than on the M4 Pro.
 
+**Cross-platform CI (`master`, 20 November 2026, 2-physical-core / 4-vCPU runners):**
+
+- **Primary-key point lookup (100,000 rows, BenchmarkDotNet):**
+  - **Linux x64 (`ubuntu-latest`):** `130.8 ns` (Memory, 56 B) and `288.3 ns` (File/LSM, 144 B) vs SQLite `1,398.2 ns` and `3,642.7 ns` (**10.7–12.6× faster**).
+  - **Windows x64 (`windows-latest`):** `239.6 ns` (Memory, 56 B) and `666.9 ns` (File/LSM, 144 B) vs SQLite `2,024.0 ns` and `6,741.1 ns` (**8.4–10.1× faster**).
+- **Filtered `COUNT(*)` over 200,000 rows (`[Columnar]`, BenchmarkDotNet):** `9.29 µs` Memory / `8.81 µs` File on Linux (**491–636× faster** than SQLite, **40–61× faster** than 1-thread DuckDB, 0 B allocated); `16.20 µs` Memory / `15.94 µs` File on Windows (**531–844× faster** than SQLite).
+- **Concurrent ops (8 readers + 2 writers, 5 s, Research Benchmark):** `1,530,919 ops/s` with `302,878` writes (`0.12 ms` write P99) on Linux x64, and `1,535,444 ops/s` with `98,696` writes (`1.08 ms` write P99) on Windows x64.
+- **YCSB 80/20 (4 threads, Relaxed):** `230,912 ops/s` (`0.43 ms` write P99) vs SQLite `98,295 ops/s` (`3.20 ms` write P99) on Linux x64; `70,735 ops/s` (`1.05 ms` write P99) vs SQLite `33,256 ops/s` (`7.49 ms` write P99) on Windows x64.
+
 ## Install
 
 Published prereleases on [nuget.org](https://www.nuget.org/packages/DataVo.Core/) (0.4.0-rc.1):
@@ -155,6 +164,22 @@ int veterans = db.Table<Player>().Where(50, static (p, min) => p.Level >= min).C
 - **Native AOT:** `DataVo.Core`, `DataVo.Data` and generated code publish with `PublishAot=true`. The EF Core bridge is not covered.
 - **Unity** is an evaluation target, not a supported runtime. `DataVoEnablePortableTarget=true` builds an experimental local `netstandard2.1` candidate; a narrow smoke (in-memory, LSM and Disk save/reopen) passes in the Unity 6000.5.4f1 macOS Editor and a macOS IL2CPP Player. Windows IL2CPP is unverified and direct Burst calls are unsupported by design.
 - **Browser / WebAssembly:** `DataVo.Browser` runs the engine for the documentation site's playground. It is not production-ready and not published on npm. To run the playground locally: `bash ./scripts/deploy-browser-wasm.sh`, then `cd docs && npm install && npm run docs:dev`.
+
+## Commercial Add-On: DataVo Sync
+
+For teams that need **offline-first, bidirectional synchronization between PostgreSQL and embedded DataVo clients**, **DataVo Sync** is available as a separate commercial add-on (not included in the MIT open-source repository).
+
+It pairs PostgreSQL logical replication (`pgoutput`), Z-set delta compaction, per-column conflict resolution, crash-recoverable outbox write-back, and WebSocket/HTTP transport with DataVo's local `InMemory` and `Lsm` stores.
+
+End-to-end benchmarks on Ubuntu x64 (2 vCPU, PostgreSQL 17.12, 20 November 2026):
+
+- **100k-row warm initial sync:** **605 ms** (`InMemory`) / **706–726 ms** (`LSM`) vs **702–909 ms** for a custom JSON/WebSocket → SQLite WAL baseline and **1,167 ms** for ElectricSQL `1.8.1`.
+- **Wire footprint:** **45.5 B/row** (4.55 MB total over wire v2 + Brotli) — **4.7× smaller** than plain JSON (`214.8 B/row`) and **8.0× smaller** than ElectricSQL (`362.7 B/row`).
+- **Client memory allocations (100k sync):** **36.4–49.1 MB** vs **130 MB** (SQLite/JSON) and **251.4 MB** (ElectricSQL).
+- **Local reads on synced 100k replica:** **4.06–5.19 µs/op** point lookups vs **8.27–8.86 µs/op** on SQLite WAL.
+- **Concurrent scaling:** **140,218 aggregate rows/s** fan-out across 50 clients; **12,754 rows/s** sustained at **1,000 concurrent WebSocket clients** on a 2-vCPU VM.
+
+For commercial licensing or early access, contact the repository maintainer (`@ArintonAkos`).
 
 ## Documentation
 

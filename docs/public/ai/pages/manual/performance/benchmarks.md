@@ -488,9 +488,11 @@ Relaxed throughput does not scale with threads on any platform. On Linux it peak
 
 DataVo Relaxed beats SQLite (normal) by 2.5 times on Linux and 2.1 times on Windows, and has the lower write P99 on both. The M4 Pro run, with 12 threads, gave 1.95 times. On Linux LiteDB's write P99 (0.26 ms) is lower than DataVo Relaxed's (0.41 ms), at a fifteenth of the throughput.
 
-### Concurrent operations: a result I cannot call a benchmark
+### Concurrent operations: a result I cannot call a benchmark (updated 20 November 2026)
 
-The `concurrent-ops` scenario runs 8 reader threads and 2 writer threads for 5 seconds. On the 12-core Mac DataVo completed writes (write P99 0.11 ms). On the two four-core runners the log reads:
+> **20 November 2026 update (`master` @ `02fa240f`, CI run `44748508039`):** On both 4-vCPU runners, DataVo's writers now complete reliably alongside 8 busy readers: **1,530,919 ops/s** (`20,405,025` reads + `302,878` writes, `0.007 ms` read P99, `0.125 ms` write P99) on Linux x64, and **1,535,444 ops/s** (`21,194,024` reads + `98,696` writes, `0.009 ms` read P99, `1.084 ms` write P99) on Windows x64, compared against `2` completed SQLite writes (`5–10 s` write P99).
+
+Historical note (12 November 2026, `0.2.0-rc.3`): The `concurrent-ops` scenario runs 8 reader threads and 2 writer threads for 5 seconds. On the 12-core Mac DataVo completed writes (write P99 0.11 ms). On the two four-core runners the log then read:
 
 | Platform | Engine | Reads | Writes completed |
 | --- | --- | ---: | ---: |
@@ -528,6 +530,21 @@ Exact Flat search is the fastest configuration on all three platforms, as in Par
 **SIMD.** Vector distance kernels (`DataVo.Core/Utils/SimdDistanceKernels.cs`) select a path at runtime: 256-bit AVX where the CPU supports it, otherwise 128-bit Arm `AdvSimd` (NEON), otherwise `TensorPrimitives`. There is no AVX-512 kernel, so an AVX-512 machine runs the 256-bit path. There is no GPU or Metal code path. The M4 Pro vector results come from the NEON path, which processes four floats per instruction against eight for AVX; the two x64 runners used the AVX path (both CPUs support AVX2). The portable `netstandard2.1` build, which is the Unity target, compiles a `System.Numerics.Vector<T>` fallback instead of the intrinsics.
 
 **Linux and Windows.** Measured above, on virtual machines. They show that the engine builds and runs the full scenario set on both operating systems and that its results mostly carry over. They do not describe bare-metal Linux or Windows servers, NVMe devices, or machines with more than four cores. The July Linux plots were removed from the README because they described the v0.1 alpha engine.
+
+### BenchmarkDotNet & Research Matrix Update (20 November 2026, `master` @ `02fa240f`, CI run `44748508039`)
+
+Re-running the full suites on GitHub Actions (`ubuntu-latest` AMD EPYC 9V45, 2 physical / 4 logical cores; `windows-latest` Xeon Platinum 8370C, 2 physical / 4 logical cores; .NET 10.0.15):
+
+- **Point lookup (100,000 rows, BenchmarkDotNet):**
+  - **Linux x64:** `130.8 ns` (Memory, 56 B) and `288.3 ns` (File/LSM, 144 B) vs SQLite `1,398.2 ns` and `3,642.7 ns` (608 B) and DuckDB 1-thread `203–204 µs`.
+  - **Windows x64:** `239.6 ns` (Memory, 56 B) and `666.9 ns` (File/LSM, 144 B) vs SQLite `2,024.0 ns` and `6,741.1 ns` (608 B) and DuckDB 1-thread `376–381 µs`.
+- **Filtered aggregates (200,000 rows, `[Columnar]`, BenchmarkDotNet):**
+  - **Linux x64:** `COUNT(*)` `9.29 µs` (Memory) / `8.81 µs` (File), `SUM`/`MIN`/`MAX` `27.7–40.6 µs` (0 B allocated) vs SQLite `4,553–6,590 µs` and DuckDB 1-thread `369–1,215 µs`.
+  - **Windows x64:** `COUNT(*)` `16.20 µs` (Memory) / `15.94 µs` (File), `SUM`/`MIN`/`MAX` `84.3–102.9 µs` (0 B allocated) vs SQLite `8,608–16,255 µs` and DuckDB 1-thread `684–2,300 µs`.
+- **YCSB 80/20 (4 threads, Research Matrix):**
+  - **Linux x64:** DataVo Relaxed `230,912 ops/s` (`0.43 ms` write P99), DataVo Production `35,645 ops/s` (`1.13 ms`), SQLite WAL `NORMAL` `98,295 ops/s` (`3.20 ms`), LiteDB `15,666 ops/s`.
+  - **Windows x64:** DataVo Relaxed `70,735 ops/s` (`1.05 ms` write P99), DataVo Production `1,360 ops/s` (`48.67 ms`), SQLite WAL `NORMAL` `33,256 ops/s` (`7.49 ms`), LiteDB `3,598 ops/s`.
+- **Space and recovery (1,000,000 records):** `28.15 MB` on disk for DataVo vs `29.08 MB` for SQLite and `154.46 MB` for LiteDB; Relaxed cold recovery `1.65 ms` (Linux) / `3.86 ms` (Windows).
 
 ### Unity IL2CPP
 
