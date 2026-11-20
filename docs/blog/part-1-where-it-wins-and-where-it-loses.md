@@ -23,7 +23,7 @@ A few ground rules for reading the numbers:
 
 | Environment | Hardware | Runtime | Used for |
 | --- | --- | --- | --- |
-| macOS | Apple M4 Pro, 12 cores, 48 GiB | .NET 10.0.3, macOS 26.3 | SQL and vector matrix (17 Nov), storage workloads (12 Nov) |
+| macOS (M4 Pro) | Apple M4 Pro, 12 cores, 48 GiB | .NET 10.0.3, macOS 26.3 | BenchmarkDotNet lookups/aggregates (`02fa240f`, 20 Nov), SQL/vector matrix (17 Nov), storage workloads (12 Nov) |
 | Linux x64 CI | AMD EPYC 9V45, 4 logical / 2 physical cores | .NET 10.0.15, Ubuntu 26.04 | BenchmarkDotNet and research matrix, run `44748508039` (20 Nov) |
 | Windows x64 CI | Xeon Platinum 8370C, 4 logical / 2 physical cores, Hyper-V | .NET 10.0.15, Windows 11 24H2 | same run |
 | Sync CI | Ubuntu 26.04 x64, **2 vCPU**, PostgreSQL 17.12, ElectricSQL 1.8.1 in Docker | .NET 10.0.15 | DataVo-Sync end-to-end, run `44756364158` (20 Nov) |
@@ -46,17 +46,11 @@ What this is not: DataVo is not a client/server database. One process owns a dat
 
 ```mermaid
 flowchart LR
-  subgraph PG["PostgreSQL 17"]
-    WAL[("WAL, wal_level=logical")]
-  end
+  PG[("PostgreSQL 17")] <-->|"bidirectional sync"| SYNC["DataVo-Sync (commercial)"]
+  SYNC <-->|"WebSocket / Wire v2"| CORE
 
-  subgraph Hub["DataVo-Sync server (commercial)"]
-    DEC["pgoutput decoder"] --> ZS["Z-set deltas, compacted"]
-    ZS --> WIRE["Wire v2 + Brotli"]
-  end
-
-  subgraph App["Application process"]
-    subgraph Core["DataVo.Core (MIT)"]
+  subgraph APP["Application process"]
+    subgraph CORE["DataVo.Core (MIT)"]
       SQL["SQL text / compiled LINQ"] --> TYPED["Typed paths"]
       SQL --> GEN["General path"]
       TYPED --> MEM["InMemory: FlatRowStore"]
@@ -64,14 +58,7 @@ flowchart LR
       SQL --> VEC["Flat / HNSW vector search"]
       SQL --> IVM["Z-set incremental views"]
     end
-    OUTBOX[("Outbox")]
   end
-
-  WAL -->|logical replication| DEC
-  WIRE -->|WebSocket| Core
-  Core --> OUTBOX
-  OUTBOX -->|"upload, per-column conflict resolution"| Hub
-  Hub -->|write-back| PG
 ```
 
 ### The storage engines
@@ -98,9 +85,7 @@ DataVo can keep a query result up to date as rows change, using the model from B
 
 ### DataVo-Sync
 
-I describe DataVo-Sync at the level of protocol and behaviour only, because it is a commercial product.
-
-PostgreSQL logical replication (`pgoutput`) is decoded into Z-set deltas, compacted, and sent to clients as a columnar wire format (wire v2) compressed with Brotli over WebSocket. The client applies the deltas to a local DataVo store, either `InMemory` or `Lsm`. Local writes go into a crash-recoverable outbox and are uploaded, with conflicts resolved per column (last writer wins), and written back to PostgreSQL.
+Because DataVo-Sync is a commercial product, I keep its internal architecture private and describe only the external behaviour tested here. It pairs a sync server connected to PostgreSQL logical replication with an embedded client library that writes into a local DataVo store (`InMemory` or `Lsm`), transfers compressed columnar deltas over WebSocket (wire v2 + Brotli), and queues offline local writes for upload and conflict resolution.
 
 ## 3. Engine benchmarks and correctness
 
@@ -123,12 +108,13 @@ BenchmarkDotNet, 100,000 rows for lookups and 200,000 rows for aggregates, same 
 
 | Primary-key lookup | DataVo, memory | DataVo, file (LSM) | SQLite, memory | SQLite, file | DuckDB, 1 thread, file |
 | --- | ---: | ---: | ---: | ---: | ---: |
+| Apple M4 Pro (`02fa240f`, 20 Nov) | 55.0 ns | 216.2 ns | 715.7 ns | 1,654.0 ns | 62.7 µs |
 | Linux x64 | 130.8 ns | 288.3 ns | 1,398.2 ns | 3,642.7 ns | 204.1 µs |
 | Windows x64 | 239.6 ns | 666.9 ns | 2,024.0 ns | 6,741.1 ns | 380.7 µs |
-| Apple M4 Pro (13 Nov) | 52.1 ns | 236.0 ns | 735.6 ns | 1,609.4 ns | 64.9 µs |
 
 | Filtered `COUNT(*)`, `[Columnar]` | DataVo, memory | DataVo, file | SQLite, memory | SQLite, file | DuckDB 1 thread, file |
 | --- | ---: | ---: | ---: | ---: | ---: |
+| Apple M4 Pro (`02fa240f`, 20 Nov) | 27.11 µs | 27.44 µs | 3,655.8 µs | 4,449.5 µs | 229.8 µs |
 | Linux x64 | 9.29 µs | 8.81 µs | 4,553.2 µs | 5,603.4 µs | 538.4 µs |
 | Windows x64 | 16.20 µs | 15.94 µs | 8,607.6 µs | 13,446.1 µs | 1,102.2 µs |
 
@@ -154,37 +140,39 @@ On 20 November, at `master` @ `02fa240f`, the same scenario completes writes on 
 
 | Platform | Engine | Reported ops/s | Reads | Writes | Read p99 | Write p99 |
 | --- | --- | ---: | ---: | ---: | ---: | ---: |
-| Linux x64 | DataVo | 1,530,919 | 20,405,025 | 302,878 | 0.007 ms | 0.125 ms |
-| Linux x64 | SQLite | 244,903 | 2,464,746 | 2 | 0.118 ms | 10,061 ms |
-| Windows x64 | DataVo | 1,535,444 | 21,194,024 | 98,696 | 0.009 ms | 1.084 ms |
-| Windows x64 | SQLite | 432,870 | 2,231,788 | 2 | 0.041 ms | 5,152 ms |
+| Apple M4 Pro (12 Nov) | DataVo (`InMemory`) | 1,852,526 | — | — | 0.048 ms | 0.112 ms |
+| Apple M4 Pro (12 Nov) | SQLite (`shared-cache`) | 372,220 | — | — | 0.120 ms | 5,135 ms |
+| Linux x64 | DataVo (`InMemory`) | 1,530,919 | 20,405,025 | 302,878 | 0.007 ms | 0.125 ms |
+| Linux x64 | SQLite (`shared-cache`) | 244,903 | 2,464,746 | 2 | 0.118 ms | 10,061 ms |
+| Windows x64 | DataVo (`InMemory`) | 1,535,444 | 21,194,024 | 98,696 | 0.009 ms | 1.084 ms |
+| Windows x64 | SQLite (`shared-cache`) | 432,870 | 2,231,788 | 2 | 0.041 ms | 5,152 ms |
 
-Between the two runs, a series of lock and snapshot changes landed: commit-ordered snapshots, bounded waits on the snapshot gate, correct accounting of write-lock owners, and coordination between row write locks and table write locks. I have not bisected them, so I cannot tell you which one removed the starvation. I would be more comfortable with an answer than with this paragraph.
+Between the two runs, a series of lock and snapshot changes landed: commit-ordered snapshots, bounded waits on the snapshot gate, correct accounting of write-lock owners, and coordination between row write locks and table write locks. I have not bisected them, so I cannot tell you which one removed the starvation.
 
-The SQLite column deserves its own warning. SQLite completed two writes in the run, and the harness reports a total of 10,064 ms (Linux) and 5,156 ms (Windows) for a nominal 5-second window. My earlier results page attributed the multi-second write p99 to a writer waiting out its busy timeout, and I have not investigated further. So SQLite's ops/s here is essentially read throughput with the writers shut out. It is a property of this contention setup, ten threads on four cores, not a typical SQLite write latency, and I would not use it to claim that DataVo handles mixed load several times better.
+The SQLite numbers look strange at first glance — **two** writes in 5 seconds, with a 5–10 second write p99 — and the reason is in `SqliteConcurrentOpsEngine.cs` itself rather than SQLite WAL performance. The benchmark opens SQLite with `mode=memory&cache=shared`, which does not use WAL; under shared-cache mode, SQLite takes table-level shared-cache locks (`SQLITE_LOCKED`), so 8 continuous reader threads starve the 2 writer threads until `PRAGMA busy_timeout = 3000` expires repeatedly. The harness catches `SQLITE_BUSY`/`SQLITE_LOCKED` to keep running, stretching the 5-second window to 10,064 ms (Linux) and 5,156 ms (Windows). In short: both engines here run in memory, DataVo handles the 8+2 contention without starving writers, while the SQLite runner configuration serializes shared-cache locks and should not be read as SQLite WAL mixed-load behaviour.
 
 ### Durable commits and YCSB
 
 | 50,000 durable point updates, median latency | Linux x64 | Windows x64 | M4 Pro (20,000 updates, 12 Nov) |
 | --- | ---: | ---: | ---: |
-| DataVo Production (`StrictFsync`) | 0.2405 ms | 3.9163 ms | 4.04 ms |
-| SQLite WAL `FULL` | 0.1076 ms | 3.9218 ms | 4.04 ms |
-| DataVo Relaxed | 0.0086 ms | 0.0272 ms | |
-| SQLite WAL `NORMAL` | 0.0114 ms | 0.0134 ms | |
+| DataVo Production (`StrictFsync`) | 0.2405 ms | 3.9163 ms | 4.0396 ms |
+| SQLite WAL `FULL` | 0.1076 ms | 3.9218 ms | 4.0419 ms |
+| DataVo Relaxed | 0.0086 ms | 0.0272 ms | 0.0045 ms |
+| SQLite WAL `NORMAL` | 0.0114 ms | 0.0134 ms | 0.0054 ms |
 
 Where the device flush costs milliseconds, as on the Mac's SSD and the Windows runner, the two durable engines are indistinguishable. The cost is the flush, and neither engine can skip it. That is the honest result, and it is the subject of Part 3.
 
 On the Linux runner the flush is cheap, and then SQLite is faster: 0.1076 ms against 0.2405 ms per update, and 6.8 s against 13.3 s over 50,000. DataVo also allocates more per update (968.2 B against 512.1 B). I have not profiled the Production commit path. The group-commit machinery is the obvious place to look, and that is an inference from the design rather than a finding.
 
-YCSB (80% reads, 20% updates, 4 threads, 100,000 preloaded records), matched at Relaxed against `NORMAL`:
+YCSB (80% reads, 20% updates, 4 threads on x64 / 12 threads on M4 Pro, 100,000 preloaded records), matched at Relaxed against `NORMAL`:
 
 | | DataVo Relaxed | SQLite `NORMAL` | DataVo Production |
 | --- | ---: | ---: | ---: |
 | Linux x64 | 230,912 ops/s, write p99 0.43 ms | 98,295 ops/s, 3.20 ms | 35,645 ops/s, 1.13 ms |
 | Windows x64 | 70,735 ops/s, write p99 1.05 ms | 33,256 ops/s, 7.49 ms | 1,360 ops/s, 48.67 ms |
-| M4 Pro, 12 threads | 510,695 ops/s, 0.66 ms | 261,618 ops/s, 3.77 ms | |
+| M4 Pro (12 Nov) | 510,695 ops/s, 0.66 ms | 261,618 ops/s, 3.77 ms | 4,326 ops/s, 27.83 ms |
 
-There is no SQLite `FULL` row in the YCSB logs, so the Production column has no matched comparator. It is there to show what the flush costs on Windows.
+There is no SQLite `FULL` row in the YCSB logs, so the Production column has no matched comparator. It is there to show what the flush costs on Windows and macOS.
 
 ### Space, recovery, and the matrix
 
@@ -192,6 +180,9 @@ There is no SQLite `FULL` row in the YCSB logs, so the Production column has no 
 
 | | Insert | On disk | Reopen | First read after |
 | --- | ---: | ---: | ---: | ---: |
+| DataVo Production, M4 Pro (12 Nov) | 731.8 ms | 27.725 MB | 4.3 ms | — |
+| DataVo Relaxed, M4 Pro (12 Nov) | 473.2 ms | 27.725 MB | 1.5 ms | — |
+| SQLite `NORMAL`, M4 Pro (12 Nov) | 712.5 ms | 29.082 MB | 0.4 ms | — |
 | DataVo Production, Linux | 1,365.8 ms | 28.155 MB | 27.3 ms | 10.4 ms |
 | DataVo Relaxed, Linux | 946.4 ms | 28.155 MB | 1.6 ms | 0.1 ms |
 | SQLite `NORMAL`, Linux | 1,839.1 ms | 29.082 MB | 0.6 ms | 3.9 ms |
@@ -383,7 +374,7 @@ C3 (`SUM` of a `DOUBLE`) is a deliberate loss on LSM: floating-point addition is
 
 - **Part 2.** Packed byte buffers and Roslyn codegen: how a 52 ns point lookup is built, and what it cost in complexity.
 - **Part 3.** What an fsync costs, across operating systems: the 4 ms tie, the 0.1 ms Linux case, and the Windows scaling problem.
-- **Part 4.** Z-sets, from incremental views to a 36 MB sync: how one data model serves both.
+- **Part 4.** Cutting 100k-row sync allocations from 1.2 GB to 36 MB: zero-allocation initial sync and compressed columnar wire transfer.
 - **Part 5.** HNSW, the JIT, and the exact fallback: recall on clustered data, and why a graph search sometimes loses to a scan.
 - **Part 6.** Differential oracle testing: how the matrix found five wrong answers before I had tuned anything.
 

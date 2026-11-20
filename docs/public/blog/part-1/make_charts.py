@@ -226,14 +226,14 @@ def chart4():
     b.set_ylim(1, 3e6)
     b.set_ylabel("writes completed (log scale)")
     b.set_title("Writes completed by the 2 writer threads")
-    fig.legend(handles=[Patch(color=BLUE, label="DataVo (LSM)"), Patch(color=ORANGE, label="SQLite (WAL)")], loc="upper center",
+    fig.legend(handles=[Patch(color=BLUE, label="DataVo (InMemory)"), Patch(color=ORANGE, label="SQLite (shared-cache in-memory)")], loc="upper center",
                ncol=2, frameon=False, bbox_to_anchor=(0.5, 1.0))
     fig.suptitle("Concurrent ops, 8 readers + 2 writers: the writers are the story", fontsize=13, fontweight="bold",
                  x=0.01, ha="left", y=1.05)
     fig.tight_layout(rect=(0, 0.07, 1, 0.97))
     footer(fig, "CI run 44748508039 (master @ 02fa240f), 4 logical / 2 physical cores, 100,000 preloaded records, 5 s. "
-                "Reads: DataVo 20,405,025 (Linux) / 21,194,024 (Windows); SQLite 2,464,746 / 2,231,788. SQLite completed 2 writes (write p99 10,061 ms / 5,152 ms) and its "
-                "run lasted 10,064 ms / 5,156 ms against a 5 s window, so its ops/s is essentially read throughput, not a like-for-like mixed workload.")
+                "Reads: DataVo 20,405,025 (Linux) / 21,194,024 (Windows); SQLite 2,464,746 / 2,231,788. "
+                "SQLite uses mode=memory&cache=shared (no WAL, table-level locking) with busy_timeout=3000 ms, so 8 readers starve its writers (2 writes, run stretched to 10,064 / 5,156 ms).")
     save(fig, "04-concurrent-ops.png")
 
 
