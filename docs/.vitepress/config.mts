@@ -169,6 +169,10 @@ export default withMermaid(
                 text: "Part 1: Where It Wins and Where It Loses",
                 link: "/blog/part-1-where-it-wins-and-where-it-loses",
               },
+              {
+                text: "Part 2: Packed Buffers, Native AOT & Roslyn Codegen",
+                link: "/blog/part-2-packed-buffers-aot-and-roslyn-codegen",
+              },
             ],
           },
         ],

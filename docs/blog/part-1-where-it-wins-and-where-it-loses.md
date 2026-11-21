@@ -1,14 +1,16 @@
 ---
 title: "I wrote an embedded database and Postgres sync engine in C#. Here is where it wins and where it loses."
-description: "Part 1 of 6: In-process SQL, SIMD vector search, Z-set incremental views, and offline-first Postgres sync in pure .NET 10—measured across macOS, Linux, and Windows."
+description: "Part 1 of 7: In-process SQL, SIMD vector search, Z-set incremental views, and offline-first Postgres sync in pure .NET 10—measured across macOS, Linux, and Windows."
 outline: [2, 3]
 prev: false
-next: false
+next:
+  text: "Part 2: Packed byte buffers, Native AOT, and Roslyn codegen"
+  link: "/blog/part-2-packed-buffers-aot-and-roslyn-codegen"
 ---
 
 # I wrote an embedded database and Postgres sync engine in C#. Here is where it wins and where it loses.
 
-*Part 1 of 6.*
+*Part 1 of 7.*
 
 When you build a local-first .NET application today—a desktop tool that has to stay responsive offline, a local AI assistant, or a real-time simulation—you rarely pick one database. You assemble three. You ship SQLite for relational state, bolt on a separate store for vector embeddings, and write a custom JSON-over-WebSocket layer to keep that local cache reconciled with PostgreSQL. Each boundary costs you something: native binaries per target OS, P/Invoke marshalling on every call, duplicated schemas, and hand-rolled conflict handling.
 
@@ -425,17 +427,18 @@ db.Execute("CREATE TABLE Notes (Id INT PRIMARY KEY, Tag VARCHAR(32), Embedding V
 - **Commercial `DataVo-Sync` add-on:** For early access or licensing for offline-first PostgreSQL sync, reach out via `@ArintonAkos` on GitHub.
 
 > [!TIP]
-> Enjoyed the deep dive? Star [`ArintonAkos/DataVo-DBMS`](https://github.com/ArintonAkos/DataVo-DBMS) on GitHub to follow Parts 2–6.
+> Enjoyed the deep dive? Star [`ArintonAkos/DataVo-DBMS`](https://github.com/ArintonAkos/DataVo-DBMS) on GitHub to follow Parts 2–7.
 
 ---
 
 ## What comes next
 
-- **Part 2.** Packed byte buffers and Roslyn codegen: how a 55 ns point lookup is built, and what it cost in complexity.
+- **[Part 2.](/blog/part-2-packed-buffers-aot-and-roslyn-codegen)** Packed byte buffers, Native AOT, and Roslyn codegen: how a 55 ns point lookup works with zero native binaries, prepared statements, and typed execution paths.
 - **Part 3.** What an fsync costs, across operating systems: the 4 ms tie, the 0.1 ms Linux case, and the Windows scaling problem.
 - **Part 4.** Cutting 100k-row sync allocations from 1.2 GB to 36 MB: zero-allocation initial sync and compressed columnar wire transfer.
 - **Part 5.** HNSW, the JIT, and the exact fallback: recall on clustered data, and why a graph search sometimes loses to a scan.
 - **Part 6.** Differential oracle testing: how our matrix caught five wrong-answer bugs before we tuned a single microsecond.
+- **Part 7.** Building an offline-first .NET 10 app end-to-end: combining Native AOT, filtered `VECTOR(n)` search, live Z-set views, and bidirectional Postgres sync in a real desktop/mobile architecture.
 
 ---
 
