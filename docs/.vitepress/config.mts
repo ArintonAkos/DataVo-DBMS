@@ -13,7 +13,7 @@ if (isProdBuild) {
   head.push([
     "script",
     {
-      "data-goatcounter": "https://YOUR_GOATCOUNTER_CODE.goatcounter.com/count",
+      "data-goatcounter": "https://datavodb.goatcounter.com/count",
       async: "",
       src: "//gc.zgo.at/count.js",
     },
