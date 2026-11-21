@@ -195,45 +195,63 @@ def chart3():
 
 # =============================================================================
 # Chart 4: concurrent ops, 8 readers + 2 writers, 5 s
-# Source: linux-x64-net10-benchmark.log / windows-x64-net10-benchmark.log (CI run 44748508039)
+# Source: docs/public/benchmarks/2026-11-21-m4pro/concurrent-ops.md (Apple M4 Pro)
+#         & linux-x64-net10-benchmark.log / windows-x64-net10-benchmark.log (CI run 44748508039)
 # =============================================================================
 def chart4():
     data = {
-        "Linux x64": {"DataVo": dict(ops=1530919, writes=302878, wp99=0.124786),
-                      "SQLite": dict(ops=244903, writes=2, wp99=10061.055113)},
-        "Windows x64": {"DataVo": dict(ops=1535444, writes=98696, wp99=1.0843),
-                        "SQLite": dict(ops=432870, writes=2, wp99=5151.9354)},
+        "Apple M4 Pro\n(21 Nov)": [
+            ("DataVo (InMemory)", BLUE, dict(ops=1087329, writes=224522, wp99=0.619834)),
+            ("SQLite (WAL, normal)", GREEN, dict(ops=389341, writes=91458, wp99=1.299083)),
+            ("SQLite (shared-cache)", ORANGE, dict(ops=381982, writes=2, wp99=5011.840208)),
+        ],
+        "Linux x64 CI\n(20 Nov)": [
+            ("DataVo (InMemory)", BLUE, dict(ops=1530919, writes=302878, wp99=0.124786)),
+            ("SQLite (shared-cache)", ORANGE, dict(ops=244903, writes=2, wp99=10061.055113)),
+        ],
+        "Windows x64 CI\n(20 Nov)": [
+            ("DataVo (InMemory)", BLUE, dict(ops=1535444, writes=98696, wp99=1.0843)),
+            ("SQLite (shared-cache)", ORANGE, dict(ops=432870, writes=2, wp99=5151.9354)),
+        ],
     }
-    fig, (a, b) = plt.subplots(1, 2, figsize=(12.5, 5.2))
-    w = 0.34
+    fig, (a, b) = plt.subplots(1, 2, figsize=(14.0, 5.6))
+    w = 0.295
     for i, plat in enumerate(data):
-        for j, (eng, colr) in enumerate([("DataVo", BLUE), ("SQLite", ORANGE)]):
-            d = data[plat][eng]
-            x = i + (j - 0.5) * w
-            a.bar(x, d["ops"], w * 0.92, color=colr, zorder=3)
-            a.text(x, d["ops"] + 25000, f"{d['ops']:,}", ha="center", fontsize=8.5)
-            b.bar(x, d["writes"], w * 0.92, color=colr, zorder=3)
-            b.text(x, d["writes"] * 1.25, f"{d['writes']:,} writes\nwrite p99 {d['wp99']:,.2f} ms", ha="center", fontsize=8)
+        entries = data[plat]
+        n = len(entries)
+        for j, (eng, colr, d) in enumerate(entries):
+            x = i + (j - (n - 1) / 2.0) * w
+            a.bar(x, d["ops"], w * 0.84, color=colr, zorder=3)
+            a.text(x, d["ops"] + 28000, f"{d['ops']:,}", ha="center", fontsize=7.6)
+            b.bar(x, d["writes"], w * 0.84, color=colr, zorder=3)
+            p99_lbl = f"{d['wp99']:,.0f} ms" if d["wp99"] >= 100 else f"{d['wp99']:,.2f} ms"
+            b.text(x, d["writes"] * 1.32, f"{d['writes']:,}\n{p99_lbl}", ha="center", fontsize=7.5)
     for ax in (a, b):
-        ax.set_xticks([0, 1])
+        ax.set_xticks([0, 1, 2])
         ax.set_xticklabels(list(data))
         ax.grid(axis="y", color=GRID, zorder=0)
-    a.set_ylim(0, 1900000)
+    a.set_ylim(0, 1850000)
     a.yaxis.set_major_formatter(matplotlib.ticker.FuncFormatter(lambda v, _: f"{v:,.0f}"))
     a.set_ylabel("reported operations / s")
     a.set_title("Throughput as reported")
     b.set_yscale("log")
-    b.set_ylim(1, 3e6)
+    b.set_ylim(1, 4e6)
     b.set_ylabel("writes completed (log scale)")
-    b.set_title("Writes completed by the 2 writer threads")
-    fig.legend(handles=[Patch(color=BLUE, label="DataVo (InMemory)"), Patch(color=ORANGE, label="SQLite (shared-cache in-memory)")], loc="upper center",
-               ncol=2, frameon=False, bbox_to_anchor=(0.5, 1.0))
-    fig.suptitle("Concurrent ops, 8 readers + 2 writers: the writers are the story", fontsize=13, fontweight="bold",
-                 x=0.01, ha="left", y=1.05)
-    fig.tight_layout(rect=(0, 0.07, 1, 0.97))
-    footer(fig, "CI run 44748508039 (master @ 02fa240f), 4 logical / 2 physical cores, 100,000 preloaded records, 5 s. "
-                "Reads: DataVo 20,405,025 (Linux) / 21,194,024 (Windows); SQLite 2,464,746 / 2,231,788. "
-                "SQLite uses mode=memory&cache=shared (no WAL, table-level locking) with busy_timeout=3000 ms, so 8 readers starve its writers (2 writes, run stretched to 10,064 / 5,156 ms).")
+    b.set_title("Writes completed (with write p99 latency)")
+    fig.legend(
+        handles=[
+            Patch(color=BLUE, label="DataVo (InMemory)"),
+            Patch(color=GREEN, label="SQLite (WAL, normal — M4 Pro)"),
+            Patch(color=ORANGE, label="SQLite (shared-cache)"),
+        ],
+        loc="upper center", ncol=3, frameon=False, bbox_to_anchor=(0.5, 1.0),
+    )
+    fig.suptitle("Concurrent ops, 8 readers + 2 writers: shared-cache starves writers, WAL does not",
+                 fontsize=13, fontweight="bold", x=0.01, ha="left", y=1.05)
+    fig.tight_layout(rect=(0, 0.08, 1, 0.97))
+    footer(fig, "100,000 preloaded records, 5 s window, busy_timeout=3,000 ms. "
+                "M4 Pro (21 Nov, back-to-back run): DataVo completes 224,522 writes (0.62 ms p99) vs SQLite WAL 91,458 writes (1.30 ms p99), while SQLite shared-cache stalls at 2 writes (5,012 ms p99). "
+                "CI run 44748508039 (20 Nov, 4 vCPU) only measured SQLite shared-cache.")
     save(fig, "04-concurrent-ops.png")
 
 

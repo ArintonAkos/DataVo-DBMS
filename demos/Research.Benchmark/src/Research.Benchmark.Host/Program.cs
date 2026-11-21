@@ -154,6 +154,8 @@ else if (benchmarkScenario.Equals("concurrent-ops", StringComparison.OrdinalIgno
         results.Add(await RunConcurrentOps(new DataVoConcurrentOpsEngine(), options));
     if (ShouldRun(engineFilter, "sqlite"))
         results.Add(await RunConcurrentOps(new SqliteConcurrentOpsEngine(), options));
+    if (ShouldRun(engineFilter, "sqlite-wal"))
+        results.Add(await RunConcurrentOps(new SqliteConcurrentOpsEngine(useWal: true), options));
 }
 else if (benchmarkScenario.Equals("vector-search", StringComparison.OrdinalIgnoreCase))
 {

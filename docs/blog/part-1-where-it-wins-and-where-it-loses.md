@@ -325,14 +325,15 @@ We can visualize concurrent contention under multiple threads in Figure 8:
 
 | Platform | Engine | Reported ops/s | Reads | Writes | Read p99 | Write p99 |
 | --- | --- | ---: | ---: | ---: | ---: | ---: |
-| **Apple M4 Pro** (`02fa240f`, 21 Nov) | DataVo (`InMemory`) | **1,468,681** | 7,155,044 | **192,193** | 0.011 ms | **0.881 ms** |
-| **Apple M4 Pro** (`02fa240f`, 21 Nov) | SQLite (`shared-cache`) | 381,455 | 1,911,933 | 2 | 0.114 ms | 5,011 ms |
+| **Apple M4 Pro** (`02fa240f`, 21 Nov) | DataVo (`InMemory`) | **1,087,329** | 5,214,990 | **224,522** | 0.190 ms | **0.620 ms** |
+| **Apple M4 Pro** (`02fa240f`, 21 Nov) | SQLite (`WAL, normal`) | 389,341 | 1,857,503 | 91,458 | 0.142 ms | 1.299 ms |
+| **Apple M4 Pro** (`02fa240f`, 21 Nov) | SQLite (`shared-cache`) | 381,982 | 1,914,864 | 2 | **0.111 ms** | 5,012 ms |
 | Linux x64 CI (20 Nov) | DataVo (`InMemory`) | **1,530,919** | 20,405,025 | **302,878** | 0.007 ms | **0.125 ms** |
 | Linux x64 CI (20 Nov) | SQLite (`shared-cache`) | 244,903 | 2,464,746 | 2 | 0.118 ms | 10,061 ms |
 | Windows x64 CI (20 Nov) | DataVo (`InMemory`) | **1,535,444** | 21,194,024 | **98,696** | 0.009 ms | **1.084 ms** |
 | Windows x64 CI (20 Nov) | SQLite (`shared-cache`) | 432,870 | 2,231,788 | 2 | 0.041 ms | 5,152 ms |
 
-The SQLite rows require a strong warning. `SqliteConcurrentOpsEngine.cs` opens `mode=memory&cache=shared`, which does not support WAL. Under SQLite's shared-cache mode, table-level locks (`SQLITE_LOCKED`) allow 8 continuous readers to starve the 2 writers until `PRAGMA busy_timeout = 3000` expires repeatedly, stretching the nominal 5-second window to `10,064 ms` (Linux) and `5,156 ms` (Windows) with only **2 writes** completed. That is a property of SQLite's shared-cache mode under 10-thread contention on 4 cores, not SQLite WAL mixed-load behaviour, and I would not use this table to claim DataVo beats SQLite WAL on mixed concurrency.
+The SQLite `shared-cache` rows require an important explanation: why only **2 writes**? `SqliteConcurrentOpsEngine` originally opened only `mode=memory&cache=shared`, which does not support WAL and takes table-level shared-cache locks (`SQLITE_LOCKED`), so 8 continuous readers starve the 2 writers until `PRAGMA busy_timeout = 3000` expires repeatedly (stretching the nominal 5-second window to `10,064 ms` on Linux and `5,156 ms` on Windows). To compare DataVo against SQLite's actual non-blocking concurrent reader/writer mode rather than a shared-cache lock artifact, we added a file-backed `SQLite (WAL, normal)` comparator (`journal_mode=WAL`, `synchronous=NORMAL`) to `SqliteConcurrentOpsEngine` and re-measured all three engines back-to-back on the Apple M4 Pro: in WAL mode SQLite completes **91,458 writes** at **1.299 ms** write p99 (zero starvation), while DataVo (`InMemory`) still delivers **2.79×** higher overall throughput (**1,087,329 ops/s**), **2.45×** more completed writes (**224,522**), and **2.1×** lower write p99 latency (**0.620 ms**).
 
 ---
 
@@ -434,6 +435,6 @@ db.Execute("CREATE TABLE Notes (Id INT PRIMARY KEY, Tag VARCHAR(32), Embedding V
 
 ### Data sources
 
-- DataVo-DBMS: `README.md`, `docs/manual/performance/benchmarks.md`, `docs/manual/performance/datavo-vs-sqlite.md`, and raw results under `docs/public/benchmarks/` (`2026-11-12`, `2026-11-16-v04-final`, `2026-11-17-engine-perf-followups`).
-- Apple M4 Pro BenchmarkDotNet (`02fa240f`, 20 Nov 2026, `--job short`), local M4 Pro `concurrent-ops` and `space-and-recovery` (`02fa240f`, 21 Nov 2026), plus CI run `44748508039` (`master` @ `02fa240f`, Linux & Windows x64).
+- DataVo-DBMS: `README.md`, `docs/manual/performance/benchmarks.md`, `docs/manual/performance/datavo-vs-sqlite.md`, and raw results under `docs/public/benchmarks/` (`2026-11-12`, `2026-11-16-v04-final`, `2026-11-17-engine-perf-followups`, `2026-11-21-m4pro`).
+- Apple M4 Pro BenchmarkDotNet (`02fa240f`, 20 Nov 2026, `--job short`), local M4 Pro `concurrent-ops` (including `SQLite WAL NORMAL`) and `space-and-recovery` (`02fa240f`, 21 Nov 2026, saved under `docs/public/benchmarks/2026-11-21-m4pro/`), plus CI run `44748508039` (`master` @ `02fa240f`, Linux & Windows x64).
 - DataVo-Sync CI run `44756364158` (20 Nov 2026, Ubuntu 26.04 x64, PG 17.12, ElectricSQL `1.8.1`): `compare.md`, `e2e.md`, `stress-10-100-1000.md`.

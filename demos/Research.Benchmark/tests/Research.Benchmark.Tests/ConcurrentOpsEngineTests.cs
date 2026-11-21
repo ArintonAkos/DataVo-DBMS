@@ -9,6 +9,7 @@ public sealed class ConcurrentOpsEngineTests
     {
         yield return [new DataVoConcurrentOpsEngine()];
         yield return [new SqliteConcurrentOpsEngine()];
+        yield return [new SqliteConcurrentOpsEngine(useWal: true)];
     }
 
     [Theory]

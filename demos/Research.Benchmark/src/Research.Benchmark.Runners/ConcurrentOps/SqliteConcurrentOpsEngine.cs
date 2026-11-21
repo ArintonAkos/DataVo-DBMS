@@ -4,28 +4,58 @@ using Research.Benchmark.Abstractions;
 
 namespace Research.Benchmark.Runners.ConcurrentOps;
 
+/// <summary>
+/// Concurrent 8-reader, 2-writer benchmark runner for SQLite supporting both shared-cache in-memory
+/// mode and file-backed WAL (<c>synchronous=NORMAL</c>) mode.
+/// </summary>
+/// <example>
+/// <code>
+/// await using var engine = new SqliteConcurrentOpsEngine(useWal: true);
+/// await engine.InitializeAsync(ConcurrentOpsOptions.Default);
+/// ConcurrentOpsResult result = await engine.RunAsync(ConcurrentOpsOptions.Default);
+/// </code>
+/// </example>
 public sealed class SqliteConcurrentOpsEngine : IConcurrentOpsEngine
 {
     private const int SqliteBusy = 5;
     private const int SqliteLocked = 6;
 
+    private readonly bool _useWal;
     private string? _connectionString;
+    private string? _tempDirectory;
     private SqliteConnection? _rootConnection;
     private int _initialRecords;
     private long _nextInsertId;
     private int _busyTimeoutMs;
 
-    public string Name => "SQLite";
+    /// <summary>
+    /// Initializes a new instance of <see cref="SqliteConcurrentOpsEngine"/>.
+    /// </summary>
+    /// <param name="useWal">
+    /// When <see langword="true"/>, runs against a temporary file-backed SQLite database in
+    /// <c>journal_mode=WAL</c> with <c>synchronous=NORMAL</c>; otherwise uses shared-cache in-memory SQLite.
+    /// </param>
+    public SqliteConcurrentOpsEngine(bool useWal = false)
+    {
+        _useWal = useWal;
+    }
 
+    /// <summary>
+    /// Gets the display name used in benchmark reports for the configured SQLite mode.
+    /// </summary>
+    public string Name => _useWal ? "SQLite (WAL,normal)" : "SQLite";
+
+    /// <summary>
+    /// Creates the schema and preloads <see cref="ConcurrentOpsOptions.InitialRecords"/> rows before timed measurement.
+    /// </summary>
     public async Task InitializeAsync(ConcurrentOpsOptions options, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(options);
         await DisposeAsync();
 
-        string databaseName = $"concurrentdb_{Guid.NewGuid():N}";
-        _connectionString = $"Data Source=file:{databaseName}?mode=memory&cache=shared";
+        _connectionString = CreateConnectionString();
         _busyTimeoutMs = checked((int)Math.Clamp(options.BusyTimeout.TotalMilliseconds, 1d, int.MaxValue));
-        _rootConnection = OpenConnection();
+        _rootConnection = OpenConnection(initializeWal: _useWal);
 
         using (SqliteCommand schema = _rootConnection.CreateCommand())
         {
@@ -61,10 +91,20 @@ public sealed class SqliteConcurrentOpsEngine : IConcurrentOpsEngine
         }
 
         transaction.Commit();
+        if (_useWal)
+        {
+            using SqliteCommand checkpoint = _rootConnection.CreateCommand();
+            checkpoint.CommandText = "PRAGMA wal_checkpoint(TRUNCATE);";
+            checkpoint.ExecuteNonQuery();
+        }
+
         _initialRecords = options.InitialRecords;
         _nextInsertId = options.InitialRecords;
     }
 
+    /// <summary>
+    /// Runs concurrent reader and writer worker tasks for the configured duration and returns aggregate metrics.
+    /// </summary>
     public async Task<ConcurrentOpsResult> RunAsync(ConcurrentOpsOptions options, CancellationToken cancellationToken = default)
     {
         EnsureInitialized();
@@ -89,11 +129,15 @@ public sealed class SqliteConcurrentOpsEngine : IConcurrentOpsEngine
             stopwatch.Elapsed);
     }
 
+    /// <summary>
+    /// Releases open SQLite connections and deletes any temporary WAL database directory.
+    /// </summary>
     public ValueTask DisposeAsync()
     {
         _rootConnection?.Dispose();
         _rootConnection = null;
         _connectionString = null;
+        CleanupTempDirectory();
         return ValueTask.CompletedTask;
     }
 
@@ -201,17 +245,64 @@ public sealed class SqliteConcurrentOpsEngine : IConcurrentOpsEngine
         return new ConcurrentWorkerResult(operations, latencies);
     }
 
-    private SqliteConnection OpenConnection()
+    private string CreateConnectionString()
+    {
+        if (!_useWal)
+        {
+            string databaseName = $"concurrentdb_{Guid.NewGuid():N}";
+            return $"Data Source=file:{databaseName}?mode=memory&cache=shared";
+        }
+
+        _tempDirectory = Path.Combine(Path.GetTempPath(), $"datavo-sqlite-wal-concurrent-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(_tempDirectory);
+        string dbPath = Path.Combine(_tempDirectory, "concurrent.sqlite");
+        return $"Data Source={dbPath};Pooling=False";
+    }
+
+    private SqliteConnection OpenConnection(bool initializeWal = false)
     {
         string connectionString = _connectionString
             ?? throw new InvalidOperationException("SQLite concurrent-ops engine has not been initialized.");
         var connection = new SqliteConnection(connectionString);
         connection.Open();
 
+        if (_useWal)
+        {
+            using SqliteCommand walPragma = connection.CreateCommand();
+            walPragma.CommandText = initializeWal
+                ? "PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL;"
+                : "PRAGMA synchronous = NORMAL;";
+            walPragma.ExecuteNonQuery();
+        }
+
         using SqliteCommand busy = connection.CreateCommand();
         busy.CommandText = $"PRAGMA busy_timeout = {_busyTimeoutMs};";
         busy.ExecuteNonQuery();
         return connection;
+    }
+
+    private void CleanupTempDirectory()
+    {
+        if (_tempDirectory is null)
+        {
+            return;
+        }
+
+        try
+        {
+            if (Directory.Exists(_tempDirectory))
+            {
+                Directory.Delete(_tempDirectory, recursive: true);
+            }
+        }
+        catch
+        {
+            // Best-effort temp cleanup after benchmark disposal.
+        }
+        finally
+        {
+            _tempDirectory = null;
+        }
     }
 
     private void EnsureInitialized()
