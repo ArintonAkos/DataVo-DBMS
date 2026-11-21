@@ -40,7 +40,14 @@ internal static class DataVoLinqShapeEmitter
         if (site.ResultType is { } result)
         {
             string projection = $"{Core}DataVoProjection<{site.Call.ModelType}, {result}>";
-            code.AppendLine($"        private static readonly {projection} Projection{id} = new {projection}({columns}, Project{id});");
+            code.AppendLine($"        private readonly struct RowRefProjector{id} : {Core}Runtime.Reactive.IReactiveRowProjector<{result}>");
+            code.AppendLine("        {");
+            code.AppendLine($"            public {result} Project(in {Core}Runtime.Reactive.RowRef row)");
+            code.AppendLine("            {");
+            code.AppendLine($"                return {site.ReactiveBody};");
+            code.AppendLine("            }");
+            code.AppendLine("        }").AppendLine();
+            code.AppendLine($"        private static readonly {projection} Projection{id} = {projection}.Create({columns}, Project{id}, default(RowRefProjector{id}));");
             code.AppendLine();
             code.AppendLine($"        private static {result} Project{id}({Core}DataVoRow row)");
             code.AppendLine("        {");
@@ -58,7 +65,14 @@ internal static class DataVoLinqShapeEmitter
         string parameters = table ? "<T, TResult>" : "<T, TState, TResult>";
         code.AppendLine($"        private static class Projection{id}<T, TResult>");
         code.AppendLine("        {");
-        code.AppendLine($"            public static readonly {Core}DataVoProjection<T, TResult> Instance = new {Core}DataVoProjection<T, TResult>({columns}, static row => (TResult)(object)({site.Body}));");
+        code.AppendLine($"            private readonly struct RowRefProjector : {Core}Runtime.Reactive.IReactiveRowProjector<TResult>");
+        code.AppendLine("            {");
+        code.AppendLine($"                public TResult Project(in {Core}Runtime.Reactive.RowRef row)");
+        code.AppendLine("                {");
+        code.AppendLine($"                    return (TResult)(object)({site.ReactiveBody});");
+        code.AppendLine("                }");
+        code.AppendLine("            }").AppendLine();
+        code.AppendLine($"            public static readonly {Core}DataVoProjection<T, TResult> Instance = {Core}DataVoProjection<T, TResult>.Create({columns}, static row => (TResult)(object)({site.Body}), default(RowRefProjector));");
         code.AppendLine("        }").AppendLine();
         code.AppendLine($"        [global::System.Runtime.CompilerServices.InterceptsLocation({DataVoLinqEmitter.LocationText(site.Call.Location)})]");
         code.AppendLine($"        public static {returns} Select{id}{parameters}(this {(table ? string.Empty : "in ")}{receiver} source, global::System.Func<T, TResult> selector)");

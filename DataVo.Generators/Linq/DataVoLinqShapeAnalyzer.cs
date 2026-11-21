@@ -138,13 +138,17 @@ internal static class DataVoLinqShapeAnalyzer
             writer.Columns.Add(context.Model.Columns.First(static column => column.IsPrimaryKey).PropertyName); // SELECT needs a column
         }
 
+        var reactiveWriter = new LinqProjectionWriter(context.Semantics, context.Model, row, context.Cancellation, useReactiveRowRef: true);
+        string reactiveWritten = reactiveWriter.Write(body) ?? written;
+
         ITypeSymbol result = context.Method.TypeArguments[0];
         bool named = context.ReceiverIsNameable && DataVoLinqAnalyzer.IsNameable(result, context.Semantics.Compilation);
         return context.Result(lambda, projection: new LinqProjectionSite(
             call,
             named ? result.ToDisplayString(DataVoLinqAnalyzer.TypeFormat) : null,
             new EquatableArray<string>([.. writer.Columns]),
-            written));
+            written,
+            reactiveWritten));
     }
 
     /// <summary>An update compiles when its setters translate; otherwise the build fails, since nothing else can run it.</summary>

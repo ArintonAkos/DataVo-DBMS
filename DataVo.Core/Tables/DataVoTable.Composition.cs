@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.ComponentModel;
 using DataVo.Core.Contracts.Results;
 using DataVo.Core.Parser;
+using DataVo.Core.Runtime.Reactive;
 
 namespace DataVo.Core;
 
@@ -115,11 +116,45 @@ public sealed partial class DataVoTable<T>
     [EditorBrowsable(EditorBrowsableState.Never)]
     public int ExecuteUpdateSet(string assignments, DataVoQueryParameter[] values) => All.ExecuteUpdateSet(assignments, values);
 
+    /// <summary>
+    /// Registers a strongly-typed reactive subscription observing every row of this table.
+    /// Deltas are delivered when <see cref="DataVoContext.DispatchPendingNotifications"/> is called.
+    /// </summary>
+    /// <param name="onChanged">The callback invoked with typed added, removed, and updated rows.</param>
+    /// <returns>A disposable subscription handle.</returns>
+    /// <example>
+    /// <code>
+    /// using var sub = db.Table&lt;Player&gt;().Subscribe(change => Handle(change.Added));
+    /// </code>
+    /// </example>
+    public IDisposable Subscribe(Action<QueryChange<T>> onChanged) => All.Subscribe(onChanged);
+
+    /// <summary>
+    /// Registers a zero-allocation buffered window subscription over this table, writing up to
+    /// <c>destination.Length</c> live rows into <paramref name="destination"/> on each drain.
+    /// </summary>
+    /// <param name="destination">Caller-owned buffer receiving the live rows.</param>
+    /// <param name="onUpdated">Callback invoked with the number of rows written whenever the window changes.</param>
+    /// <returns>A disposable subscription handle.</returns>
+    public IDisposable SubscribeInto(Memory<T> destination, Action<int> onUpdated) => All.SubscribeInto(destination, onUpdated);
+
     /// <summary>Gets the table's name.</summary>
     internal string TableName => _info.TableName;
 
     /// <summary>Gets every column of the model, as a SELECT list.</summary>
     internal string ModelColumns => _info.ColumnList;
+
+    /// <summary>Gets the model's column names in reader ordinal order.</summary>
+    internal string[] ModelColumnNames => _info.ColumnNames.Length > 0
+        ? _info.ColumnNames
+        : [.. _info.ColumnList.Split(',').Select(static name => name.Trim())];
+
+    /// <summary>Gets the zero-allocation reactive row reader generated for this model, if available.</summary>
+    internal DataVoReactiveRowReader<T>? ReactiveRowReader => _info.ReadReactiveRow;
+
+    /// <summary>Gets or prepares a reusable statement cached by its SQL text on this table.</summary>
+    internal DataVoPreparedStatement GetOrPrepareStatement(string sql) =>
+        _composedStatements.GetOrAdd(sql, static (text, context) => context.Prepare(text), Context);
 
     /// <summary>Gets the reader that builds a model from a row holding <see cref="ModelColumns"/>.</summary>
     internal Func<DataVoRow, T> RowReader => _info.ReadStreamedRow;

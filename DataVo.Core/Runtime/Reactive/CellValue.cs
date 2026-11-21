@@ -118,6 +118,7 @@ public readonly partial struct CellValue
         bool b => From(b),
         int i => From(i),
         long l => From(l),
+        float f => From((double)f),
         double d => From(d),
         decimal m => From(m),
         string s => From(s),
@@ -126,6 +127,15 @@ public readonly partial struct CellValue
         float[] v => From(v),
         _ when DateObjectAdapter.TryConvert(value, out DataVoDate d) => From(d),
         _ => throw new NotSupportedException($"Unsupported cell value type '{value.GetType()}'."),
+    };
+
+    /// <summary>
+    /// Builds a cell from a boxed value owned by change capture without cloning vector arrays.
+    /// </summary>
+    internal static CellValue FromBorrowedObject(object? value) => value switch
+    {
+        float[] v => FromVectorOwned(v),
+        _ => From(value),
     };
 
     /// <summary>The scalar type held by this cell.</summary>

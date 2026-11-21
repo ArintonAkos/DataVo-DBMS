@@ -19,7 +19,12 @@ namespace DataVo.Generators.Linq;
 /// </remarks>
 /// <example><c>p =&gt; new { p.Name, Rich = p.Gold &gt; 100 }</c> becomes
 /// <c>new { Name = (Read…(row["Name"], "Name")), Rich = (Read…(row["Gold"], "Gold")) &gt; (100L) }</c>.</example>
-internal sealed class LinqProjectionWriter(SemanticModel semantics, TableModel model, IParameterSymbol row, CancellationToken cancellation)
+internal sealed class LinqProjectionWriter(
+    SemanticModel semantics,
+    TableModel model,
+    IParameterSymbol row,
+    CancellationToken cancellation,
+    bool useReactiveRowRef = false)
     : LinqExpressionReader(semantics, null, cancellation)
 {
     private const string Support = "global::DataVo.Core.Annotations.DataVoGeneratedTableSupport";
@@ -127,13 +132,17 @@ internal sealed class LinqProjectionWriter(SemanticModel semantics, TableModel m
             return Fail($"it reads {property}, which is not a stored column");
         }
 
-        if (!Columns.Contains(column.PropertyName))
+        int ordinal = Columns.IndexOf(column.PropertyName);
+        if (ordinal < 0)
         {
+            ordinal = Columns.Count;
             Columns.Add(column.PropertyName);
         }
 
         string name = SymbolDisplay.FormatLiteral(column.PropertyName, quote: true);
-        return $"({Support}.{column.Type.ReaderMethod}(row[{name}], {name}){column.Type.ReadSuffix})";
+        return useReactiveRowRef
+            ? $"(row.{column.Type.ReaderMethod}({ordinal.ToString(CultureInfo.InvariantCulture)}, {name}){column.Type.ReadSuffix})"
+            : $"({Support}.{column.Type.ReaderMethod}(row[{name}], {name}){column.Type.ReadSuffix})";
     }
 
     /// <summary>A method call: static, instance, extension (rewritten as a static call) or a delegate's invoke.</summary>

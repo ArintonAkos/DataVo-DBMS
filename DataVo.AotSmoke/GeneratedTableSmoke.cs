@@ -20,6 +20,8 @@ public sealed record Quest([PrimaryKey] int Id, string Title, int Reward, bool D
 
 public sealed record QuestLine(int Id, string Title);
 
+public readonly record struct QuestHudSlot(int Id, int Reward);
+
 [DataVoTable("probes")]
 public sealed class Probe
 {
@@ -152,6 +154,34 @@ internal static class GeneratedTableSmoke
         Require(quests.Where(static q => q.Done).ExecuteUpdate(5, static (set, bonus) => set.Set(q => q.Reward, q => q.Reward + bonus)) == 4, "ExecuteUpdate changed the wrong number of rows.");
         Require(quests.Where(12, static (q, id) => q.Id == id).Select(static q => q.Reward).SingleOrDefault() == 55, "ExecuteUpdate arithmetic was wrong.");
         Require(quests.Where(static q => q.Reward < 25).ExecuteDelete() == 4 && quests.Count() == 8, "ExecuteDelete removed the wrong rows.");
+
+        // Prepared statement reactive subscriptions (Subscribe + SubscribeZeroAlloc with AST-isolated bindings)
+        // + typed LINQ Subscribe & SubscribeInto.
+        DataVoPreparedStatement preparedSub = db.Prepare("SELECT Id, Reward FROM quests WHERE Done = @done");
+        DataVoPreparedStatement preparedTop = db.Prepare("SELECT Id, Reward FROM quests WHERE Done = @done ORDER BY Reward DESC LIMIT @k");
+        int preparedAdded = 0;
+        int preparedZeroAllocAdded = 0;
+        using (db.Subscribe(preparedSub, change => preparedAdded += change.Added.Count, ("done", false)))
+        using (db.SubscribeZeroAlloc(preparedTop, (in DataVo.Core.Runtime.Reactive.QueryChangeRef change) => preparedZeroAllocAdded += change.Added.Count, ("done", false), ("k", 2)))
+        {
+            db.Insert(new Quest(100, "quest-100", 85, false));
+            db.DispatchPendingNotifications();
+        }
+        Require(preparedAdded == 1, "Prepared statement reactive Subscribe missed an inserted row.");
+        Require(preparedZeroAllocAdded == 1, "Prepared statement reactive SubscribeZeroAlloc missed an inserted row.");
+
+        int typedTopAdded = 0;
+        var hudSlots = new QuestHudSlot[2];
+        int hudCount = 0;
+        using (quests.Where(50, static (q, min) => q.Reward >= min).OrderByDescending(static q => q.Reward).Take(2).Subscribe(change => typedTopAdded += change.Added.Count))
+        using (quests.Where(50, static (q, min) => q.Reward >= min).OrderByDescending(static q => q.Reward).Take(2).Select(static q => new QuestHudSlot(q.Id, q.Reward)).SubscribeInto(hudSlots.AsMemory(), count => hudCount = count))
+        {
+            db.Insert(new Quest(101, "quest-101", 500, false));
+            db.DispatchPendingNotifications();
+        }
+
+        Require(typedTopAdded == 1, "Typed LINQ reactive Subscribe did not receive the new top quest.");
+        Require(hudCount == 2 && hudSlots[0] == new QuestHudSlot(101, 500), "Typed LINQ SubscribeInto did not write the live sorted window.");
     }
 
     private static void Require(bool condition, string message)

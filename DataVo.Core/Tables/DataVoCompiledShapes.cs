@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using DataVo.Core.Runtime.Reactive;
 
 namespace DataVo.Core;
 
@@ -36,8 +37,10 @@ public sealed class DataVoOrderKey
 /// <typeparam name="T">The model type.</typeparam>
 /// <typeparam name="TResult">The type of the projected value.</typeparam>
 [EditorBrowsable(EditorBrowsableState.Never)]
-public sealed class DataVoProjection<T, TResult>
+public class DataVoProjection<T, TResult>
 {
+    private readonly string[] _columns;
+
     /// <summary>Describes a compiled projection.</summary>
     /// <param name="columns">The columns the projection reads; at least one.</param>
     /// <param name="read">Builds the projected value from a row holding <paramref name="columns"/>.</param>
@@ -49,19 +52,177 @@ public sealed class DataVoProjection<T, TResult>
             throw new ArgumentException("A projection reads at least one column.", nameof(columns));
         }
 
+        _columns = columns;
         Columns = columns;
         ColumnList = string.Join(", ", columns);
         Read = read ?? throw new ArgumentNullException(nameof(read));
     }
 
+    /// <summary>
+    /// Creates a compiled projection that also carries a zero-allocation value-type
+    /// <see cref="IReactiveRowProjector{TProjection}"/> for reactive <c>Subscribe</c> and <c>SubscribeInto</c> calls.
+    /// </summary>
+    /// <typeparam name="TProjector">The generated struct projector type.</typeparam>
+    /// <param name="columns">The columns the projection reads; at least one.</param>
+    /// <param name="read">Builds the projected value from a streamed <see cref="DataVoRow"/>.</param>
+    /// <param name="projector">The value-type projector mapping borrowed reactive rows into <typeparamref name="TResult"/>.</param>
+    /// <returns>A compiled projection supporting both batch streaming and zero-allocation reactive delivery.</returns>
+    public static DataVoProjection<T, TResult> Create<TProjector>(
+        string[] columns,
+        Func<DataVoRow, TResult> read,
+        TProjector projector)
+        where TProjector : struct, IReactiveRowProjector<TResult>
+        => new ReactiveDataVoProjection<T, TResult, TProjector>(columns, read, projector);
+
     /// <summary>Gets the columns the projection reads.</summary>
     public IReadOnlyList<string> Columns { get; }
+
+    /// <summary>Gets the backing column array in projection ordinal order.</summary>
+    internal string[] ColumnArray => _columns;
 
     /// <summary>Gets the columns as a SELECT list.</summary>
     internal string ColumnList { get; }
 
     /// <summary>Gets the code that builds the projected value from a row.</summary>
     internal Func<DataVoRow, TResult> Read { get; }
+
+    /// <summary>Gets whether this projection carries a compiled zero-allocation reactive projector.</summary>
+    internal virtual bool HasReactiveProjector => false;
+
+    /// <summary>Projects a dictionary row returned by the owned reactive lane into <typeparamref name="TResult"/>.</summary>
+    internal virtual TResult ReadDictionary(IReadOnlyDictionary<string, object?> row)
+    {
+        var schema = new DataVoRowSchema(_columns);
+        var values = new object?[_columns.Length];
+        for (int i = 0; i < _columns.Length; i++)
+        {
+            values[i] = row.TryGetValue(_columns[i], out object? value) ? value : null;
+        }
+
+        return Read(new DataVoRow(schema, values));
+    }
+
+    /// <summary>Subscribes on the borrowed reactive lane when supported, projecting directly from <see cref="Runtime.Reactive.RowRef"/>.</summary>
+    internal virtual IDisposable SubscribeBorrowed(
+        DataVoContext context,
+        DataVoPreparedStatement statement,
+        DataVoQueryParameter[] parameters,
+        Action<QueryChange<TResult>> onChanged)
+    {
+        return context.Subscribe(
+            statement,
+            change => DataVoReactiveLinq.DeliverOwned(change, ReadDictionary, onChanged),
+            parameters);
+    }
+
+    /// <summary>Subscribes a zero-allocation buffered window into <paramref name="destination"/>.</summary>
+    internal virtual IDisposable SubscribeInto(
+        DataVoContext context,
+        string tableName,
+        string primaryKeyColumn,
+        IReadOnlyList<BufferedWindowSortKey> sortKeys,
+        int skip,
+        int take,
+        ReactivePredicate? predicate,
+        Func<IReadOnlyDictionary<string, object?>, bool>? fallbackPredicate,
+        Memory<TResult> destination,
+        Action<int> onUpdated)
+    {
+        var projector = new DictionaryRowRefProjector<TResult>(this);
+        var query = new BufferedWindowReactiveQuery<TResult, DictionaryRowRefProjector<TResult>>(
+            tableName,
+            primaryKeyColumn,
+            _columns,
+            sortKeys,
+            skip,
+            take,
+            predicate,
+            fallbackPredicate,
+            projector,
+            destination,
+            onUpdated);
+        return context.Engine.Reactive.AddDirect(context, query);
+    }
+
+    private readonly struct DictionaryRowRefProjector<TOut>(DataVoProjection<T, TOut> owner) : IReactiveRowProjector<TOut>
+    {
+        public TOut Project(in Runtime.Reactive.RowRef row) => owner.ReadDictionary(row.ToOwnedDictionary());
+    }
+}
+
+/// <summary>
+/// A compiled <see cref="DataVoProjection{T, TResult}"/> backed by a generated value-type
+/// <see cref="IReactiveRowProjector{TProjection}"/> struct for zero-allocation reactive subscriptions.
+/// </summary>
+internal sealed class ReactiveDataVoProjection<T, TResult, TProjector> : DataVoProjection<T, TResult>
+    where TProjector : struct, IReactiveRowProjector<TResult>
+{
+    private readonly TProjector _projector;
+    private readonly ReactiveRowSchema _reactiveSchema;
+
+    public ReactiveDataVoProjection(string[] columns, Func<DataVoRow, TResult> read, TProjector projector)
+        : base(columns, read)
+    {
+        _projector = projector;
+        _reactiveSchema = new ReactiveRowSchema(columns);
+    }
+
+    internal override bool HasReactiveProjector => true;
+
+    internal override TResult ReadDictionary(IReadOnlyDictionary<string, object?> row)
+    {
+        string[] columns = ColumnArray;
+        var cells = new CellValue[columns.Length];
+        for (int i = 0; i < columns.Length; i++)
+        {
+            cells[i] = row.TryGetValue(columns[i], out object? value)
+                ? CellValue.FromBorrowedObject(value)
+                : CellValue.Null;
+        }
+
+        var rowRef = new Runtime.Reactive.RowRef(_reactiveSchema, cells);
+        return _projector.Project(in rowRef);
+    }
+
+    internal override IDisposable SubscribeBorrowed(
+        DataVoContext context,
+        DataVoPreparedStatement statement,
+        DataVoQueryParameter[] parameters,
+        Action<QueryChange<TResult>> onChanged)
+    {
+        TProjector projector = _projector;
+        return context.SubscribeZeroAlloc(
+            statement,
+            (in QueryChangeRef delta) => DataVoReactiveLinq.DeliverBorrowed(in delta, projector, onChanged),
+            parameters);
+    }
+
+    internal override IDisposable SubscribeInto(
+        DataVoContext context,
+        string tableName,
+        string primaryKeyColumn,
+        IReadOnlyList<BufferedWindowSortKey> sortKeys,
+        int skip,
+        int take,
+        ReactivePredicate? predicate,
+        Func<IReadOnlyDictionary<string, object?>, bool>? fallbackPredicate,
+        Memory<TResult> destination,
+        Action<int> onUpdated)
+    {
+        var query = new BufferedWindowReactiveQuery<TResult, TProjector>(
+            tableName,
+            primaryKeyColumn,
+            ColumnArray,
+            sortKeys,
+            skip,
+            take,
+            predicate,
+            fallbackPredicate,
+            _projector,
+            destination,
+            onUpdated);
+        return context.Engine.Reactive.AddDirect(context, query);
+    }
 }
 
 /// <summary>

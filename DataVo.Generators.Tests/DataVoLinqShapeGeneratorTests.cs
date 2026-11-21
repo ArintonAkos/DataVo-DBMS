@@ -101,6 +101,10 @@ public class DataVoLinqShapeGeneratorTests
         Assert.Contains($"new string[] {{ {columns}", generated);
         Assert.Contains(body, generated);
         Assert.Contains("(global::DataVo.Core.DataVoRow row)", generated);
+        Assert.Contains("private readonly struct RowRefProjector0 : global::DataVo.Core.Runtime.Reactive.IReactiveRowProjector<", generated);
+        Assert.Contains("public ", generated);
+        Assert.Contains("Project(in global::DataVo.Core.Runtime.Reactive.RowRef row)", generated);
+        Assert.Contains(".Create(", generated);
         Assert.Contains("return source.SelectColumns(Projection0, selector);", generated);
     }
 
@@ -276,5 +280,65 @@ public class DataVoLinqShapeGeneratorTests
         IncrementalGeneratorRunStep[] outputs = [.. driver.GetRunResult().Results[0].TrackedOutputSteps.SelectMany(static step => step.Value)];
         Assert.NotEmpty(outputs);
         Assert.All(outputs.SelectMany(static step => step.Outputs), output => Assert.Equal(IncrementalStepRunReason.Cached, output.Reason));
+    }
+
+    [Fact]
+    public void TopKReactiveSubscription_OnTableWithoutPrimaryKey_ReportsCompileTimeDiagnostic()
+    {
+        const string source = """
+            using DataVo.Core;
+            using DataVo.Core.Annotations;
+
+            namespace App
+            {
+                [DataVoTable("no_key_players")]
+                public sealed class NoKeyPlayer
+                {
+                    public int Id { get; set; }
+                    public int Score { get; set; }
+                }
+
+                public static class Queries
+                {
+                    public static System.IDisposable SubscribeTop(DataVoContext db) =>
+                        db.Table<NoKeyPlayer>()
+                            .OrderByDescending(static p => p.Score)
+                            .Take(3)
+                            .Subscribe(static _ => { });
+                }
+            }
+            """;
+
+        CSharpParseOptions parse = ParseOptions(LanguageVersion.Latest, "InterceptorsNamespaces");
+        GeneratorDriver driver = CSharpGeneratorDriver.Create(
+            [new DataVoTableGenerator().AsSourceGenerator(), new DataVoLinqInterceptorGenerator().AsSourceGenerator()],
+            parseOptions: parse);
+        driver = driver.RunGeneratorsAndUpdateCompilation(CreateCompilation(source, parse), out _, out _);
+
+        Diagnostic[] diagnostics = [.. driver.GetRunResult().Diagnostics];
+        Diagnostic missingKey = Assert.Single(diagnostics, static diagnostic => diagnostic.Id == "DATAVOT001");
+        Assert.Equal(DiagnosticSeverity.Error, missingKey.Severity);
+        Assert.Contains("NoKeyPlayer", missingKey.GetMessage());
+        Assert.Contains("[PrimaryKey]", missingKey.GetMessage());
+    }
+
+    [Fact]
+    public void SubscribeInto_WithStructProjection_GeneratesZeroAllocRowRefProjector()
+    {
+        const string call =
+            "players.Where(100, static (p, min) => p.Level >= min)" +
+            ".OrderByDescending(static p => p.Level)" +
+            ".Take(3)" +
+            ".Select(static p => new PlayerCard(p.Id, p.Name))" +
+            ".SubscribeInto(new PlayerCard[3], static _ => { })";
+
+        Compilation output = Compile(call, LanguageVersion.Latest, out GeneratorRunResult result);
+        string generated = string.Concat(result.GeneratedSources.Select(static s => s.SourceText.ToString()));
+
+        Assert.Empty(result.Diagnostics);
+        Assert.Empty(output.GetDiagnostics().Where(static d => d.Severity >= DiagnosticSeverity.Warning));
+        Assert.Contains("private readonly struct RowRefProjector0 : global::DataVo.Core.Runtime.Reactive.IReactiveRowProjector<global::App.PlayerCard>", generated);
+        Assert.Contains("row.ReadInt32(0, \"Id\")", generated);
+        Assert.Contains("row.ReadString(1, \"Name\")", generated);
     }
 }

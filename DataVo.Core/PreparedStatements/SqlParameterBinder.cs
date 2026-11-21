@@ -135,18 +135,55 @@ internal static class SqlParameterBinder
             FromAlias = select.FromAlias is not null ? new IdentifierNode(select.FromAlias.Name) : null,
             Joins = joins,
             WhereExpression = select.WhereExpression is not null ? BindExpression(select.WhereExpression, parameters) : null,
-            GroupByExpression = select.GroupByExpression,
+            GroupByExpression = CloneGroupBy(select.GroupByExpression),
             HavingExpression = select.HavingExpression is not null ? BindExpression(select.HavingExpression, parameters) : null,
-            OrderByExpression = select.OrderByExpression,
+            OrderByExpression = CloneOrderBy(select.OrderByExpression),
             LimitExpression = BindLimit(select.LimitExpression, parameters),
         };
     }
 
+    private static GroupByNode? CloneGroupBy(GroupByNode? groupBy)
+    {
+        if (groupBy is null)
+        {
+            return null;
+        }
+
+        var columns = new List<IdentifierNode>(groupBy.Columns.Count);
+        for (int i = 0; i < groupBy.Columns.Count; i++)
+        {
+            columns.Add(new IdentifierNode(groupBy.Columns[i].Name));
+        }
+
+        return new GroupByNode { Columns = columns };
+    }
+
+    private static OrderByNode? CloneOrderBy(OrderByNode? orderBy)
+    {
+        if (orderBy is null)
+        {
+            return null;
+        }
+
+        var columns = new List<OrderByColumnNode>(orderBy.Columns.Count);
+        for (int i = 0; i < orderBy.Columns.Count; i++)
+        {
+            OrderByColumnNode col = orderBy.Columns[i];
+            columns.Add(new OrderByColumnNode
+            {
+                Column = new IdentifierNode(col.Column.Name),
+                IsAscending = col.IsAscending,
+            });
+        }
+
+        return new OrderByNode { Columns = columns };
+    }
+
     private static LimitNode? BindLimit(LimitNode? limit, ReadOnlySpan<DataVoQueryParameter> parameters)
     {
-        if (limit is null || !limit.HasParameters)
+        if (limit is null)
         {
-            return limit;
+            return null;
         }
 
         return new LimitNode
@@ -190,7 +227,7 @@ internal static class SqlParameterBinder
         {
             Left = BindSelectStatement(union.Left, parameters),
             Branches = branches,
-            OrderByExpression = union.OrderByExpression,
+            OrderByExpression = CloneOrderBy(union.OrderByExpression),
             LimitExpression = BindLimit(union.LimitExpression, parameters),
         };
     }

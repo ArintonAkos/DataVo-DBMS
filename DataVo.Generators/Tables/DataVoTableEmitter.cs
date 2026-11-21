@@ -116,6 +116,7 @@ internal static class DataVoTableEmitter
         }
 
         EmitPackedReader(code, model, columns);
+        EmitReactiveReader(code, model, columns);
     }
 
     /// <summary>
@@ -140,6 +141,30 @@ internal static class DataVoTableEmitter
         code.AppendLine("            };").AppendLine();
     }
 
+    /// <summary>
+    /// Writes the reader that builds the model directly from a borrowed reactive <c>RowRef</c> without
+    /// dictionary allocation or boxing.
+    /// </summary>
+    private static void EmitReactiveReader(StringBuilder code, TableModel model, ColumnModel[] columns)
+    {
+        string Read(ColumnModel column) =>
+            $"row.{column.Type.ReaderMethod}({Array.IndexOf(columns, column)}, \"{column.PropertyName}\"){column.Type.ReadSuffix}";
+
+        string[] constructorArguments = [.. model.ConstructorParameters.Select(parameter =>
+            Read(columns.Single(column => column.PropertyName.Equals(parameter, StringComparison.OrdinalIgnoreCase))))];
+        code.AppendLine($"        private static {model.FullTypeName} ReadReactiveRow(in {Core}Runtime.Reactive.RowRef row)");
+        code.AppendLine("        {");
+        code.Append("            return new ").Append(model.FullTypeName).Append('(').Append(string.Join(", ", constructorArguments)).AppendLine(")");
+        code.AppendLine("            {");
+        foreach (ColumnModel column in columns.Where(static column => column.IsSettable && !column.IsConstructorParameter))
+        {
+            code.Append("                ").Append(column.PropertyName).Append(" = ").Append(Read(column)).AppendLine(",");
+        }
+
+        code.AppendLine("            };");
+        code.AppendLine("        }").AppendLine();
+    }
+
     /// <summary>The name of the HNSW index a <c>[SpatialIndex]</c> column gets.</summary>
     private static string SpatialIndexName(TableModel model, ColumnModel column) => $"sx_{model.TableName}_{column.PropertyName}";
 
@@ -152,7 +177,7 @@ internal static class DataVoTableEmitter
             : $", new {Core}DataVoSpatialColumn[] {{ {string.Join(", ", positions.Select(column => $"new {Core}DataVoSpatialColumn(\"{column.PropertyName}\", {(column.IsSpatialIndexed ? $"\"{SpatialIndexName(model, column)}\"" : "null")})"))} }}";
         string sqlTypes = string.Join(", ", columns.Select(static column => $"\"{column.Type.SqlType}\""));
         string keyColumn = columns.Single(static column => column.IsPrimaryKey).PropertyName;
-        string packed = $", ReadPackedRow, new string[] {{ {sqlTypes} }}, \"{keyColumn}\"";
+        string packed = $", ReadPackedRow, new string[] {{ {sqlTypes} }}, \"{keyColumn}\", ReadReactiveRow";
         code.AppendLine($$"""
                     /// <summary>Describes the {{model.TableName}} table to DataVo. Used by generated code.</summary>
                     [global::System.ComponentModel.EditorBrowsable(global::System.ComponentModel.EditorBrowsableState.Never)]

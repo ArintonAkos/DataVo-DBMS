@@ -91,7 +91,8 @@ internal sealed record LinqOrderSite(LinqCall Call, string Method, string KeyTyp
 /// <param name="ResultType">The projected type, or null when generated code cannot name it (an anonymous type), so the interceptor is generic.</param>
 /// <param name="Columns">The columns the projection reads, each once, in the order the selector first reads them.</param>
 /// <param name="Body">The selector's body as C# over a <c>DataVoRow</c> named <c>row</c>.</param>
-internal sealed record LinqProjectionSite(LinqCall Call, string? ResultType, EquatableArray<string> Columns, string Body);
+/// <param name="ReactiveBody">The selector's body as C# over a reactive <c>RowRef</c> named <c>row</c> reading columns by constant ordinal.</param>
+internal sealed record LinqProjectionSite(LinqCall Call, string? ResultType, EquatableArray<string> Columns, string Body, string ReactiveBody);
 
 /// <summary>An <c>ExecuteUpdate</c> whose setters were translated into a SET list.</summary>
 /// <param name="StateType">The state value's fully qualified type, or null for the overload without state.</param>

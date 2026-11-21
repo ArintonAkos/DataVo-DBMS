@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using DataVo.Core.Runtime.Reactive;
 
 namespace DataVo.Core;
 
@@ -162,6 +163,35 @@ public readonly partial struct DataVoQuery<T, TState>
 
         return table.ChangeEachKey(MatchingKeys(), DataVoSql.Update(table.TableName, assignments, DataVoSql.KeyEquals(table.KeyColumn)), values);
     }
+
+    /// <summary>
+    /// Registers a strongly-typed reactive subscription observing the rows matching this query.
+    /// Deltas are delivered when <see cref="DataVoContext.DispatchPendingNotifications"/> is called.
+    /// </summary>
+    /// <param name="onChanged">The callback invoked with typed added, removed, and updated rows.</param>
+    /// <returns>A disposable subscription handle.</returns>
+    /// <example>
+    /// <code>
+    /// using var sub = db.Table&lt;Player&gt;()
+    ///     .Where(100, static (p, min) => p.Score >= min)
+    ///     .Subscribe(change => Handle(change));
+    /// </code>
+    /// </example>
+    public IDisposable Subscribe(Action<QueryChange<T>> onChanged) =>
+        DataVoReactiveLinq.SubscribeModels(this, DataVoQueryShape<T>.None, onChanged);
+
+    /// <summary>
+    /// Registers a zero-allocation buffered window subscription over the matching rows, writing up to
+    /// <c>destination.Length</c> live rows in place into <paramref name="destination"/> on each drain.
+    /// </summary>
+    /// <param name="destination">Caller-owned buffer receiving the live rows.</param>
+    /// <param name="onUpdated">Callback invoked with the live row count written whenever the window changes.</param>
+    /// <returns>A disposable subscription handle.</returns>
+    public IDisposable SubscribeInto(Memory<T> destination, Action<int> onUpdated) =>
+        DataVoReactiveLinq.SubscribeModelsInto(this, DataVoQueryShape<T>.None, destination, onUpdated);
+
+    /// <summary>Evaluates this query's C# predicate against an in-memory model instance.</summary>
+    internal bool MatchesInMemory(T item) => _predicate(item, _state);
 
     /// <summary>Gets the filter as SQL and its values, when the plan was compiled and binds this state.</summary>
     /// <param name="where">The condition, or <see langword="null"/> for every row.</param>

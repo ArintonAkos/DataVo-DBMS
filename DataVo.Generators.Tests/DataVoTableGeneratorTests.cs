@@ -28,6 +28,7 @@ public class DataVoTableGeneratorTests
         Assert.Contains("GetPlayerById(this global::DataVo.Core.DataVoContext context, int key)", generated);
         Assert.Contains("Insert(this global::DataVo.Core.DataVoContext context, global::App.Player entity)", generated);
         Assert.Contains("Update(this global::DataVo.Core.DataVoContext context, global::App.Player entity)", generated);
+        Assert.Contains("ReadReactiveRow(in global::DataVo.Core.Runtime.Reactive.RowRef row)", generated);
         Assert.Contains("ExecuteBorrowed", generated);
     }
 
@@ -171,7 +172,7 @@ public class DataVoTableGeneratorTests
         string generated = GeneratedText(ValidModel);
 
         Assert.DoesNotContain("DataVoSpatialColumn", generated);
-        Assert.Contains("new global::DataVo.Core.DataVoTableInfo<global::App.Player>(\"players\", \"Id, Level, Name\", ReadRow, ReadStreamedRow, ReadPackedRow, new string[] { \"INT\", \"INT\", \"VARCHAR\" }, \"Id\");", generated);
+        Assert.Contains("new global::DataVo.Core.DataVoTableInfo<global::App.Player>(\"players\", \"Id, Level, Name\", ReadRow, ReadStreamedRow, ReadPackedRow, new string[] { \"INT\", \"INT\", \"VARCHAR\" }, \"Id\", ReadReactiveRow);", generated);
     }
 
     [Fact]

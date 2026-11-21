@@ -1,5 +1,6 @@
 using System.Collections;
 using System.ComponentModel;
+using DataVo.Core.Runtime.Reactive;
 
 namespace DataVo.Core;
 
@@ -85,6 +86,35 @@ public readonly struct DataVoPagedQuery<T, TState> : IEnumerable<T>
     /// <summary>Reads the window into a list.</summary>
     /// <returns>The rows.</returns>
     public List<T> ToList() => [.. DataVoComposed.ReadModels(_source, Shape, -1)];
+
+    /// <summary>
+    /// Registers a strongly-typed reactive subscription observing this paged or top-K window.
+    /// Deltas are delivered when <see cref="DataVoContext.DispatchPendingNotifications"/> is called.
+    /// </summary>
+    /// <param name="onChanged">The callback invoked with typed added, removed, and updated rows.</param>
+    /// <returns>A disposable subscription handle.</returns>
+    /// <example>
+    /// <code>
+    /// using var sub = db.Table&lt;Player&gt;()
+    ///     .Where(100, static (p, minScore) => p.Score >= minScore)
+    ///     .OrderByDescending(static p => p.Score)
+    ///     .Take(3)
+    ///     .Subscribe(change => Handle(change));
+    /// </code>
+    /// </example>
+    public IDisposable Subscribe(Action<QueryChange<T>> onChanged) =>
+        DataVoReactiveLinq.SubscribeModels(_source, Shape, onChanged);
+
+    /// <summary>
+    /// Registers a zero-allocation buffered window subscription over this paged or top-K query, writing
+    /// the current live window in place into <c>destination.Span[0..count]</c> (clamped to
+    /// <c>destination.Length</c>) and invoking <paramref name="onUpdated"/> with <c>count</c>.
+    /// </summary>
+    /// <param name="destination">Caller-owned buffer receiving the live window.</param>
+    /// <param name="onUpdated">Callback invoked with the live row count written whenever the window changes.</param>
+    /// <returns>A disposable subscription handle.</returns>
+    public IDisposable SubscribeInto(Memory<T> destination, Action<int> onUpdated) =>
+        DataVoReactiveLinq.SubscribeModelsInto(_source, Shape, destination, onUpdated);
 
     /// <summary>Runs the query and enumerates the window.</summary>
     /// <returns>An enumerator over the rows.</returns>

@@ -670,6 +670,79 @@ internal static class ReactiveQueryParser
         }
     }
 
+    /// <summary>
+    /// Rejects any <c>DISTINCT</c> aggregate present in a pre-parsed AST (such as a prepared statement)
+    /// without re-lexing the SQL text.
+    /// </summary>
+    /// <param name="statement">The parsed statement to inspect.</param>
+    public static void RejectDistinctAggregates(SqlStatement statement)
+    {
+        switch (statement)
+        {
+            case SelectStatement select:
+                RejectDistinctAggregates(select);
+                break;
+            case UnionSelectStatement union:
+                RejectDistinctAggregates(union.Left);
+                foreach (UnionBranchNode branch in union.Branches)
+                {
+                    RejectDistinctAggregates(branch.Select);
+                }
+
+                break;
+        }
+    }
+
+    private static void RejectDistinctAggregates(SelectStatement select)
+    {
+        foreach (CteDefinitionNode cte in select.Ctes)
+        {
+            RejectDistinctAggregates(cte.Select);
+        }
+
+        foreach (SelectColumnNode column in select.Columns)
+        {
+            RejectDistinctAggregates(column.Expression);
+        }
+
+        RejectDistinctAggregates(select.WhereExpression);
+        RejectDistinctAggregates(select.HavingExpression);
+    }
+
+    private static void RejectDistinctAggregates(ExpressionNode? expression)
+    {
+        switch (expression)
+        {
+            case AggregateExpressionNode { IsDistinct: true } aggregate:
+                throw new NotSupportedException(
+                    $"Reactive subscriptions do not support {aggregate.FunctionName.ToUpperInvariant()}(DISTINCT ...); run the query with Execute instead.");
+            case AggregateExpressionNode aggregate:
+                RejectDistinctAggregates(aggregate.Argument);
+                break;
+            case BinaryExpressionNode binary:
+                RejectDistinctAggregates(binary.Left);
+                RejectDistinctAggregates(binary.Right);
+                break;
+            case ScalarFunctionExpressionNode scalar:
+                foreach (ExpressionNode argument in scalar.Arguments)
+                {
+                    RejectDistinctAggregates(argument);
+                }
+
+                break;
+            case InSubqueryExpressionNode inSubquery:
+                RejectDistinctAggregates(inSubquery.Left);
+                RejectDistinctAggregates(inSubquery.Subquery);
+                break;
+            case ExistsSubqueryExpressionNode exists:
+                RejectDistinctAggregates(exists.Subquery);
+                break;
+            case ScalarSubqueryExpressionNode scalarSubquery:
+                RejectDistinctAggregates(scalarSubquery.Subquery);
+                break;
+        }
+    }
+
     private static bool ContainsAggregate(ExpressionNode? expression)
     {
         return expression switch

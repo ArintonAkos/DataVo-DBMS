@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
+using DataVo.Core.Runtime.Reactive;
 
 namespace DataVo.Core;
 
@@ -71,7 +72,7 @@ public sealed class DataVoTableInfo<T>
         DataVoPackedReader<T> readPackedRow,
         string[] columnTypes,
         string keyColumn)
-        : this(tableName, columnList, readRow, readStreamedRow, [], readPackedRow, columnTypes, keyColumn)
+        : this(tableName, columnList, readRow, readStreamedRow, [], readPackedRow, columnTypes, keyColumn, readReactiveRow: null)
     {
     }
 
@@ -93,9 +94,45 @@ public sealed class DataVoTableInfo<T>
         DataVoPackedReader<T> readPackedRow,
         string[] columnTypes,
         string keyColumn)
+        : this(tableName, columnList, readRow, readStreamedRow, spatialColumns, readPackedRow, columnTypes, keyColumn, readReactiveRow: null)
+    {
+    }
+
+    /// <summary>
+    /// Creates table metadata for a model with packed in-memory reading and zero-allocation reactive
+    /// <see cref="Runtime.Reactive.RowRef"/> materialization.
+    /// </summary>
+    public DataVoTableInfo(
+        string tableName,
+        string columnList,
+        Func<Dictionary<string, object?>, T> readRow,
+        Func<DataVoRow, T> readStreamedRow,
+        DataVoPackedReader<T> readPackedRow,
+        string[] columnTypes,
+        string keyColumn,
+        DataVoReactiveRowReader<T>? readReactiveRow)
+        : this(tableName, columnList, readRow, readStreamedRow, [], readPackedRow, columnTypes, keyColumn, readReactiveRow)
+    {
+    }
+
+    /// <summary>
+    /// Creates table metadata for a model with spatial columns, packed in-memory reading, and zero-allocation
+    /// reactive <see cref="Runtime.Reactive.RowRef"/> materialization.
+    /// </summary>
+    public DataVoTableInfo(
+        string tableName,
+        string columnList,
+        Func<Dictionary<string, object?>, T> readRow,
+        Func<DataVoRow, T> readStreamedRow,
+        DataVoSpatialColumn[] spatialColumns,
+        DataVoPackedReader<T> readPackedRow,
+        string[] columnTypes,
+        string keyColumn,
+        DataVoReactiveRowReader<T>? readReactiveRow)
         : this(tableName, columnList, readRow, readStreamedRow, spatialColumns)
     {
         ReadPackedRow = readPackedRow ?? throw new ArgumentNullException(nameof(readPackedRow));
+        ReadReactiveRow = readReactiveRow;
         ColumnTypes = columnTypes ?? throw new ArgumentNullException(nameof(columnTypes));
         KeyColumn = keyColumn ?? throw new ArgumentNullException(nameof(keyColumn));
         ColumnNames = [.. columnList.Split(',').Select(static name => name.Trim())];
@@ -118,6 +155,9 @@ public sealed class DataVoTableInfo<T>
 
     /// <summary>Builds a model from a row read in place; null for a model generated without one.</summary>
     internal DataVoPackedReader<T>? ReadPackedRow { get; }
+
+    /// <summary>Builds a model from a borrowed reactive row; null for a model generated without one.</summary>
+    internal DataVoReactiveRowReader<T>? ReadReactiveRow { get; }
 
     /// <summary>The model's columns, in the order <see cref="ReadPackedRow"/> numbers them.</summary>
     internal string[] ColumnNames { get; }

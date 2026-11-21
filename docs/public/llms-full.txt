@@ -2991,6 +2991,25 @@ A compiled selector can build a scalar, a tuple, an anonymous type, a class or r
 
 A selector that uses the row itself (`p => p`, `p => Describe(p)`), captures a variable or contains a lambda reads models and runs as written, and the build warns with `DATAVOL004`. A projection whose filter or sort runs in memory also reads models, since the filter and the keys need them.
 
+### Reactive Subscriptions And Zero-Allocation Buffered Windows
+
+Every `[DataVoTable]` table and composed LINQ query (`Where`, `OrderBy`/`ThenBy`, `Skip`, `Take`, `Select`) supports strongly-typed reactive subscriptions without writing SQL. See [Live Reactive Views (Z-set IVM)](/manual/client-interfaces/reactive-views) and [Choosing a Subscription API](/manual/client-interfaces/reactive-views#choosing-a-subscription-api) for the full comparison across all five reactive APIs:
+
+- **`.Subscribe(Action<QueryChange<T>> onChanged)`** delivers strongly-typed `Added`, `Removed`, `Updated`, and `UpdatedBefore` collections whenever `db.DispatchPendingNotifications()` drains committed writes.
+- **`.SubscribeInto(Memory<TProjection> destination, Action<int> onUpdated)`** writes the current live window directly into `destination.Span[0..count]` (clamped to `destination.Length`) and invokes `onUpdated(count)`. For compiled `.Select(...)` projections, `DataVo.Generators` emits a zero-allocation value-type `IReactiveRowProjector<TProjection>` struct reading reactive `RowRef` cells by constant ordinal, allocating **0 bytes** on the managed heap per drain in steady state.
+
+```csharp
+public readonly record struct HudSlot(int Id, int Score);
+
+var hud = new HudSlot[3];
+using var sub = db.Table<Player>()
+    .Where(100, static (p, minScore) => p.Score >= minScore)
+    .OrderByDescending(static p => p.Score)
+    .Take(3)
+    .Select(static p => new HudSlot(p.Id, p.Score))
+    .SubscribeInto(hud.AsMemory(), count => UpdateHud(hud.AsSpan(0, count)));
+```
+
 Inside an explicit transaction the engine reads the transaction's view of the table: the committed rows its snapshot sees, the old versions of rows other sessions changed since it began, and its own uncommitted inserts, updates and deletes. A single-table projection still decodes only the columns it selects, filters on and sorts by, so a wide text column it leaves out is not decoded there either. The rows the transaction itself wrote are serialized once per query to be read the same way.
 
 ### Bulk Deletes And Updates

@@ -90,6 +90,51 @@ public sealed partial class DataVoPreparedStatement
     public string Sql { get; }
 
     /// <summary>
+    /// Gets the engine instance this statement was prepared against.
+    /// </summary>
+    internal DataVoEngine Engine => _engine;
+
+    /// <summary>
+    /// Validates that this prepared statement contains a single reactive-eligible <c>SELECT</c> statement
+    /// and returns an isolated, parameter-bound AST clone without mutating the cached template AST.
+    /// </summary>
+    /// <param name="parameters">The parameter values to bind into the cloned AST.</param>
+    /// <returns>An isolated, bound <see cref="SqlStatement"/> ready for reactive operator compilation.</returns>
+    /// <exception cref="NotSupportedException">
+    /// Thrown when the prepared statement failed to parse, contains zero or multiple statements,
+    /// is not a <c>SELECT</c> statement, has no <c>FROM</c> table, or uses a <c>DISTINCT</c> aggregate.
+    /// </exception>
+    /// <exception cref="BindingException">Thrown when a referenced parameter is missing or invalid.</exception>
+    internal SqlStatement BindSingleReactiveStatement(ReadOnlySpan<DataVoQueryParameter> parameters)
+    {
+        if (_parseException is not null)
+        {
+            throw new NotSupportedException(
+                $"Reactive subscription SQL could not be parsed: {_parseException.Message}",
+                _parseException);
+        }
+
+        if (_statements is null || _statements.Count != 1)
+        {
+            throw new NotSupportedException("Reactive subscriptions support exactly one SELECT statement.");
+        }
+
+        SqlStatement template = _statements[0];
+        if (template is SelectStatement { FromTable: null })
+        {
+            throw new NotSupportedException("Reactive subscriptions require a table to watch.");
+        }
+
+        if (template is not SelectStatement and not UnionSelectStatement)
+        {
+            throw new NotSupportedException("Reactive subscriptions support only SELECT statements.");
+        }
+
+        Runtime.Reactive.ReactiveQueryParser.RejectDistinctAggregates(template);
+        return SqlParameterBinder.BindStatement(template, parameters);
+    }
+
+    /// <summary>
     /// Executes the prepared statement with no parameters and returns the final <see cref="QueryResult"/>.
     /// </summary>
     /// <returns>The execution result of the statement.</returns>

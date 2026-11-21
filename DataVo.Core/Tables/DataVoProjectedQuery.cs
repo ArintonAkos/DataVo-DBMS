@@ -1,4 +1,5 @@
 using System.Collections;
+using DataVo.Core.Runtime.Reactive;
 
 namespace DataVo.Core;
 
@@ -85,6 +86,48 @@ public readonly struct DataVoProjectedQuery<T, TState, TResult> : IEnumerable<TR
     /// <summary>Reads the values into a list.</summary>
     /// <returns>The values, in order.</returns>
     public List<TResult> ToList() => [.. Read(-1)];
+
+    /// <summary>
+    /// Registers a strongly-typed reactive subscription delivering projected <see cref="QueryChange{TResult}"/>
+    /// deltas when <see cref="DataVoContext.DispatchPendingNotifications"/> is called.
+    /// </summary>
+    /// <param name="onChanged">The callback invoked with projected added, removed, and updated items.</param>
+    /// <returns>A disposable subscription handle.</returns>
+    public IDisposable Subscribe(Action<QueryChange<TResult>> onChanged) =>
+        DataVoReactiveLinq.SubscribeProjected(
+            _source,
+            Shape,
+            _projection,
+            _selector ?? throw new InvalidOperationException("This query was not created by a DataVoTable."),
+            onChanged);
+
+    /// <summary>
+    /// Registers a zero-allocation buffered window subscription over this projected query. When compiled by
+    /// <c>DataVo.Generators</c>, DataVo projects live rows through a generated value-type
+    /// <see cref="IReactiveRowProjector{TProjection}"/> directly into <c>destination.Span[0..count]</c>
+    /// (clamped to <c>destination.Length</c>) and invokes <paramref name="onUpdated"/> with zero heap allocations.
+    /// </summary>
+    /// <param name="destination">Caller-owned buffer receiving the live projected window.</param>
+    /// <param name="onUpdated">Callback invoked with the number of projected items written whenever the window changes.</param>
+    /// <returns>A disposable subscription handle.</returns>
+    /// <example>
+    /// <code>
+    /// var slots = new HudSlot[3];
+    /// using var sub = db.Table&lt;Player&gt;()
+    ///     .OrderByDescending(static p => p.Score)
+    ///     .Take(3)
+    ///     .Select(static p => new HudSlot(p.Id, p.Score))
+    ///     .SubscribeInto(slots.AsMemory(), count => RenderHud(slots.AsSpan(0, count)));
+    /// </code>
+    /// </example>
+    public IDisposable SubscribeInto(Memory<TResult> destination, Action<int> onUpdated) =>
+        DataVoReactiveLinq.SubscribeProjectedInto(
+            _source,
+            Shape,
+            _projection,
+            _selector ?? throw new InvalidOperationException("This query was not created by a DataVoTable."),
+            destination,
+            onUpdated);
 
     /// <summary>Runs the query and enumerates the values. Rows are streamed when the query is not sorted.</summary>
     /// <returns>An enumerator over the values.</returns>

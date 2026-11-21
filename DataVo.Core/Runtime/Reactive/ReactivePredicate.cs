@@ -108,22 +108,23 @@ internal sealed class ReactivePredicate
 
         object? left = ResolveValue(binary.Left, row);
         object? right = ResolveValue(binary.Right, row);
+        bool trimQuotes = binary.Left is not BoundValueLiteralNode && binary.Right is not BoundValueLiteralNode;
 
         return binary.Operator switch
         {
-            Operators.EQUALS => ExpressionValueComparer.AreEqual(left, right, trimQuotedStrings: true),
+            Operators.EQUALS => ExpressionValueComparer.AreEqual(left, right, trimQuotedStrings: trimQuotes),
             Operators.NOT_EQUALS => left is not null && right is not null
-                && !ExpressionValueComparer.AreEqual(left, right, trimQuotedStrings: true),
+                && !ExpressionValueComparer.AreEqual(left, right, trimQuotedStrings: trimQuotes),
             Operators.LESS_THAN => left is not null && right is not null
-                && ExpressionValueComparer.Compare(left, right, trimQuotedStrings: true) < 0,
+                && ExpressionValueComparer.Compare(left, right, trimQuotedStrings: trimQuotes) < 0,
             Operators.GREATER_THAN => left is not null && right is not null
-                && ExpressionValueComparer.Compare(left, right, trimQuotedStrings: true) > 0,
+                && ExpressionValueComparer.Compare(left, right, trimQuotedStrings: trimQuotes) > 0,
             Operators.LESS_THAN_OR_EQUAL_TO => left is not null && right is not null
-                && ExpressionValueComparer.Compare(left, right, trimQuotedStrings: true) <= 0,
+                && ExpressionValueComparer.Compare(left, right, trimQuotedStrings: trimQuotes) <= 0,
             Operators.GREATER_THAN_OR_EQUAL_TO => left is not null && right is not null
-                && ExpressionValueComparer.Compare(left, right, trimQuotedStrings: true) >= 0,
-            Operators.LIKE => ExpressionValueComparer.MatchesLike(left, right, trimQuotedStrings: true),
-            Operators.NOT_LIKE => ExpressionValueComparer.MatchesNotLike(left, right, trimQuotedStrings: true),
+                && ExpressionValueComparer.Compare(left, right, trimQuotedStrings: trimQuotes) >= 0,
+            Operators.LIKE => ExpressionValueComparer.MatchesLike(left, right, trimQuotedStrings: trimQuotes),
+            Operators.NOT_LIKE => ExpressionValueComparer.MatchesNotLike(left, right, trimQuotedStrings: trimQuotes),
             _ => throw new NotSupportedException($"Reactive subscriptions do not support the operator '{binary.Operator}' in WHERE.")
         };
     }
@@ -152,18 +153,14 @@ internal sealed class ReactivePredicate
 
         return binary.Operator switch
         {
-            Operators.EQUALS => AreEqual(left, right),
+            Operators.EQUALS => !left.IsNull && !right.IsNull && AreEqual(left, right),
             Operators.NOT_EQUALS => !left.IsNull && !right.IsNull && !AreEqual(left, right),
-            Operators.LESS_THAN => !left.IsNull && !right.IsNull
-                && ExpressionValueComparer.Compare(left.ToObject(), right.ToObject(), trimQuotedStrings: true) < 0,
-            Operators.GREATER_THAN => !left.IsNull && !right.IsNull
-                && ExpressionValueComparer.Compare(left.ToObject(), right.ToObject(), trimQuotedStrings: true) > 0,
-            Operators.LESS_THAN_OR_EQUAL_TO => !left.IsNull && !right.IsNull
-                && ExpressionValueComparer.Compare(left.ToObject(), right.ToObject(), trimQuotedStrings: true) <= 0,
-            Operators.GREATER_THAN_OR_EQUAL_TO => !left.IsNull && !right.IsNull
-                && ExpressionValueComparer.Compare(left.ToObject(), right.ToObject(), trimQuotedStrings: true) >= 0,
-            Operators.LIKE => ExpressionValueComparer.MatchesLike(left.ToObject(), right.ToObject(), trimQuotedStrings: true),
-            Operators.NOT_LIKE => ExpressionValueComparer.MatchesNotLike(left.ToObject(), right.ToObject(), trimQuotedStrings: true),
+            Operators.LESS_THAN => !left.IsNull && !right.IsNull && CellValueComparer.Compare(left, right) < 0,
+            Operators.GREATER_THAN => !left.IsNull && !right.IsNull && CellValueComparer.Compare(left, right) > 0,
+            Operators.LESS_THAN_OR_EQUAL_TO => !left.IsNull && !right.IsNull && CellValueComparer.Compare(left, right) <= 0,
+            Operators.GREATER_THAN_OR_EQUAL_TO => !left.IsNull && !right.IsNull && CellValueComparer.Compare(left, right) >= 0,
+            Operators.LIKE => ExpressionValueComparer.MatchesLike(left.ToObject(), right.ToObject(), trimQuotedStrings: false),
+            Operators.NOT_LIKE => ExpressionValueComparer.MatchesNotLike(left.ToObject(), right.ToObject(), trimQuotedStrings: false),
             _ => throw new NotSupportedException($"Reactive subscriptions do not support the operator '{binary.Operator}' in WHERE.")
         };
     }
@@ -173,7 +170,8 @@ internal sealed class ReactivePredicate
         return expression switch
         {
             NullLiteralNode => null,
-            LiteralNode literal => literal.Value,
+            BoundValueLiteralNode bound => bound.Value,
+            LiteralNode literal => UnquoteSqlLiteral(literal.Value),
             ColumnRefNode columnRef when IsBooleanLiteral(columnRef.Column, out bool value) => value,
             ColumnRefNode columnRef => row.TryGetValue(columnRef.Column, out object? value) ? value : null,
             ResolvedColumnRefNode resolved when IsBooleanLiteral(resolved.Column, out bool value) => value,
@@ -187,7 +185,8 @@ internal sealed class ReactivePredicate
         return expression switch
         {
             NullLiteralNode => CellValue.Null,
-            LiteralNode literal => CellValue.From(literal.Value),
+            BoundValueLiteralNode bound => CellValue.FromBorrowedObject(bound.Value),
+            LiteralNode literal => CellValue.FromBorrowedObject(UnquoteSqlLiteral(literal.Value)),
             ColumnRefNode columnRef when IsBooleanLiteral(columnRef.Column, out bool value) => CellValue.From(value),
             ColumnRefNode columnRef => row.TryGet(columnRef.Column, out CellValue value) ? value : CellValue.Null,
             ResolvedColumnRefNode resolved when IsBooleanLiteral(resolved.Column, out bool value) => CellValue.From(value),
@@ -196,29 +195,14 @@ internal sealed class ReactivePredicate
         };
     }
 
+    private static object? UnquoteSqlLiteral(object? value) =>
+        value is string text && text.Length >= 2 && text[0] == '\'' && text[^1] == '\''
+            ? text[1..^1]
+            : value;
+
     private static bool AreEqual(CellValue left, CellValue right)
     {
-        if (left.IsNull || right.IsNull)
-        {
-            return left.IsNull && right.IsNull;
-        }
-
-        if (left.Type == right.Type)
-        {
-            return left.Type switch
-            {
-                CellType.Boolean => left.AsBoolean() == right.AsBoolean(),
-                CellType.Int32 => left.AsInt32() == right.AsInt32(),
-                CellType.Int64 => left.AsInt64() == right.AsInt64(),
-                CellType.Double => left.AsDouble() == right.AsDouble(),
-                CellType.Decimal => left.AsDecimal() == right.AsDecimal(),
-                CellType.String => string.Equals(left.AsString(), right.AsString(), StringComparison.Ordinal),
-                CellType.Date => left.AsDate() == right.AsDate(),
-                _ => ExpressionValueComparer.AreEqual(left.ToObject(), right.ToObject(), trimQuotedStrings: true)
-            };
-        }
-
-        return ExpressionValueComparer.AreEqual(left.ToObject(), right.ToObject(), trimQuotedStrings: true);
+        return CellValueEqualityComparer.AreEqual(left, right);
     }
 
     private static bool IsBooleanLiteral(string token, out bool value)

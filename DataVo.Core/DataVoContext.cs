@@ -167,12 +167,147 @@ public sealed class DataVoContext : IDisposable
         => Engine.Reactive.Add(this, sql, onChanged);
 
     /// <summary>
+    /// Registers a standing reactive query from a pre-parsed <see cref="DataVoPreparedStatement"/> with no parameters.
+    /// </summary>
+    /// <param name="statement">The prepared <c>SELECT</c> statement to observe.</param>
+    /// <param name="onChanged">The callback invoked with non-empty changes on each drain.</param>
+    /// <returns>A disposable subscription handle.</returns>
+    /// <example>
+    /// <code>
+    /// DataVoPreparedStatement active = context.Prepare("SELECT Id, Score FROM Players WHERE Active = true");
+    /// using IDisposable sub = context.Subscribe(active, change => Handle(change));
+    /// </code>
+    /// </example>
+    public IDisposable Subscribe(DataVoPreparedStatement statement, Action<QueryChange> onChanged)
+        => Engine.Reactive.Add(this, statement, onChanged, ReadOnlySpan<DataVoQueryParameter>.Empty);
+
+    /// <summary>
+    /// Registers a standing reactive query from a pre-parsed <see cref="DataVoPreparedStatement"/> with bound parameters,
+    /// bypassing SQL text parsing while preserving AST isolation across concurrent subscriptions.
+    /// </summary>
+    /// <param name="statement">The prepared <c>SELECT</c> statement to observe.</param>
+    /// <param name="onChanged">The callback invoked with non-empty changes on each drain.</param>
+    /// <param name="parameters">The parameter values bound into an isolated clone of the prepared AST.</param>
+    /// <returns>A disposable subscription handle.</returns>
+    /// <example>
+    /// <code>
+    /// DataVoPreparedStatement byTeam = context.Prepare("SELECT Id, Score FROM Players WHERE Team = @team");
+    /// using IDisposable red = context.Subscribe(byTeam, change => HandleRed(change), ("team", "Red"));
+    /// using IDisposable blue = context.Subscribe(byTeam, change => HandleBlue(change), ("team", "Blue"));
+    /// </code>
+    /// </example>
+    public IDisposable Subscribe(
+        DataVoPreparedStatement statement,
+        Action<QueryChange> onChanged,
+        params DataVoQueryParameter[] parameters)
+        => Engine.Reactive.Add(this, statement, onChanged, parameters.AsSpan());
+
+    /// <summary>
+    /// Registers a standing reactive query from a pre-parsed <see cref="DataVoPreparedStatement"/> using a span of parameters.
+    /// </summary>
+    /// <param name="statement">The prepared <c>SELECT</c> statement to observe.</param>
+    /// <param name="onChanged">The callback invoked with non-empty changes on each drain.</param>
+    /// <param name="parameters">The parameter bindings for this subscription.</param>
+    /// <returns>A disposable subscription handle.</returns>
+    public IDisposable Subscribe(
+        DataVoPreparedStatement statement,
+        Action<QueryChange> onChanged,
+        ReadOnlySpan<DataVoQueryParameter> parameters)
+        => Engine.Reactive.Add(this, statement, onChanged, parameters);
+
+    /// <summary>
+    /// Registers a standing reactive query from a pre-parsed <see cref="DataVoPreparedStatement"/> using a dictionary of named parameters.
+    /// </summary>
+    /// <param name="statement">The prepared <c>SELECT</c> statement to observe.</param>
+    /// <param name="onChanged">The callback invoked with non-empty changes on each drain.</param>
+    /// <param name="parameters">The named parameter bindings for this subscription.</param>
+    /// <returns>A disposable subscription handle.</returns>
+    public IDisposable Subscribe(
+        DataVoPreparedStatement statement,
+        Action<QueryChange> onChanged,
+        IReadOnlyDictionary<string, object?> parameters)
+        => Engine.Reactive.Add(this, statement, onChanged, ConvertParameters(parameters));
+
+    /// <summary>
     /// Subscribes on the zero-allocation fast lane: delivers a borrowed <see cref="QueryChangeRef"/>
     /// (valid only during the callback) without materializing to an owned <see cref="QueryChange"/>.
     /// Throws <see cref="NotSupportedException"/> for query shapes not yet migrated to borrowed emit.
     /// </summary>
     public IDisposable SubscribeZeroAlloc(string sql, QueryDeltaHandler onChanged)
         => Engine.Reactive.SubscribeZeroAlloc(this, sql, onChanged);
+
+    /// <summary>
+    /// Registers a zero-allocation reactive subscription from a pre-parsed <see cref="DataVoPreparedStatement"/> with no parameters.
+    /// </summary>
+    /// <param name="statement">The prepared <c>SELECT</c> statement to observe.</param>
+    /// <param name="onChanged">The borrowed-delta callback invoked on each drain.</param>
+    /// <returns>A disposable subscription handle.</returns>
+    public IDisposable SubscribeZeroAlloc(DataVoPreparedStatement statement, QueryDeltaHandler onChanged)
+        => Engine.Reactive.SubscribeZeroAlloc(this, statement, onChanged, ReadOnlySpan<DataVoQueryParameter>.Empty);
+
+    /// <summary>
+    /// Registers a zero-allocation reactive subscription from a pre-parsed <see cref="DataVoPreparedStatement"/> with bound parameters,
+    /// bypassing SQL text parsing while preserving AST isolation across concurrent subscriptions.
+    /// </summary>
+    /// <param name="statement">The prepared <c>SELECT</c> statement to observe.</param>
+    /// <param name="onChanged">The borrowed-delta callback invoked on each drain.</param>
+    /// <param name="parameters">The parameter values bound into an isolated clone of the prepared AST.</param>
+    /// <returns>A disposable subscription handle.</returns>
+    /// <example>
+    /// <code>
+    /// DataVoPreparedStatement topTeam = context.Prepare("SELECT Id, Score FROM Players WHERE Team = @team ORDER BY Score DESC LIMIT 3");
+    /// using IDisposable sub = context.SubscribeZeroAlloc(topTeam, (in QueryChangeRef change) => Handle(in change), ("team", "Red"));
+    /// </code>
+    /// </example>
+    public IDisposable SubscribeZeroAlloc(
+        DataVoPreparedStatement statement,
+        QueryDeltaHandler onChanged,
+        params DataVoQueryParameter[] parameters)
+        => Engine.Reactive.SubscribeZeroAlloc(this, statement, onChanged, parameters.AsSpan());
+
+    /// <summary>
+    /// Registers a zero-allocation reactive subscription from a pre-parsed <see cref="DataVoPreparedStatement"/> using a span of parameters.
+    /// </summary>
+    /// <param name="statement">The prepared <c>SELECT</c> statement to observe.</param>
+    /// <param name="onChanged">The borrowed-delta callback invoked on each drain.</param>
+    /// <param name="parameters">The parameter bindings for this subscription.</param>
+    /// <returns>A disposable subscription handle.</returns>
+    public IDisposable SubscribeZeroAlloc(
+        DataVoPreparedStatement statement,
+        QueryDeltaHandler onChanged,
+        ReadOnlySpan<DataVoQueryParameter> parameters)
+        => Engine.Reactive.SubscribeZeroAlloc(this, statement, onChanged, parameters);
+
+    /// <summary>
+    /// Registers a zero-allocation reactive subscription from a pre-parsed <see cref="DataVoPreparedStatement"/> using a dictionary of named parameters.
+    /// </summary>
+    /// <param name="statement">The prepared <c>SELECT</c> statement to observe.</param>
+    /// <param name="onChanged">The borrowed-delta callback invoked on each drain.</param>
+    /// <param name="parameters">The named parameter bindings for this subscription.</param>
+    /// <returns>A disposable subscription handle.</returns>
+    public IDisposable SubscribeZeroAlloc(
+        DataVoPreparedStatement statement,
+        QueryDeltaHandler onChanged,
+        IReadOnlyDictionary<string, object?> parameters)
+        => Engine.Reactive.SubscribeZeroAlloc(this, statement, onChanged, ConvertParameters(parameters));
+
+    private static DataVoQueryParameter[] ConvertParameters(IReadOnlyDictionary<string, object?> parameters)
+    {
+        DataVo.Core.Compat.ThrowHelper.ThrowIfNull(parameters);
+        if (parameters.Count == 0)
+        {
+            return [];
+        }
+
+        var result = new DataVoQueryParameter[parameters.Count];
+        int index = 0;
+        foreach (KeyValuePair<string, object?> entry in parameters)
+        {
+            result[index++] = DataVoQueryParameter.FromObject(entry.Key, entry.Value);
+        }
+
+        return result;
+    }
 
     /// <summary>
     /// Drains buffered committed change sets through active subscriptions, invoking callbacks on the
@@ -188,7 +323,7 @@ public sealed class DataVoContext : IDisposable
         => Engine.Reactive.Dispatch();
 
     /// <summary>
-    /// Sets the maximum number of concurrently active reactive subscriptions; <see cref="Subscribe"/>
+    /// Sets the maximum number of concurrently active reactive subscriptions; <see cref="Subscribe(string, Action{QueryChange})"/>
     /// throws once the cap is reached.
     /// </summary>
     /// <param name="max">The new subscription cap.</param>

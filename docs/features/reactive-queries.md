@@ -17,12 +17,22 @@ is **stable** across layers.
 
 ```csharp
 IDisposable Subscribe(string sql, Action<QueryChange> onChanged);
+IDisposable Subscribe(DataVoPreparedStatement statement, Action<QueryChange> onChanged, params DataVoQueryParameter[] parameters);
+IDisposable SubscribeZeroAlloc(string sql, QueryDeltaHandler onChanged);
+IDisposable SubscribeZeroAlloc(DataVoPreparedStatement statement, QueryDeltaHandler onChanged, params DataVoQueryParameter[] parameters);
 void DispatchPendingNotifications();
 void SetMaxReactiveSubscriptions(int max);
 ```
 
 - `Subscribe(sql, onChanged)` — parses and validates `sql`, seeds the subscription from the current
   table contents, and returns a handle. `Dispose()` the handle to stop delivery.
+- `Subscribe(statement, onChanged, parameters)` / `SubscribeZeroAlloc(statement, onChanged, parameters)` —
+  subscribes from a pre-parsed `DataVoPreparedStatement` (plus parameterless, `ReadOnlySpan<DataVoQueryParameter>`,
+  and `IReadOnlyDictionary<string, object?>` overloads), cloning and binding an isolated AST per subscription
+  so SQL text parsing is bypassed and a single prepared statement can be reused concurrently with different parameter values.
+- Strongly-typed LINQ queries on `db.Table<T>()` (`Where`, `OrderBy`/`ThenBy`, `Skip`, `Take`, `Select`) also
+  expose `.Subscribe(Action<QueryChange<T>>)` and zero-allocation `.SubscribeInto(Memory<TProjection>, Action<int>)`
+  backed by source-generated `IReactiveRowProjector<TProjection>` value-type projectors.
 - `DispatchPendingNotifications()` — drains all buffered committed changes through every active
   subscription and invokes callbacks **on the calling thread**.
 - `SetMaxReactiveSubscriptions(max)` — caps the number of concurrently active subscriptions.

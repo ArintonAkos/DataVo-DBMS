@@ -1,5 +1,6 @@
 using System.Collections;
 using System.ComponentModel;
+using DataVo.Core.Runtime.Reactive;
 
 namespace DataVo.Core;
 
@@ -125,6 +126,25 @@ public readonly struct DataVoOrderedQuery<T, TState> : IOrderedEnumerable<T>
     /// <summary>Reads the sorted rows into a list.</summary>
     /// <returns>The rows, in order.</returns>
     public List<T> ToList() => [.. DataVoComposed.ReadModels(_source, Shape, -1)];
+
+    /// <summary>
+    /// Registers a strongly-typed reactive subscription observing the sorted query results.
+    /// Deltas are delivered when <see cref="DataVoContext.DispatchPendingNotifications"/> is called.
+    /// </summary>
+    /// <param name="onChanged">The callback invoked with typed added, removed, and updated rows.</param>
+    /// <returns>A disposable subscription handle.</returns>
+    public IDisposable Subscribe(Action<QueryChange<T>> onChanged) =>
+        DataVoReactiveLinq.SubscribeModels(_source, Shape, onChanged);
+
+    /// <summary>
+    /// Registers a zero-allocation buffered window subscription over the sorted rows, writing up to
+    /// <c>destination.Length</c> live rows in sorted order into <paramref name="destination"/> on each drain.
+    /// </summary>
+    /// <param name="destination">Caller-owned buffer receiving the live sorted window.</param>
+    /// <param name="onUpdated">Callback invoked with the live row count written whenever the window changes.</param>
+    /// <returns>A disposable subscription handle.</returns>
+    public IDisposable SubscribeInto(Memory<T> destination, Action<int> onUpdated) =>
+        DataVoReactiveLinq.SubscribeModelsInto(_source, Shape, destination, onUpdated);
 
     /// <summary>Runs the query and enumerates the sorted rows.</summary>
     /// <returns>An enumerator over the rows, in order.</returns>

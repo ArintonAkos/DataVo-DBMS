@@ -511,6 +511,11 @@ public sealed partial class DataVoTable<T> : IEnumerable<T>
 
     internal T Read(Dictionary<string, object?> row) => _info.ReadRow(row);
 
+    internal T Read(IReadOnlyDictionary<string, object?> row) =>
+        row is Dictionary<string, object?> dict
+            ? _info.ReadRow(dict)
+            : _info.ReadRow(new Dictionary<string, object?>(row, StringComparer.OrdinalIgnoreCase));
+
     internal T Read(DataVoRow row) => _info.ReadStreamedRow(row);
 
     /// <summary>Streams every row of the table.</summary>
