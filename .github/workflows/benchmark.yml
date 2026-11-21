@@ -2,6 +2,16 @@ name: Benchmark
 
 on:
   workflow_dispatch:
+    inputs:
+      scenarios:
+        description: "Comma-separated scenarios to run, or 'all'"
+        required: false
+        default: "all"
+      run_benchmarkdotnet:
+        description: "Whether to run the BenchmarkDotNet suite"
+        required: false
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -90,18 +100,29 @@ jobs:
 
           HOST_DLL="demos/Research.Benchmark/src/Research.Benchmark.Host/bin/Release/net10.0/Research.Benchmark.Host.dll"
 
-          scenarios=(
-            "simple-exposure"
-            "complex-vip"
-            "flat-crud"
-            "disk-crud-wal"
-            "deep-document"
-            "concurrent-ops"
-            "vector-search"
-            "thread-scaling"
-            "ycsb-mixed"
-            "space-and-recovery"
-          )
+          SCENARIOS_INPUT="${{ github.event.inputs.scenarios || 'all' }}"
+          if [[ "$SCENARIOS_INPUT" == "all" || -z "$SCENARIOS_INPUT" ]]; then
+            scenarios=(
+              "simple-exposure"
+              "complex-vip"
+              "flat-crud"
+              "disk-crud-wal"
+              "deep-document"
+              "concurrent-ops"
+              "vector-search"
+              "thread-scaling"
+              "ycsb-mixed"
+              "space-and-recovery"
+            )
+          else
+            IFS=',' read -r -a raw_scenarios <<< "$SCENARIOS_INPUT"
+            scenarios=()
+            for s in "${raw_scenarios[@]}"; do
+              s="${s#"${s%%[![:space:]]*}"}"
+              s="${s%"${s##*[![:space:]]}"}"
+              [[ -n "$s" ]] && scenarios+=("$s")
+            done
+          fi
 
           {
             echo "DataVo benchmark matrix (${{ matrix.label }})"
@@ -148,6 +169,7 @@ jobs:
           if-no-files-found: error
 
   benchmarkdotnet:
+    if: ${{ github.event.inputs.run_benchmarkdotnet != 'false' }}
     name: BenchmarkDotNet suite (DataVo, SQLite, DuckDB) on ${{ matrix.runner }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 90
