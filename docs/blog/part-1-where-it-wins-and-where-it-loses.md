@@ -202,6 +202,17 @@ Over 10,000 orders, 1,000 accounts, and 50 markets running **50,000 insert-and-r
 
 *Figure 6: Cumulative time to apply 50,000 updates to a 3-table JOIN + GROUP BY view on macOS, Linux, and Windows.*
 
+In C#, the subscription uses `SubscribeZeroAlloc` (or the owned `Subscribe` overload) and drains deltas on demand via `DispatchPendingNotifications()` (see [Live Reactive Views (Z-set IVM)](/manual/client-interfaces/reactive-views)):
+
+```csharp
+using var view = db.SubscribeZeroAlloc(
+    "SELECT m.Category, SUM(o.Stake) AS TotalExposure FROM Orders o " +
+    "JOIN Accounts a ON o.AccountId = a.Id JOIN Markets m ON o.MarketId = m.Id " +
+    "WHERE a.IsVip = true GROUP BY m.Category",
+    (in QueryChangeRef delta) => ApplyDeltas(delta.Added, delta.Updated, delta.Removed));
+db.DispatchPendingNotifications(); // pull-drain deltas on the caller thread
+```
+
 - **Apple M4 Pro (12 Nov):** DataVo **191.7 ms** (p50 `3.1 µs`) vs DuckDB **34.3 s** (**179×**) vs SQLite **126.1 s** (**658×**).
 - **Linux x64 CI (20 Nov):** DataVo **599.9 ms** (p50 `10.9 µs`) vs DuckDB **112.9 s** (**188×**) vs SQLite **237.1 s** (**395×**).
 - **Windows x64 CI (20 Nov):** DataVo **545.5 ms** (p50 `9.6 µs`) vs DuckDB **135.5 s** (**248×**) vs SQLite **247.8 s** (**454×**).
