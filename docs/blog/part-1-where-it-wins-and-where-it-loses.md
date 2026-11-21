@@ -25,7 +25,7 @@ At a glance, the approach pays off in four specific places:
 - **Filtered vector search inside ordinary SQL:** Top-10 search over 50,000 × 384-dimensional embeddings with SQL `JOIN` and `WHERE` filters runs in **0.26–3.62 ms** at **100% recall@10**, in the same transaction log as the relational tables.
 - **Compact offline-first Postgres sync:** End-to-end PostgreSQL 17 replication transfers **45.5 bytes per row** over the wire (**8.0× smaller** than ElectricSQL `1.8.1`) with **5.1–6.9× lower** client GC allocations, converging automatically after a burst of 500 offline writes.
 
-It also loses in predictable places—unindexed substring scans, whole-table analytical scans without columnar indexes, Linux single-row durable `fsync` latency, and hub cold-start time. Those losses are reported alongside the wins below, because an embedded database is only useful once you know where its boundaries are.
+It also loses in predictable places—unindexed substring scans (**1.35× slower** than SQLite on `LIKE '%042-%'`), whole-table analytical scans without `[Columnar]` (**3–340× slower** than DuckDB), Linux single-row durable `StrictFsync` latency (**0.241 ms** vs **0.108 ms**, **2.2× slower** than SQLite WAL `FULL`), and sync hub cold-start time (**2.4 s** to load 100k rows). Those losses are reported alongside the wins below, because an embedded database is only useful once you know where its boundaries are.
 
 ---
 
@@ -53,7 +53,7 @@ DataVo exists for four narrower situations where the usual stack starts to show 
 
 *Figure 1: Traditional .NET local-first assembly vs. single-process consolidation in DataVo.*
 
-It is equally important to be clear about what DataVo is **not**. It is not a client/server database: a lock file (`datavo.lock`) gives one process exclusive ownership of a database directory. Transactions provide snapshot isolation rather than serializability <a class="cite-badge" href="#ref-2">2</a>. Its SQL dialect is its own, and at `0.4.0-rc.1` it is prerelease software whose on-disk format does not yet carry a cross-version compatibility guarantee.
+It is equally important to be clear about what DataVo is **not**. It is not a client/server database: a lock file (`datavo.lock`) gives one process exclusive ownership of a database directory. Transactions provide snapshot isolation rather than serializability <a class="cite-badge" href="#ref-2">2</a>. Its SQL dialect intentionally leaves out features teams expect from full-scale SQL engines—no `CASE`/`CAST`/`COALESCE` or date functions, no window functions beyond `RANK()`, and no `CREATE VIEW`, triggers, or stored procedures. At `0.4.0-rc.1` it is prerelease software whose on-disk format does not yet carry a cross-version compatibility guarantee: standalone local databases require an export and re-import across breaking format changes, whereas `DataVo-Sync` setups treat PostgreSQL as the source of truth and can simply wipe and re-hydrate the local replica (**~0.7 s** for 100k rows).
 
 ---
 
@@ -84,7 +84,7 @@ DataVo organizes data in two ways to strike a balance between fast point lookups
 
 Every incoming query is first offered to a set of **typed execution paths** that read cells directly from packed buffers (as mapped in Figure 3): single-table scans (`AND`, `OR`, `LIKE`, grouping, bounded top-k, key ranges, index lookups), integer-key hash joins (`INNER` and `LEFT`), columnar aggregates, and the vector planner. Each typed path guarantees that it either produces the exact same answer as the general evaluator or declines cleanly.
 
-Queries that no typed path accepts fall back to the general evaluator, which materializes a dictionary per row and allocates kilobytes per row read. Which side of that boundary a query lands on explains far more of the benchmark numbers below than any micro-optimization.
+Queries that no typed path accepts fall back to the general evaluator, which materializes a dictionary per row and allocates kilobytes per row read. Which side of that boundary a query lands on explains far more of the benchmark numbers below than any micro-optimization. Today, `EXPLAIN` reports only the general planner's `Volcano` vs `Legacy` mode rather than whether a typed bypass accepted the query, so teams check eligibility against the documented fast-path shape rules (exposing typed-versus-fallback dispatch directly in `EXPLAIN` diagnostics is planned for `0.5.0`).
 
 <div class="sketch-diagram light-only">
 
@@ -181,7 +181,7 @@ Two caveats keep this result honest. First, this table compares DataVo's build-t
 
 ## Maintaining views incrementally
 
-Consider a reactive dashboard, trading blotter, or live game leaderboard that joins three tables—`Orders × Accounts × Markets`—with a `GROUP BY`, while new rows arrive continuously (visualized in Figure 4). In a traditional embedded database, every refresh re-executes the entire join. With Z-set incremental view maintenance (IVM), each write pushes a tiny `+1` / `-1` delta through the view operator graph and updates only the affected groups:
+Consider a reactive dashboard, trading blotter, or live game leaderboard that joins three tables—`Orders × Accounts × Markets`—with a `GROUP BY`, while new rows arrive continuously (visualized in Figure 4). In a traditional embedded database, every refresh re-executes the entire join unless you maintain custom summary tables by hand (for example, with SQLite `AFTER INSERT/UPDATE/DELETE` triggers). With declarative Z-set incremental view maintenance (IVM), each write pushes a tiny `+1` / `-1` delta through the view operator graph and updates only the affected groups without trigger boilerplate:
 
 <div class="sketch-diagram light-only">
 
