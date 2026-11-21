@@ -26,6 +26,13 @@ html:not(.dark) .dark-only {
   cursor: zoom-in;
 }
 
+.VPNavBarTitle .logo {
+  margin-right: 8px;
+  height: 24px;
+  width: auto;
+  transition: transform 0.2s ease;
+}
+
 .cite-badge {
   display: inline-flex;
   align-items: center;

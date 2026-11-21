@@ -8,6 +8,10 @@ export default withMermaid(
     description:
       "C#-native embedded database documentation for DataVo v0.2.0-rc.3.",
     cleanUrls: true,
+    head: [
+      ["link", { rel: "icon", type: "image/svg+xml", href: "/DataVo-DBMS/favicon.svg" }],
+      ["link", { rel: "icon", type: "image/x-icon", href: "/DataVo-DBMS/favicon.ico" }],
+    ],
     srcExclude: [
       "superpowers/**",
       "specs/**",
@@ -27,6 +31,10 @@ export default withMermaid(
       "sql-reference.md",
     ],
     themeConfig: {
+      logo: {
+        light: "/logo-light.svg",
+        dark: "/logo-dark.svg",
+      },
       siteTitle: "DataVo",
       nav: [
         { text: "Home", link: "/" },
