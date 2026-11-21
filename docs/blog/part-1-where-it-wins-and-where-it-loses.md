@@ -113,12 +113,12 @@ Before looking at any chart, four ground rules govern how to read the numbers be
 
 1. **Matching durability.** A database that acknowledges writes from RAM will always beat one waiting on the drive. Every disk comparison pairs equivalent durability guarantees:
 
-| DataVo | SQLite | What a commit guarantees |
-| --- | --- | --- |
-| `LsmStrictFsync = true` ("Production") | WAL, `synchronous=FULL` | Waits for stable storage on every commit |
-| `LsmStrictFsync = false` ("Relaxed") | WAL, `synchronous=NORMAL` | Survives process crash; may lose recent commits on power loss |
+   | DataVo | SQLite | What a commit guarantees |
+   | --- | --- | --- |
+   | `LsmStrictFsync = true` ("Production") | WAL, `synchronous=FULL` | Waits for stable storage on every commit |
+   | `LsmStrictFsync = false` ("Relaxed") | WAL, `synchronous=NORMAL` | Survives process crash; may lose recent commits on power loss |
 
-Where a benchmark harness lacked a matched `SQLite WAL FULL` row, I state that explicitly.
+   Where a benchmark harness lacked a matched `SQLite WAL FULL` row, I state that explicitly.
 
 2. **No interpolation.** Every figure comes directly from a logged run or CI artifact listed under [Data sources](#data-sources).
 3. **Single-run noise.** Only the BenchmarkDotNet suites carry confidence intervals. On single-run suites, I treat differences under ~20% as unestablished.
@@ -155,11 +155,11 @@ public sealed class Player
 int highLevel = db.Table<Player>().Where(50, static (p, min) => p.Level >= min).Count();
 ```
 
-As charted in Figure 5, removing the native boundary pays off on frequent, tiny queries:
+As charted in Figure 4, removing the native boundary pays off on frequent, tiny queries:
 
-![Figure 5: Primary-key point lookup and filtered COUNT(*) latencies on the Apple M4 Pro and CI platforms](/blog/part-1/01-cross-platform-lookup-and-count.png)
+![Figure 4: Primary-key point lookup and filtered COUNT(*) latencies on the Apple M4 Pro and CI platforms](/blog/part-1/01-cross-platform-lookup-and-count.png)
 
-*Figure 5: Primary-key point lookup and filtered COUNT(\*) latencies on the Apple M4 Pro and CI platforms.*
+*Figure 4: Primary-key point lookup and filtered COUNT(\*) latencies on the Apple M4 Pro and CI platforms.*
 
 | Primary-key lookup (100k rows) | DataVo, memory | DataVo, file (LSM) | SQLite, memory | SQLite, file | DuckDB, 1 thread, file |
 | --- | ---: | ---: | ---: | ---: | ---: |
@@ -181,20 +181,20 @@ Two caveats keep this result honest. First, this table compares DataVo's build-t
 
 ## Maintaining views incrementally
 
-Consider a reactive dashboard, trading blotter, or live game leaderboard that joins three tables—`Orders × Accounts × Markets`—with a `GROUP BY`, while new rows arrive continuously (visualized in Figure 4). In a traditional embedded database, every refresh re-executes the entire join unless you maintain custom summary tables by hand (for example, with SQLite `AFTER INSERT/UPDATE/DELETE` triggers). With declarative Z-set incremental view maintenance (IVM), each write pushes a tiny `+1` / `-1` delta through the view operator graph and updates only the affected groups without trigger boilerplate:
+Consider a reactive dashboard, trading blotter, or live game leaderboard that joins three tables—`Orders × Accounts × Markets`—with a `GROUP BY`, while new rows arrive continuously (visualized in Figure 5). In a traditional embedded database, every refresh re-executes the entire join unless you maintain custom summary tables by hand (for example, with SQLite `AFTER INSERT/UPDATE/DELETE` triggers). With declarative Z-set incremental view maintenance (IVM), each write pushes a tiny `+1` / `-1` delta through the view operator graph and updates only the affected groups without trigger boilerplate:
 
 <div class="sketch-diagram light-only">
 
-![Figure 4: Full view recomputation vs. incremental Z-set delta propagation](/blog/part-1/fig-04-zset-ivm-light.svg)
+![Figure 5: Full view recomputation vs. incremental Z-set delta propagation](/blog/part-1/fig-04-zset-ivm-light.svg)
 
 </div>
 <div class="sketch-diagram dark-only">
 
-![Figure 4: Full view recomputation vs. incremental Z-set delta propagation](/blog/part-1/fig-04-zset-ivm-dark.svg)
+![Figure 5: Full view recomputation vs. incremental Z-set delta propagation](/blog/part-1/fig-04-zset-ivm-dark.svg)
 
 </div>
 
-*Figure 4: Full view recomputation vs. incremental Z-set delta propagation.*
+*Figure 5: Full view recomputation vs. incremental Z-set delta propagation.*
 
 Over 10,000 orders, 1,000 accounts, and 50 markets running **50,000 insert-and-read iterations** (`complex-vip`), avoid-the-join gains grow with write density, as mapped in Figure 6:
 
