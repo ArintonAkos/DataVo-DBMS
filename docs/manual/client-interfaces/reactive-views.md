@@ -197,8 +197,13 @@ using var redTop3 = ctx.SubscribeZeroAlloc(
     teamTop,
     (in QueryChangeRef change) =>
     {
-        for (int i = 0; i < change.Added.Count; i++)
-            Console.WriteLine($"Red top-3 added: {change.Added[i]["Name"].AsString()}");
+        change.Schema.TryGetOrdinal("Name", out int nameCol);
+        RowSet added = change.Added;
+        for (int i = 0; i < added.Count; i++)
+        {
+            RowRef row = added[i];
+            Console.WriteLine($"Red top-3 added: {row[nameCol].AsString()}");
+        }
     },
     ("team", "Red"), ("k", 3));
 
