@@ -1,6 +1,6 @@
 ---
 title: "Packed byte buffers, Native AOT, and Roslyn codegen: how a 55 ns point lookup works with zero native binaries"
-description: "Part 2 of 7: Deconstructing the managed-to-native tax, 64-byte aligned FlatRowStore records, lock-free ARM64 optimistic reads, AST-isolated prepared statements, Roslyn interceptors, and locking the Native AOT fence from 184 warnings to zero."
+description: "Part 2 of 7: How packed byte buffers, lock-free reads, AST-isolated prepared statements, and compile-time Roslyn codegen deliver 55 ns point lookups in pure .NET 10 with zero native binaries."
 outline: [2, 3]
 prev:
   text: "Part 1: Where it wins and where it loses"
@@ -12,34 +12,32 @@ next: false
 
 *Part 2 of 7.*
 
-In [Part 1](/blog/part-1-where-it-wins-and-where-it-loses), a single benchmark line stood out above the rest: looking up one row by primary key out of 100,000 shuffled records took **55.0 ns** in memory and **216.2 ns** on LSM disk files on an Apple M4 Pro—**7.7–13× faster** than SQLite, allocating **56 B** in memory (literally the size of the returned `Player` object) and **144 B** on disk, versus **608 B** for `Microsoft.Data.Sqlite`.
+In [Part 1](/blog/part-1-where-it-wins-and-where-it-loses), one benchmark line stood out above the rest: looking up a single row by primary key out of 100,000 shuffled records took **55.0 ns** in memory and **216.2 ns** on LSM disk files on an Apple M4 Pro—**7.7–13× faster** than SQLite, allocating **56 B** in memory (literally the size of the returned `Player` object) and **144 B** on disk, versus **608 B** for `Microsoft.Data.Sqlite`.
 
 That result raises an obvious question: **how can C# beat a battle-tested C database library by an order of magnitude on an in-memory lookup?**
 
-It is not because C# executes instructions faster than C. It is because, in a managed runtime, calling *into* a C database library is never free—and neither is asking a general-purpose SQL engine to rediscover your schema on every row. When the storage engine lives inside the same managed compilation unit as your application, and the C# compiler knows your table schema and query predicate at build time, four layers of runtime ceremony collapse into a handful of inlined bounds checks, aligned loads, and a single object allocation.
+It is not because C# executes instructions faster than C. It is because calling *into* a C library from a managed runtime is never free, and neither is asking a general-purpose SQL engine to rediscover your schema on every row. When the storage engine lives in the same managed compilation unit as your code, and the C# compiler knows your table layout and query predicate at build time, four layers of runtime ceremony collapse into a handful of inlined bounds checks, aligned loads, and a single object allocation.
 
-This post opens the hood on that entire path—from the byte layout of `FlatRowStore`, through the lock-free ARM64 liveness protocol in `PackedKeyReader<T>`, to AST-isolated prepared statements (`DataVoPreparedStatement`), Roslyn `[InterceptsLocation]` code generation (`DataVo.Generators`), and the ratchet that took `DataVo.Core` and `DataVo.Data` from **184** Native AOT warnings down to **0**.
+At a glance, five engineering choices drive both the speed and the packaging story:
 
-At a glance, here is what makes the numbers work—and what they cost in engineering complexity:
+- **Zero native binaries and zero interop marshalling:** Keeping the entire engine in pure .NET 10 removes per-OS native libraries and lets the JIT and AOT compilers inline straight from your query call into storage buffers.
+- **Cache-aligned packed byte buffers:** Fixed-width columns sit contiguously inside 64-byte aligned Pinned Object Heap buffers rather than per-row objects, shrinking retained memory **13×** from **640.3 B/row** to **49.2 B/row** (with shared strings).
+- **Lock-free optimistic reads:** In-memory primary-key lookups take no lock, pairing opposite volatile write/read ordering so a concurrent delete can never surface a half-read row.
+- **Immutable prepared-statement templates:** Parsing SQL once and cloning parameter-bound syntax trees lets concurrent threads, LSM point lookups, and live reactive views share one prepared query safely.
+- **Compile-time Roslyn code generation under Native AOT:** Incremental source generators replace runtime reflection and expression-tree compilation with static readers and build-time interceptors, passing `PublishAot=true` with **0** trim/AOT warnings.
 
-- **Zero native binaries and zero P/Invoke marshalling:** `DataVo.Core` has a single `net10.0` dependency (`System.Numerics.Tensors`) and zero `.dll`/`.so`/`.dylib` native libraries. Every step from caller to storage sits inside one RyuJIT / Native AOT compilation unit.
-- **Widest-first packed buffers (`FlatRowStore`):** Fixed-width columns live in 64-byte-aligned Pinned Object Heap chunks (`FlatChunk`, 4,096 slots), shrinking retained row memory **13×** from **640.3 B/row** to **49.2 B/row** (shared strings).
-- **Lock-free optimistic reads on weakly ordered CPUs:** In-memory integer primary-key lookups take no lock, using opposite `Volatile.Write` / `Volatile.Read` ordering to guarantee that a concurrent delete never surfaces a half-read row.
-- **Prepared statements as the universal backbone:** `ctx.Prepare(...)` parses once and clones bound ASTs via `SqlParameterBinder` without mutating the shared template—feeding both 216 ns LSM point lookups (via `ExecuteBorrowed` and reused `RowResultSlot` boxes) and multi-tenant reactive views (`Subscribe` / `SubscribeZeroAlloc`).
-- **Build-time Roslyn codegen, zero runtime reflection:** `DataVoTableGenerator` and `DataVoLinqInterceptorGenerator` replace `Expression.Compile()` and reflection mapping with static readers (`ReadPackedRow`, `ReadReactiveRow`), compiled scan structs (`IRowRefFilter`), and zero-allocation reactive projectors (`IReactiveRowProjector<T>`), compiling cleanly under `PublishAot=true` with `IL2026`–`IL3056` treated as build errors.
-
-None of this is free. Every shortcut introduces a parity invariant against the general SQL evaluator, weak memory-ordering subtleties, or compiler-version constraints. Those costs are tallied honestly in the final section.
+None of this is free. Every shortcut introduces parity invariants against the general SQL evaluator, memory-ordering subtleties, or compiler constraints, all tallied honestly in the final section.
 
 ---
 
 ## The invisible tax of crossing the managed–native boundary
 
-When a .NET application reads one row from an in-memory SQLite database using a prepared `SqliteCommand`, the lookup is not just a B-tree probe in RAM. Even after `Prepare()` has compiled the SQL into SQLite VDBE bytecode, every single row fetch crosses a managed–native boundary and navigates a dynamically typed C API <a class="cite-badge" href="#ref-2">2</a> <a class="cite-badge" href="#ref-3">3</a> (illustrated in Figure 1):
+When a .NET application reads one row from an in-memory SQLite database via a prepared `SqliteCommand`, the lookup is far more than a B-tree probe in RAM. Even after `Prepare()` compiles the SQL into VDBE bytecode, every row fetch crosses an ABI boundary and navigates a dynamically typed C API <a class="cite-badge" href="#ref-2">2</a> <a class="cite-badge" href="#ref-3">3</a> (Figure 1).
 
-1. **Managed parameter binding and command state.** Assigning `_sqliteId.Value = id` boxes the integer into `object?`, and calling `ExecuteReader()` allocates a `SqliteDataReader` and transitions through `Microsoft.Data.Sqlite`'s state machine.
-2. **Crossing the P/Invoke ABI wall.** Each call into `e_sqlite3` (`sqlite3_reset`, `sqlite3_bind_int64`, `sqlite3_step`, and one `sqlite3_column_*` call per column) crosses an unmanaged calling convention boundary. The .NET JIT cannot inline `sqlite3_step` into your caller, cannot eliminate redundant null/bounds checks across the boundary, and pays a fixed marshalling/transition overhead on every invocation.
-3. **Dynamic column typing and string transcoding.** SQLite uses dynamic type affinity per cell <a class="cite-badge" href="#ref-2">2</a>. Reading `Name` invokes `sqlite3_column_text`, reads a null-terminated UTF-8 byte pointer in unmanaged memory, and transcodes it into a newly allocated UTF-16 `.NET` `string` on every lookup—even if the database lives in `:memory:`.
-4. **Optional ORM / micro-ORM overhead.** If your application maps rows through Dapper (`connection.QuerySingleOrDefault<Player>(...)`), Dapper adds dynamic reader-to-POCO mapping on top of ADO.NET (DataVo supports Dapper through `DataVo.Data`'s `DataVoConnection` as documented in [Dapper](/manual/client-interfaces/dapper), though we do not include a Dapper row in the BenchmarkDotNet suite below). Under Native AOT, reflection-heavy mapping layers also become trimming liabilities.
+1. **Managed command and parameter overhead.** Setting `_sqliteId.Value = id` boxes the integer into `object?`, and `ExecuteReader()` allocates a `SqliteDataReader` and steps through `Microsoft.Data.Sqlite`'s state machine.
+2. **Crossing the P/Invoke boundary.** Each call into `e_sqlite3` (`sqlite3_reset`, `sqlite3_bind_int64`, `sqlite3_step`, and one `sqlite3_column_*` call per column) crosses an unmanaged calling convention. The .NET JIT cannot inline across `DllImport` or eliminate redundant checks, so it pays a fixed transition tax on every invocation.
+3. **Dynamic column typing and string transcoding.** SQLite uses dynamic type affinity per cell <a class="cite-badge" href="#ref-2">2</a>. Reading `Name` calls `sqlite3_column_text`, inspects a null-terminated UTF-8 pointer in unmanaged memory, and transcodes it into a newly allocated UTF-16 `.NET` `string` on every lookup—even in `:memory:`.
+4. **Optional ORM mapping overhead.** Mapping rows through Dapper adds dynamic reader-to-POCO reflection on top of ADO.NET (DataVo supports Dapper via `DataVoConnection` as documented in [Dapper](/manual/client-interfaces/dapper), though the BenchmarkDotNet suite below tests raw ADO.NET readers rather than Dapper). Under Native AOT, reflection-heavy mapping also conflicts with IL trimming.
 
 <div class="sketch-diagram light-only">
 
@@ -54,15 +52,15 @@ When a .NET application reads one row from an in-memory SQLite database using a 
 
 *Figure 1: SQLite managed-to-native P/Invoke boundary versus DataVo's single managed compilation unit.*
 
-Notice what happens to that stack when the database engine itself is written in pure managed C#. On `net10.0`, `DataVo.Core.csproj` has only one NuGet package reference—`System.Numerics.Tensors` `10.0.0` (managed SIMD intrinsics)—and `DataVo.Data.csproj` references only `DataVo.Core`. There is no native `.dll`, `.so`, or `.dylib` to package per RID, no `DllImport` wall blocking the inliner, and no UTF-8-to-UTF-16 string transcoding on in-memory reads because in-memory strings are already .NET `string` objects.
+Keeping the engine in managed C# eliminates that entire boundary. On `net10.0`, `DataVo.Core.csproj` has only one NuGet package reference (`System.Numerics.Tensors` `10.0.0`, which compiles to managed SIMD intrinsics), and `DataVo.Data.csproj` references only `DataVo.Core`—meaning zero `.dll`, `.so`, or `.dylib` files per target platform and zero UTF-8-to-UTF-16 transcoding for in-memory strings.
 
-Removing the FFI wall is necessary, but it is **not** sufficient. An earlier version of DataVo was already 100% pure managed C#, yet its in-memory point lookup took **405–566 ns** and allocated **1,008 B** per call—slower than its own LSM disk engine (**241 ns**). The reason was data layout and runtime dispatch.
+Yet removing the FFI wall alone is not enough: an earlier pure-managed build of DataVo still took **405–566 ns** and allocated **1,008 B** per in-memory lookup—slower than its own LSM disk engine (**241 ns**)—because every row still lived as a scattered heap object.
 
 ---
 
 ## Packing rows into cache-aligned byte buffers (`FlatRowStore`)
 
-In a naive managed in-memory database, the natural representation of a row is an object: a `StoredRow` containing a `CellValue[]` or `Dictionary<string, object?>`. Each row carries an object header, an array header, bounds metadata, and scattered heap pointers. On the benchmark `Player` schema—six columns (`Id`, `Active`, `Level`, `Gold`, `Ratio`, `Name`)—that object-per-row layout retained **640.3 bytes per row** (with shared strings). Scanning or probing 100,000 rows meant chasing hundreds of thousands of heap pointers and handing the garbage collector an enormous reference graph to traverse during Gen-2 collections <a class="cite-badge" href="#ref-1">1</a>.
+In a straightforward managed in-memory store, each row is an object holding a `CellValue[]` or dictionary. On our six-column `Player` benchmark model, that object-per-row layout retained **640.3 bytes per row** (with shared strings), forcing the CPU to chase scattered pointers and handing the garbage collector hundreds of thousands of heap references to scan during Gen-2 collections <a class="cite-badge" href="#ref-1">1</a>.
 
 ```csharp
 [DataVoTable("players")]
@@ -77,13 +75,11 @@ public sealed class Player
 }
 ```
 
-To eliminate per-row heap objects without resorting to unmanaged `Marshal.AllocHGlobal` memory (and its manual free / use-after-free risks), DataVo's in-memory storage engine stores rows in **`FlatRowStore`** (`DataVo.Core/StorageEngine/Memory/FlatRowStore.cs`).
+To replace per-row objects without risking manual `Marshal.AllocHGlobal` memory management, DataVo's in-memory storage packs rows into **`FlatRowStore`** (`DataVo.Core/StorageEngine/Memory/FlatRowStore.cs`), splitting each table into two parallel 4,096-slot chunk structures indexed by an immutable, append-only row number.
 
 ### 64-byte aligned Pinned Object Heap chunks
 
-`FlatRowStore` splits every row into two parallel structures indexed by a stable, append-only row number (`0, 1, 2, ...`):
-
-1. **Fixed-width records (`FlatSlotList` → `FlatChunk`).** Every chunk holds `4,096` slots (`1 << 12`; small tables start with `FirstChunkRows = 16` slots so tiny tables do not waste memory). On .NET 10, `FlatChunk` allocates its backing array directly on the **Pinned Object Heap (POH)** <a class="cite-badge" href="#ref-3">3</a> and computes the leading offset `_start` so slot 0 sits on a 64-byte cache-line boundary:
+Fixed-width columns live inside `FlatSlotList` → `FlatChunk` (`DataVo.Core/Memory/Flat/FlatChunk.cs`). Each chunk allocates 4,096 slots (`1 << 12`; tiny tables start at `FirstChunkRows = 16`) directly on the .NET 10 **Pinned Object Heap (POH)** <a class="cite-badge" href="#ref-3">3</a> and offsets slot 0 to a 64-byte cache-line boundary:
 
 ```csharp
 // DataVo.Core/Memory/Flat/FlatChunk.cs
@@ -91,24 +87,16 @@ _memory = GC.AllocateArray<byte>(length + Alignment - 1, pinned: true);
 _start = AlignmentGap(_memory); // Alignment = 64
 ```
 
-Because the array is owned by the GC and never moves or shrinks once published, a lock-free reader holding a `ReadOnlySpan<byte>` over a slot can never dereference freed memory—and aligned vector loads never cross unnecessary cache-line boundaries.
-
-2. **Object references (`ReferenceDirectory`).** Variable-length managed references—strings and `float[]` vectors—cannot live inside a raw `byte[]` without hiding pointers from the garbage collector. Instead, `ReferenceDirectory` allocates parallel `object?[]` chunks aligned with the same 4,096-slot chunk index (`slot & 4095`). For `Player`, only `Name` is a reference column, so each row owns exactly one reference slot (`slot 0`).
+Because the GC owns the chunk and never moves or frees it while referenced, a lock-free reader holding a `ReadOnlySpan<byte>` can never touch dangling memory. Variable-length managed references—strings and `float[]` vectors—cannot sit inside raw byte arrays without hiding pointers from the GC, so `ReferenceDirectory` stores them in parallel `object?[]` chunks indexed by the same slot number (`slot & 4095`).
 
 ### Widest-first alignment and the 32-byte `Player` record
 
-Inside each slot, `RowLayout.Create` (`DataVo.Core/StorageEngine/Memory/RowLayout.cs`) orders fixed-width columns **widest first**—16-byte (`Decimal`, `Guid`), then 8-byte (`Int64`, `Double`), then 4-byte (`Int32`, `Date`), then 1-byte (`Boolean`)—followed by a 1-byte **status flag**, a **null bitmask** (`(columnCount + 7) >> 3` bytes), and trailing padding up to an 8-byte multiple (`RecordAlignment = 8`).
+Inside each slot, `RowLayout.Create` (`DataVo.Core/StorageEngine/Memory/RowLayout.cs`) packs fixed-width columns **widest first**—16-byte (`Decimal`, `Guid`), 8-byte (`Int64`, `Double`), 4-byte (`Int32`, `Date`), then 1-byte (`Boolean`)—followed by a 1-byte status flag, a null bitmask (`(cols + 7) >> 3` bytes), and 8-byte alignment padding. Every primitive sits on a multiple of its own width with zero interior padding holes, compressing `Player` into **32 bytes** plus one reference slot for `Name` (Figure 2):
 
-Widest-first ordering guarantees that every primitive sits on a multiple of its own width with zero interior padding holes. For `Player`, that packs all five fixed-width fields, the status byte, and the null bitmask into **32 bytes** (Figure 2):
-
-- `Gold` (`Int64`, 8 B): bytes `0..7`
-- `Ratio` (`Double`, 8 B): bytes `8..15`
-- `Id` (`Int32`, 4 B): bytes `16..19`
-- `Level` (`Int32`, 4 B): bytes `20..23`
-- `Active` (`Boolean`, 1 B): byte `24`
-- `Status` (1 B): byte `25` (`0 = Empty`, `1 = Packed`, `2 = KeptApart`)
-- `NullBits` (1 B, 1 bit per column): byte `26`
-- Padding (5 B): bytes `27..31` → `RecordBytes = 32`
+- `Gold` (`Int64`, 8 B): bytes `0..7` · `Ratio` (`Double`, 8 B): bytes `8..15`
+- `Id` (`Int32`, 4 B): bytes `16..19` · `Level` (`Int32`, 4 B): bytes `20..23`
+- `Active` (`Boolean`, 1 B): byte `24` · `Status`: byte `25` (`0 = Empty`, `1 = Packed`, `2 = KeptApart`)
+- `NullBits`: byte `26` · Padding: bytes `27..31` → `RecordBytes = 32`
 
 <div class="sketch-diagram light-only">
 
@@ -123,59 +111,53 @@ Widest-first ordering guarantees that every primitive sits on a multiple of its 
 
 *Figure 2: `FlatRowStore` 32-byte widest-first packed record layout for `Player` and its parallel `ReferenceDirectory`.*
 
-Moving to `FlatRowStore` dropped retained row-store memory **13×**: from **640.3 B/row** down to **49.2 B/row** with shared strings (**145.3 B/row** with unique `"player-N"` strings; **231.6 B/row** total including the primary-key index).
+Switching to `FlatRowStore` cut retained row-store memory **13×**: from **640.3 B/row** down to **49.2 B/row** with shared strings (**145.3 B/row** with unique `"player-N"` strings; **231.6 B/row** including the primary-key index). If dynamic SQL inserts a mismatched cell type (such as a `BIGINT` into an `INT` column), `FlatRowStore.Add` spills only that row into a side `ConcurrentDictionary<int, CellValue[]>` marked `StatusKeptApart = 2` so ordinary rows pay zero overhead.
 
-What happens if a dynamic SQL statement inserts a row whose cell types do not match the table's packed layout (for instance, a `BIGINT` cell in an `INT` column, or a mismatched column count)? Rather than complicating the packed binary format with per-cell type tags, `FlatRowStore.Add` stores that row's `CellValue[]` in a lazily created side `ConcurrentDictionary<int, CellValue[]>` and marks its status byte `StatusKeptApart = 2`. Ordinary rows pay nothing for the escape hatch; `StatusKeptApart` rows simply route through the general cell decoder.
+For streaming scans over serialized rows (including LSM SSTables), DataVo applies the same principle via **`RowRef`** (`DataVo.Core/Streaming/RowRef.cs`)—a stack-only `readonly ref struct` wrapping `ReadOnlySpan<byte>` that decodes cells on demand without heap allocations (see [Zero-Allocation Row Model](/manual/internals/zero-allocation-rows)).
 
-And for streaming scans over serialized rows (including LSM SSTables), DataVo exposes the same zero-copy philosophy through **`RowRef`** (`DataVo.Core/Streaming/RowRef.cs`)—a stack-only `readonly ref struct` wrapping `ReadOnlySpan<byte>` that decodes columns on demand via `BinaryPrimitives` without allocating per-row objects (see [Zero-Allocation Row Model](/manual/internals/zero-allocation-rows)).
+Compact memory alone still leaves hundreds of nanoseconds on the table if every lookup parses SQL, takes a table lock, or allocates a row dictionary—so the lookup path itself had to bypass all three.
 
 ---
 
 ## Tracing a 55 ns point lookup—and the 216 ns LSM fallback
 
-Having compact memory is only half the story. If a primary-key lookup still builds a SQL string, runs a parser, acquires a table read lock, and materializes a `Dictionary<string, object?>`, it will still burn hundreds of nanoseconds.
-
-Here is the exact execution path of the BenchmarkDotNet lookup in [PointLookupBenchmarks.cs](https://github.com/ArintonAkos/DataVo-DBMS/blob/master/benchmarks/DataVo.Benchmarks/PointLookupBenchmarks.cs):
+Here is the BenchmarkDotNet lookup in [PointLookupBenchmarks.cs](https://github.com/ArintonAkos/DataVo-DBMS/blob/master/benchmarks/DataVo.Benchmarks/PointLookupBenchmarks.cs):
 
 ```csharp
-// BenchmarkDotNet baseline call:
+// Intercepted at build time via [InterceptsLocation]:
 Player? found = _players.FirstOrDefault(id, static (p, key) => p.Id == key);
 ```
 
-At build time, `DataVoLinqInterceptorGenerator` intercepts that call site with `[InterceptsLocation]` and routes it to a generated singleton `DataVoLinqPlan<Player, int>` whose `TryGetIntegerKey` override extracts `key` directly without touching SQL or boxing parameters. At runtime, execution splits cleanly into two paths (Figure 3):
+At build time, `DataVo.Generators` intercepts that call site and routes it to a generated `DataVoLinqPlan<Player, int>` that extracts the integer primary key directly without building SQL or boxing parameters. At runtime, execution splits cleanly between the in-memory shortcut and the LSM disk path (Figure 3).
 
 <div class="sketch-diagram light-only">
 
-![Figure 3: 55 ns lock-free packed lookup versus 216 ns LSM fallback and ARM64 volatile memory ordering](/blog/part-2/fig-03-lookup-pipeline-and-liveness-light.svg)
+![Figure 3: 55 ns lock-free packed lookup versus 216 ns LSM clustered point path](/blog/part-2/fig-03-lookup-pipeline-and-liveness-light.svg)
 
 </div>
 <div class="sketch-diagram dark-only">
 
-![Figure 3: 55 ns lock-free packed lookup versus 216 ns LSM fallback and ARM64 volatile memory ordering](/blog/part-2/fig-03-lookup-pipeline-and-liveness-dark.svg)
+![Figure 3: 55 ns lock-free packed lookup versus 216 ns LSM clustered point path](/blog/part-2/fig-03-lookup-pipeline-and-liveness-dark.svg)
 
 </div>
 
-*Figure 3: The 55 ns lock-free `PackedKeyReader<T>` shortcut versus the 216 ns LSM `ClusteredPoint` path, and the ARM64 volatile ordering invariant.*
+*Figure 3: The 55 ns lock-free `PackedKeyReader<T>` shortcut versus the 216 ns LSM `ClusteredPoint` path.*
 
 ### Path A: In-memory `PackedKeyReader<T>` (55.0 ns, 56 B)
 
-When `DataVoLinqPlan.FirstOrDefault` calls `table.TryReadByIntegerKey(key, out item)`, `PackedKeyReader<T>` (`DataVo.Core/Tables/PackedKeyReader.cs`) first verifies a fast fail-closed guard (`MustUseStatement()`):
+When `DataVoLinqPlan.FirstOrDefault` calls `table.TryReadByIntegerKey(key, out item)`, `PackedKeyReader<T>` (`DataVo.Core/Tables/PackedKeyReader.cs`) first checks a fail-closed guard (`MustUseStatement()`): it steps aside if storage is not packed, authorization or diagnostics are enabled, or the session is inside an explicit transaction, MVCC snapshot, or active row write lock.
 
-- Is the backing storage packed (`HasPackedRows`)?
-- Are authorization and query diagnostics off?
-- Is this session outside an explicit transaction, MVCC snapshot, and active row write locks?
+Otherwise, it reads **without taking any lock**:
 
-If any guard fails, `PackedKeyReader<T>` immediately returns `false` and hands off to the prepared statement. Otherwise, **without taking any lock**:
+1. Probes the cached concurrent primary-key map (`ConcurrentInt64Int64Map`) for `key → rowId`.
+2. Borrows a `FlatRow` span at `position = (int)(rowId - 1)` via `rows.TryReadPacked(...)` and verifies `binding.KeyOf(row.Record) == key`.
+3. Wraps the span in a stack-only `DataVoPackedRow` `ref struct` and calls the generated `ReadPackedRow` delegate to populate `new Player { ... }` directly from fixed byte offsets.
+4. Verifies `rows.IsTypedLive(position)` **after** constructing `Player` so a concurrent delete can never return a torn or half-cleared row.
 
-1. It probes the cached `ConcurrentInt64Int64Map` (`_PK_players`) to map `key → rowId`.
-2. It borrows a `FlatRow` (`ReadOnlySpan<byte>` + `object?[] references` + `referenceBase`) at `position = (int)(rowId - 1)` via `rows.TryReadPacked(position, out FlatRow row)`.
-3. It checks `binding.KeyOf(row.Record) == key` to verify the cached index and layout binding are not stale.
-4. It wraps the `FlatRow` in a stack-only `DataVoPackedRow` `readonly ref struct` and invokes the source-generated `ReadPackedRow` delegate, which reads each column by precomputed offset directly into `new Player { ... }`.
-5. **After** constructing `Player`, it checks `rows.IsTypedLive(position) && source.Table.CurrentRows is not null`.
+<details>
+<summary>Under the hood: lock-free ARM64 liveness proof &amp; 56-byte allocation math</summary>
 
-Why does step 5 happen *after* reading the row, and why does it work on weakly ordered ARM64 processors like the Apple M4 Pro? <a class="cite-badge" href="#ref-4">4</a>
-
-Look closely at the bottom half of Figure 3. A packed row in `FlatRowStore` is immutable once published—its fixed-width bytes are never modified in place. The only concurrent mutation possible is **`FlatRowStore.Remove(index)`**, which marks the slot empty and nulls out its string/vector references so the GC can reclaim them:
+A packed row in `FlatRowStore` is immutable once published—its fixed-width bytes are never rewritten in place. The only concurrent mutation is **`FlatRowStore.Remove(index)`**, which writes the empty status byte *before* clearing managed references:
 
 ```csharp
 // Writer: DataVo.Core/StorageEngine/Memory/FlatRowStore.cs + RowLayout.cs
@@ -183,7 +165,7 @@ Layout.MarkEmpty(record);                   // 1. Volatile.Write(ref record[Stat
 FlatRowCodec.ClearReferences(Layout, ...);  // 2. Volatile.Write(ref references[base + slot], null)
 ```
 
-Meanwhile, `PackedKeyReader<T>.TryReadFrom` reads in the **exact opposite order**:
+`PackedKeyReader<T>.TryReadFrom` reads in the **exact opposite volatile order** <a class="cite-badge" href="#ref-4">4</a>:
 
 ```csharp
 // Reader: DataVo.Core/Tables/PackedKeyReader.cs
@@ -202,18 +184,22 @@ catch (Exception) when (!rows.IsTypedLive(position))
 return rows.IsTypedLive(position) && source.Table.CurrentRows is not null;
 ```
 
-Because the writer publishes `Status = Empty` with release semantics *before* clearing references, and the reader loads every reference with `Volatile.Read` *before* checking `IsTypedLive` (which reads `StatusOffset` with `Volatile.Read`), a reader that observes a cleared reference is guaranteed to also observe `Status = Empty`—even on weakly ordered ARM64 cores. If a delete raced with the lookup, the half-read `Player` is discarded and the call falls back cleanly to the prepared statement, which resolves whether the row exists.
+Because the writer issues a release store on `Status = Empty` before clearing `references`, and the reader issues acquire loads on every reference before checking `IsTypedLive`, any reader that sees a cleared reference is guaranteed to also see `Status = Empty`—even on weakly ordered ARM64 cores like the Apple M4 Pro. If a delete raced with the lookup, the partial object is discarded and the call falls back cleanly to the prepared statement.
 
-And where do the **56 bytes** of managed allocation come from on 64-bit .NET? They are the `Player` object itself: 16 B object header + MethodTable pointer + 8 B `Gold` + 8 B `Ratio` + 8 B `Name` reference + 4 B `Id` + 4 B `Level` + 1 B `Active` + 7 B alignment padding = **56 bytes**. The database engine allocates **0 bytes**.
+As for the **56 bytes** of managed heap allocation on 64-bit .NET, that is literally the `Player` instance itself: 16 B object/MethodTable header + 8 B `Gold` + 8 B `Ratio` + 8 B `Name` reference + 4 B `Id` + 4 B `Level` + 1 B `Active` + 7 B alignment padding = **56 B** (**0 B** engine overhead).
+
+</details>
 
 ### Path B: LSM file `ClusteredPoint` (216.2 ns, 144 B)
 
-When the database runs in `StorageMode.Lsm`, `_packedStorage` is `false`, so `PackedKeyReader<T>` steps aside immediately. `DataVoLinqPlan` fetches the cached `DataVoPreparedStatement` from its per-table slot and calls `statement.ExecuteBorrowed(p0)`:
+Under `StorageMode.Lsm`, `PackedKeyReader<T>` declines (`!_packedStorage`), so `DataVoLinqPlan` executes the slot's cached `DataVoPreparedStatement` via `ExecuteBorrowed(p0)`. Because `Player` has a single `INT` primary key, LSM stores rows **clustered** directly under that key—so `SelectAccessKind.ClusteredPoint` (`DataVoPreparedStatement.Plans.cs`) skips any secondary index hop and calls `LsmStorageEngine.TryVisitStoredRowByKey`.
 
-1. `DataVoPreparedStatement` dispatches to its cached schema-versioned `CompiledSelectPlan` (`SelectAccessKind.ClusteredPoint` in `DataVoPreparedStatement.Plans.cs`). Because `Player` has a single `INT` primary key, LSM stores rows **clustered** directly under that key—no secondary index hop.
-2. `TryExecuteClusteredPointSelect` calls `StorageContext.TryVisitRowByKey` → `LsmStorageEngine.TryVisitStoredRowByKey`.
-3. `LsmStorageEngine` first probes `table.LatestRows` (a lock-free concurrent overlay of unflushed/recent writes). If not present, it acquires an immutable `TableVersion`, probes memory-mapped SSTable V2 files (`SsTableV2Reader.Lookup` with blocked Bloom filters and binary search), and copies the serialized row bytes into a thread-local `_singleRowScratch` buffer.
-4. `VisitClusteredPointRow` decodes only the projected columns into a reusable thread-local `RowResultSlot`. To avoid allocating fresh boxed `int`, `long`, and `double` objects for every row dictionary entry, `RowResultSlot` reuses pre-allocated boxes in place (using `BoxedIntegerCache` for `-1..32767` and `Unsafe.Unbox<T>(box) = value` for everything else):
+`LsmStorageEngine` probes the lock-free `LatestRows` write overlay first, then acquires an immutable `TableVersion` to search memory-mapped SSTable V2 files (`SsTableV2Reader.Lookup`) into a thread-local `_singleRowScratch` buffer. `VisitClusteredPointRow` decodes only the projected columns into a reusable thread-local `RowResultSlot` (avoiding fresh primitive boxes), and `ReadRow` constructs `Player` (`56 B`) plus the decoded UTF-8 `Name` string (`~48–56 B`), totaling **144 B** and **216.2 ns**.
+
+<details>
+<summary>Under the hood: reusing boxed primitives in RowResultSlot</summary>
+
+When returning rows through `ExecuteBorrowed`, `RowResultSlot` (`DataVo.Core/PreparedStatements/DataVoPreparedStatement.Plans.cs`) avoids allocating fresh boxed `int`, `long`, `float`, `double`, and `Guid` objects on every lookup by reusing pre-allocated per-slot boxes in place (using `BoxedIntegerCache` for `-1..32767` and `Unsafe.Unbox<T>` for everything else):
 
 ```csharp
 // DataVo.Core/PreparedStatements/DataVoPreparedStatement.Plans.cs
@@ -226,11 +212,13 @@ public object BoxInt64(int ordinal, long value)
 }
 ```
 
-5. Finally, the generated `ReadRow` delegate unboxes those fields into a fresh `Player` (`56 B`) and receives the decoded UTF-8 `Name` string (`~48–56 B` for `"player-XXXXX"`), leaving **144 B** total allocation per lookup and **216.2 ns** mean latency.
+This is safe only because `ExecuteBorrowed` callers—such as generated `ReadRow` delegates—unbox every cell immediately before the next query executes on the same thread.
+
+</details>
 
 ### Cross-platform BenchmarkDotNet results
 
-Figure 6 (below) and the tables summarize the BenchmarkDotNet `PointLookupBenchmarks` and `FilteredAggregateBenchmarks` measurements across all three platforms (Apple M4 Pro local `02fa240f`, Linux x64 CI, and Windows x64 CI from run `44748508039`).
+Figure 6 and the table below summarize `PointLookupBenchmarks` across Apple M4 Pro (`02fa240f`), Linux x64 CI, and Windows x64 CI (run `44748508039`).
 
 <details>
 <summary>Test environments (Apple M4 Pro, Linux x64 CI, Windows x64 CI)</summary>
@@ -250,27 +238,25 @@ Figure 6 (below) and the tables summarize the BenchmarkDotNet `PointLookupBenchm
 | **Windows x64 CI** (`44748508039`) | **239.6 ns** | **666.9 ns** | 2,024.0 ns | 6,741.1 ns | 380,684 ns |
 | **Managed alloc / call** (64-bit .NET 10) | **56 B** | **144 B** | 608 B | 608 B | 2,144 B |
 
-*(Note: on the full-job 13 November M4 Pro run `ce818d4`, DataVo in-memory measured **52.1 ns** mean / **49.3 ns** median, ±2.3 ns error.)*
+*(On the full-job 13 November M4 Pro run `ce818d4`, DataVo in-memory measured **52.1 ns** mean / **49.3 ns** median, ±2.3 ns error.)*
 
 ![Figure 6: Cross-platform point-lookup latency and managed heap allocation per call](/blog/part-2/01-lookup-latency-and-alloc.png)
 
 *Figure 6: Primary-key point lookup latency across Apple M4 Pro, Linux x64 CI, and Windows x64 CI (Panel A), and managed heap allocation per operation for point lookups and filtered `COUNT(*)` (Panel B).*
 
-One caveat deserves repeating plainly: **this benchmark compares DataVo's build-time compiled LINQ path against SQLite and DuckDB over ADO.NET.** When all engines run raw SQL text prepared statements (`sql-workload` over 1,000,000 file-backed rows on the M4 Pro; see [Benchmark Results](/manual/performance/benchmarks#sql-over-1-000-000-rows)), DataVo's point lookup is **1.4 µs** (`INT` key) and **1.2 µs** (`GUID` key) versus SQLite's **2.0 µs** and **2.2 µs**—still faster, but a **1.4–1.8×** advantage rather than **7.7–13×**. The gap between `216 ns` and `1.4 µs` is the cost of owned-result materialization (`Execute` vs `ExecuteBorrowed`) and dictionary-based callers outside the generated reader path.
+One honest caveat: **this benchmark compares DataVo's build-time compiled LINQ path against SQLite and DuckDB over ADO.NET.** When all engines run raw SQL text prepared statements (`sql-workload` over 1,000,000 file-backed rows on the M4 Pro; see [Benchmark Results](/manual/performance/benchmarks#sql-over-1-000-000-rows)), DataVo takes **1.4 µs** (`INT` key) and **1.2 µs** (`GUID` key) versus SQLite's **2.0 µs** and **2.2 µs** (**1.4–1.8×** faster)—because raw SQL callers pay for owned `QueryResult` dictionaries rather than `ExecuteBorrowed`.
+
+Still, every path outside an in-memory integer key—including LSM lookups, parameterized SQL, and live reactive queries—relies on one shared prepared-statement engine that must stay safe under concurrency.
 
 ---
 
 ## Prepared statements, AST isolation, and the bridge to reactive views
 
-Not every query is a primary-key lookup, and not every team wants to express every query in LINQ. Underneath both raw SQL and generated LINQ sits **`DataVoPreparedStatement`** (`DataVo.Core/PreparedStatements/DataVoPreparedStatement.cs`).
-
-When you call `ctx.Prepare(sql)`, DataVo runs `Lexer` and `Parser` **once**, stores the resulting `List<SqlStatement>` template, and immediately runs `InitializeFastPathCandidates()` to classify eligible single-table `SELECT`, `UPDATE`, and `DELETE` shapes. On first execution against a database, it compiles and caches a schema-versioned `CompiledSelectPlan` (tagged with `Catalog.GetTableSchemaVersion`) so `ALTER TABLE` invalidates the plan automatically.
+Underneath both raw SQL and generated LINQ sits **`DataVoPreparedStatement`** (`DataVo.Core/PreparedStatements/DataVoPreparedStatement.cs`). Calling `ctx.Prepare(sql)` runs `Lexer` and `Parser` **once**, stores the template `List<SqlStatement>`, and runs `InitializeFastPathCandidates()` to classify eligible single-table `SELECT`, `UPDATE`, and `DELETE` shapes—caching a schema-versioned `CompiledSelectPlan` on first execution that automatically invalidates on `ALTER TABLE`.
 
 ### Why template ASTs are never mutated
 
-A subtle concurrency bug in many hand-rolled SQL engines is mutating parameter placeholder nodes in place during binding—which breaks as soon as two threads (or two standing subscriptions) share one prepared statement.
-
-DataVo prevents this structurally through **`SqlParameterBinder`** (`DataVo.Core/PreparedStatements/SqlParameterBinder.cs`). Whenever execution falls back to the general evaluator, or whenever a prepared statement seeds a reactive view, `SqlParameterBinder.BindStatement` performs a clean structural clone of the template AST and substitutes every `ParameterNode` (`@team`, `@k`, including inside `WHERE`, `SELECT`, CTEs, `HAVING`, and `LIMIT/OFFSET`) with immutable `BoundValueLiteralNode` or `NullLiteralNode` instances. The shared template inside `DataVoPreparedStatement` is strictly read-only after construction (Figure 4).
+Mutating parameter placeholder nodes in place during binding breaks concurrency as soon as two threads or two standing views share one prepared statement. DataVo prevents that structurally via **`SqlParameterBinder`** (`DataVo.Core/PreparedStatements/SqlParameterBinder.cs`): whenever execution falls back to the general evaluator or seeds a reactive view, `BindStatement` clones the template AST and replaces every `ParameterNode` (across `WHERE`, `SELECT`, CTEs, `HAVING`, and `LIMIT/OFFSET`) with immutable `BoundValueLiteralNode` or `NullLiteralNode` values, keeping the shared template strictly read-only (Figure 4).
 
 <div class="sketch-diagram light-only">
 
@@ -287,12 +273,7 @@ DataVo prevents this structurally through **`SqlParameterBinder`** (`DataVo.Core
 
 ### Owned vs. borrowed execution—and zero-reparse reactive subscriptions
 
-For point queries and tight loops, `DataVoPreparedStatement` exposes two execution modes:
-
-- **`Execute(...)`** copies out an owned `QueryResult` whose dictionaries and lists stay valid forever.
-- **`ExecuteBorrowed(...)`** returns the thread-local `RowResultSlot.HitResult` without copying—with 1-to-4 parameter stack-struct overloads (`TwoParams`, `ThreeParams`, `FourParams`) so passing parameters does not even allocate a `params[]` array. Because `RowResultSlot` overwrites its reused boxes on the next call on that thread, the caller must finish reading the row immediately (which generated code always does).
-
-That same AST-isolation pipeline feeds DataVo's Z-set incremental view engine <a class="cite-badge" href="#ref-7">7</a> directly via `BindSingleReactiveStatement`:
+`DataVoPreparedStatement` provides `Execute(...)` (returning an owned `QueryResult`) alongside `ExecuteBorrowed(...)`, which returns the thread-local `RowResultSlot.HitResult` and uses 1-to-4 parameter stack-struct overloads (`TwoParams`, `ThreeParams`, `FourParams`) to avoid `params[]` array allocations. That same AST-isolation pipeline feeds DataVo's Z-set incremental view engine <a class="cite-badge" href="#ref-7">7</a> through `BindSingleReactiveStatement`:
 
 ```csharp
 // Parse once, bind independently for multiple live views:
@@ -310,15 +291,17 @@ using var blueTop5 = ctx.Subscribe(
     ("team", "Blue"), ("k", 5));
 ```
 
-Before attaching any change-capture hook, `BindSingleReactiveStatement` validates that the prepared template contains exactly one `SELECT` statement, rejects unsupported constructs such as `DISTINCT` aggregates, clones an isolated AST bound to `("team", "Red"), ("k", 3)`, and hands that bound AST straight to `ReactiveRegistry`. Multi-tenant, per-room, or per-team views share one prepared SQL template with zero re-parsing and zero shared mutable state (see [Live Reactive Views (Z-set IVM)](/manual/client-interfaces/reactive-views)).
+Before attaching any capture hook, `BindSingleReactiveStatement` validates that the template holds a single `SELECT`, rejects unsupported constructs like `DISTINCT` aggregates, clones an isolated AST bound to each subscription's parameters, and passes it straight to `ReactiveRegistry` with zero SQL re-parsing (see [Live Reactive Views (Z-set IVM)](/manual/client-interfaces/reactive-views)).
+
+Preparing SQL once removes parse overhead, yet raw SQL still leaves schema discovery and typed object mapping to runtime—unless we move both into the C# compiler itself.
 
 ---
 
 ## Replacing runtime reflection and `Expression.Compile()` with Roslyn codegen
 
-Traditional .NET LINQ providers (`IQueryable<T>`) work by turning a lambda into a heap-allocated `Expression<Func<T, bool>>` tree, walking that tree at runtime, and compiling a mapper delegate via `Expression.Compile()` or `Reflection.Emit`. Under Native AOT, `Reflection.Emit` is unavailable, `Expression.Compile()` falls back to a slow interpreter, and reflection over arbitrary entity properties fights the IL trimmer <a class="cite-badge" href="#ref-6">6</a>.
+Traditional .NET LINQ providers turn lambdas into heap-allocated `Expression<Func<T, bool>>` trees, walk them at runtime, and compile mappers via `Expression.Compile()` or `Reflection.Emit`. Under Native AOT, `Reflection.Emit` is unavailable, `Expression.Compile()` drops to a slow interpreter, and reflection over arbitrary model properties fights the IL trimmer <a class="cite-badge" href="#ref-6">6</a>.
 
-`DataVo.Generators` takes the opposite approach: **ordinary `Func<...>` lambdas, zero `Expression` trees, and two Roslyn `IIncrementalGenerator`s** <a class="cite-badge" href="#ref-5">5</a> that move schema discovery, SQL generation, predicate compilation, and row materialization entirely to `csc` build time (Figure 5).
+`DataVo.Generators` flips that pipeline: it uses ordinary `Func<...>` lambdas, zero `Expression` trees, and two Roslyn `IIncrementalGenerator`s <a class="cite-badge" href="#ref-5">5</a> to move schema discovery, SQL generation, predicate compilation, and row materialization entirely to `csc` build time (Figure 5).
 
 <div class="sketch-diagram light-only">
 
@@ -335,7 +318,7 @@ Traditional .NET LINQ providers (`IQueryable<T>`) work by turning a lambda into 
 
 ### 1. `DataVoTableGenerator`: four readers, zero reflection
 
-When you mark a model with `[DataVoTable("players")]`, `DataVoTableGenerator` inspects the type once via `ForAttributeWithMetadataName` and emits `PlayerDataVoExtensions`. Rather than reflecting over properties at startup, it generates four concrete readers—one for every storage and reactive surface in the engine—and registers a `DataVoTableInfo<Player>` automatically via `[ModuleInitializer]`:
+Marking a model `[DataVoTable("players")]` triggers `DataVoTableGenerator` via `ForAttributeWithMetadataName` to emit `PlayerDataVoExtensions`, registering `DataVoTableInfo<Player>` automatically through `[ModuleInitializer]`. Instead of reflecting over properties at startup, it generates four specialized readers—`ReadRow`, `ReadStreamedRow`, `ReadPackedRow`, and `ReadReactiveRow`—with column ordinals baked into IL as compile-time constants:
 
 ```csharp
 // Simplified excerpt of what DataVoTableGenerator emits for Player:
@@ -364,13 +347,9 @@ private static Player ReadReactiveRow(in DataVo.Core.Runtime.Reactive.RowRef row
 }
 ```
 
-Notice there are no string-keyed dictionary lookups in either reader: column ordinals (`0` through `5`) are baked into the IL as compile-time constants. Alongside `ReadPackedRow` and `ReadReactiveRow`, the generator emits `ReadRow` (for prepared-statement results), `ReadStreamedRow` (for `DataVoRow`), `EnsurePlayerTable()`, `GetPlayerById(...)`, `Insert(...)`, and `Update(...)`, caching prepared statements per `(DataVoContext, SessionId)` in a `ConditionalWeakTable`.
-
 ### 2. `DataVoLinqInterceptorGenerator`: `[InterceptsLocation]` at every call site
 
-For LINQ-shaped calls on `DataVoTable<T>` (`FirstOrDefault`, `SingleOrDefault`, `Where`, `OrderBy`/`ThenBy`, `Select`, `Sum`, `Min`, `Max`, `ExecuteUpdate`), `DataVoLinqInterceptorGenerator` inspects the lambda's syntax and semantic model and emits a C# 12+ **interceptor** <a class="cite-badge" href="#ref-5">5</a> pointing at the exact source file and call-site location.
-
-For `_players.FirstOrDefault(id, static (p, key) => p.Id == key)`, Roslyn rewrites the call to invoke this generated interceptor directly—no closure, no expression tree, no runtime parsing:
+For LINQ-shaped calls on `DataVoTable<T>` (`FirstOrDefault`, `SingleOrDefault`, `Where`, `OrderBy`/`ThenBy`, `Select`, `Sum`, `Min`, `Max`, `ExecuteUpdate`), `DataVoLinqInterceptorGenerator` emits C# 12+ `[InterceptsLocation]` interceptors <a class="cite-badge" href="#ref-5">5</a> targeting each exact call site. For `_players.FirstOrDefault(id, static (p, key) => p.Id == key)`, Roslyn rewrites the call to invoke the generated plan directly:
 
 ```csharp
 // Simplified excerpt of what DataVoLinqInterceptorGenerator emits:
@@ -402,10 +381,10 @@ public static Player? FirstOrDefault0(
 }
 ```
 
-The same interceptor machinery pays off in two additional places beyond point lookups:
+Beyond point lookups, the same generator powers two other zero-allocation paths:
 
-- **Zero-allocation compiled scan kernels (`IRowRefFilter` / `IColumnarFilter`).** For predicates over fixed-width columns (`Where(50, static (p, min) => p.Level >= min).Count()`), `DataVoLinqEmitter` emits a value-type `struct Kernel : IRowRefFilter, IColumnarFilter`. Because the storage scan is generic over `TFilter : struct`, RyuJIT / Native AOT specializes the loop directly over the struct with zero delegate calls and zero row allocations. On 200,000 rows (`[Columnar]` on `Level`, `Gold`, `Ratio`), `Count`, `Sum`, `Min`, and `Max` run in **27.1–89.6 µs** on the M4 Pro (both in memory and on LSM) with **0 B** allocated on the managed heap—versus **504 B** for SQLite and **1,136–1,169 B** for DuckDB (Figure 6, Panel B; see [Compiled Scan Kernels](/manual/internals/compiled-scan-kernels)).
-- **Zero-allocation reactive HUD buffers (`SubscribeInto`).** When a composed query ends in `.Select(...)`, `DataVoLinqShapeEmitter` emits a value-type `RowRefProjector : IReactiveRowProjector<TProjection>` struct reading reactive `RowRef` cells by constant ordinal:
+- **Compiled scan kernels (`IRowRefFilter` / `IColumnarFilter`).** For predicates over fixed-width columns (`Where(50, static (p, min) => p.Level >= min).Count()`), `DataVoLinqEmitter` emits a value-type `struct Kernel`. Generic specialization across the storage loop eliminates delegate calls and row allocations, running `[Columnar]` `Count`, `Sum`, `Min`, and `Max` over 200,000 rows in **27.1–89.6 µs** with **0 B** heap allocation versus **504 B** for SQLite and **1,136–1,169 B** for DuckDB (Figure 6, Panel B; see [Compiled Scan Kernels](/manual/internals/compiled-scan-kernels)).
+- **Zero-allocation reactive HUD buffers (`SubscribeInto`).** When a composed query ends in `.Select(...)`, `DataVoLinqShapeEmitter` emits a value-type `IReactiveRowProjector<TProjection>` struct reading `RowRef` cells by constant ordinal into `BufferedWindowReactiveQuery`, updating a caller-owned `Memory<HudSlot>` slice on `DispatchPendingNotifications()` with **0 bytes** allocated in steady state:
 
 ```csharp
 public readonly record struct HudSlot(int Id, int Score);
@@ -419,27 +398,32 @@ using var sub = db.Table<Player>()
     .SubscribeInto(hud.AsMemory(), count => RenderHud(hud.AsSpan(0, count)));
 ```
 
-Underneath, `BufferedWindowReactiveQuery<HudSlot, RowRefProjector0>` keeps matching rows in a pre-allocated flat `CellValue` slab indexed by unboxed primary-key `CellValue`s and sorted in a dense `int[]` slot array. On `db.DispatchPendingNotifications()`, if the visible window `[Skip .. Skip + min(Take, destination.Length))` changed, it invokes the struct projector in place into `hud.AsSpan(0, count)` with **0 bytes allocated** on the managed heap in steady state.
-
 ### Transparent fallbacks when a lambda cannot compile
 
-A source generator that silently falls back to a slow full-table scan is a performance footgun; one that refuses to compile valid C# is frustrating. DataVo steers between the two: any uncompilable filter, sort key, or projection still executes and returns the exact right rows by streaming pages, while emitting an actionable build diagnostic:
+Any filter, sort key, or projection that the generator cannot translate still executes and returns exact results by streaming pages, while emitting a build diagnostic explaining why. Outside `[InterceptsLocation]`, emitted code stays within C# 9 so older compilers (such as Unity's) compile `[DataVoTable]` models cleanly and keep `Get<Model>ById` and prepared statements fast (see [Roslyn Source Generators](/manual/client-interfaces/source-generators)).
 
-- **`DATAVOL001`:** Lambda captures a local variable or instance member (pass it as `state` with a `static` lambda).
-- **`DATAVOL002`:** Predicate uses a construct with no compiled form (e.g., arbitrary method call, column-to-column comparison, or arithmetic).
-- **`DATAVOL003`:** Project has not enabled `<InterceptorsNamespaces>$(InterceptorsNamespaces);DataVo.Generated</InterceptorsNamespaces>`.
-- **`DATAVOL004`:** `OrderBy` key or `Select` projection runs in memory over whole models.
-- **`DATAVOL005` (error):** `ExecuteUpdate` cannot be compiled (it has no in-memory fallback, so failing at build time prevents a surprise `NotSupportedException` at runtime).
+<details>
+<summary>Compiler fallback diagnostics (DATAVOL001–DATAVOL005)</summary>
 
-Because `DataVo.Generators` emits strictly C# 9-compatible members outside the `[InterceptsLocation]` attribute, older toolchains without C# 12 interceptors (such as Unity's compiler) still compile `[DataVoTable]` models cleanly—falling back to streaming scans for LINQ lambdas while keeping `Get<Model>ById` and prepared statements fast (see [Roslyn Source Generators](/manual/client-interfaces/source-generators)).
+| Diagnostic | Severity | Meaning |
+| --- | --- | --- |
+| `DATAVOL001` | Warning | Lambda captures a local variable or instance member; pass it as `state` with a `static` lambda. |
+| `DATAVOL002` | Warning | Predicate uses an untranslatable construct (arbitrary method call, arithmetic, column-to-column comparison, or mismatched type). |
+| `DATAVOL003` | Warning | Project has not enabled `<InterceptorsNamespaces>$(InterceptorsNamespaces);DataVo.Generated</InterceptorsNamespaces>`. |
+| `DATAVOL004` | Warning | `OrderBy` key or `Select` selector runs in memory over whole models. |
+| `DATAVOL005` | **Error** | `ExecuteUpdate` cannot be compiled (it has no in-memory fallback, so failing at build time prevents a runtime `NotSupportedException`). |
+
+</details>
+
+Compile-time codegen removes runtime reflection from user queries, but single-binary deployment only holds if the database engine itself passes the Native AOT trimmer cleanly.
 
 ---
 
 ## Locking the Native AOT fence (184 warnings to zero)
 
-Declaring a library "Native AOT compatible" is easy; keeping it AOT-clean as features land every week is much harder. One casual `JsonSerializer.Serialize(obj)` without a `JsonSerializerContext`, one `Activator.CreateInstance`, or one `dynamic` dispatch can silently break trimming <a class="cite-badge" href="#ref-6">6</a>.
+Declaring a library "Native AOT compatible" is easy; keeping it trim-clean as features ship every week is harder. One unannotated `JsonSerializer.Serialize`, one `Activator.CreateInstance`, or one `dynamic` dispatch can break trimming <a class="cite-badge" href="#ref-6">6</a>.
 
-When we first enabled `<IsAotCompatible>true</IsAotCompatible>` on `DataVo.Core`, the Roslyn trim and AOT analyzers reported **184 diagnostics**. Rather than suppressing them with `[UnconditionalSuppressMessage]`, we ratcheted the baseline to zero in five discrete passes (recorded in `scripts/check-aot-baseline.sh`):
+When we first enabled `<IsAotCompatible>true</IsAotCompatible>` on `DataVo.Core`, the Roslyn trim and AOT analyzers reported **184 diagnostics**. Rather than hiding them behind `[UnconditionalSuppressMessage]`, we ratcheted the baseline down to zero across five passes (recorded in `scripts/check-aot-baseline.sh`):
 
 | Milestone | Remaining IL Warnings | What was eliminated |
 | --- | ---: | --- |
@@ -449,7 +433,7 @@ When we first enabled `<IsAotCompatible>true</IsAotCompatible>` on `DataVo.Core`
 | **T3 — Execution & planner JSON** | 76 | Migrated remaining Volcano / `Select` serialization paths to source-generated STJ |
 | **T4 + T5 — Dynamic dispatch & factories** | **0** | Eliminated all `dynamic`/DLR call sites and reflection `Activator` factories |
 
-Once the count reached zero, we locked both `DataVo.Core.csproj` and `DataVo.Data.csproj` permanently by promoting every trim and AOT analyzer code (`IL2026` through `IL3056`) to a compiler error:
+Once the count hit zero, we locked both `DataVo.Core.csproj` and `DataVo.Data.csproj` by promoting every trim and AOT analyzer code (`IL2026` through `IL3056`) to a build error:
 
 ```xml
 <!-- DataVo.Core/DataVo.Core.csproj -->
@@ -457,25 +441,22 @@ Once the count reached zero, we locked both `DataVo.Core.csproj` and `DataVo.Dat
 <WarningsAsErrors Condition="'$(TargetFramework)' == 'net10.0'">$(WarningsAsErrors);IL2026;IL2046;IL2055;IL2057;IL2070;IL2072;IL2075;IL2080;IL2087;IL2090;IL2091;IL2092;IL2093;IL3050;IL3051;IL3052;IL3053;IL3054;IL3055;IL3056</WarningsAsErrors>
 ```
 
-Two CI gates enforce this fence on every change:
+Two CI gates enforce this fence on every commit: `scripts/check-aot-baseline.sh` rebuilds both locked libraries in `Release`, and **`DataVo.AotSmoke`** publishes a standalone native executable (`<PublishAot>true</PublishAot>`, `<InvariantGlobalization>true</InvariantGlobalization>`) that runs dynamic SQL, `InsertTyped`, `SubscribeZeroAlloc`, ADO.NET (`DataVoConnection`/`DataVoDataReader`), `[DataVoTable]` registration, intercepted LINQ (`Where`, `OrderBy`, `Skip`, `Take`, `Select`, `ExecuteUpdate`, `ExecuteDelete`), `RowRefStream`, HNSW `Vector3` search, prepared-statement reactive views, and `SubscribeInto` inside a trimmed native binary. Only `DataVo.EntityFrameworkCore` sits outside this guarantee due to EF Core's own upstream AOT constraints (see [Native AOT](/manual/client-interfaces/native-aot)).
 
-1. **`scripts/check-aot-baseline.sh`** rebuilds `DataVo.Data` and `DataVo.Core` in `Release` mode, failing immediately if any new reflection or dynamic-code warning appears.
-2. **`DataVo.AotSmoke`** (`DataVo.AotSmoke/DataVo.AotSmoke.csproj`) publishes a real standalone native executable with `<PublishAot>true</PublishAot>` and `<InvariantGlobalization>true</InvariantGlobalization>`, then executes it to verify dynamic SQL, `InsertTyped`, `SubscribeZeroAlloc`, `DataVoConnection` / `DataVoDataReader` (ADO.NET), `[DataVoTable]` module-initializer registration, intercepted `Where` / `OrderBy` / `Skip` / `Take` / `Select` / `ExecuteUpdate` / `ExecuteDelete`, `RowRefStream`, `Vector3` HNSW nearest-neighbor search, prepared-statement reactive subscriptions, and zero-allocation `SubscribeInto` inside a trimmed native binary.
-
-One boundary stays explicit: **`DataVo.EntityFrameworkCore` is outside this Native AOT guarantee.** EF Core brings its own upstream AOT and trimming constraints, so AOT-targeted deployments use `DataVo.Core`, `DataVo.Data`, and `DataVo.Generators` directly (see [Native AOT](/manual/client-interfaces/native-aot)).
+Every shortcut and AOT guarantee described so far shifts complexity from runtime into architecture—so before adopting them, it is worth tallying the real cost.
 
 ---
 
 ## What this cost in complexity—and where it stops paying off
 
-In Part 1, I promised that Part 2 would explain not only how a 55 ns lookup is built, but **what it cost in complexity**. Stripping 660 nanoseconds out of a lookup is not free magic; it shifts work from runtime into architecture, invariants, and maintenance. Four real costs stand out:
+In Part 1, I promised that Part 2 would explain not only how a 55 ns lookup is built, but **what it cost in complexity**. Shaving 660 nanoseconds out of a lookup shifts work into invariants, concurrency subtleties, and surface constraints:
 
-1. **Dual-path parity is an ongoing tax.** `PackedKeyReader<T>`, `CompiledSelectPlan`, `IRowRefFilter`, and the general SQL evaluator are four different ways to answer queries over the same table. Every shortcut must be strictly fail-closed: if a transaction is open, a schema version bumped, a row is `StatusKeptApart`, or a `FLOAT` sum on LSM might reorder floating-point rounding, the fast path must decline cleanly and let the general path produce the exact SQL result. Maintaining bit-for-bit parity across those paths is why Part 6's differential oracle became indispensable.
-2. **Low-level concurrency and lifetime hazards.** Lock-free reads over `FlatRowStore` rely on exact `Volatile.Write` / `Volatile.Read` pairing across ARM64 and x64 memory models. Likewise, `ExecuteBorrowed` and `RowResultSlot`'s `Unsafe.Unbox<T>` box reuse are safe *only* because generated readers consume every cell before returning—exposing borrowed mutable boxes carelessly to application code would cause silent action-at-a-distance bugs if a caller stored a reference to a row dictionary across calls.
-3. **Compile-time surface limits.** Roslyn interceptors require C# 12+ and `static` lambdas with explicit state arguments (to avoid heap closures). They compile single-table predicates, sorts, paging, projections, aggregates, and bulk updates—they do **not** compile joins, `GROUP BY`, `DISTINCT`, or arbitrary vector expressions, which remain SQL territory. Even on `DataVoTable<T>`, moving a `string` column *before* fixed-width columns in your model disables the fixed-offset byte-scan optimization in `RowRef` kernels because variable-width text shifts subsequent cell offsets.
-4. **Amdahl's Law still rules disk durability.** Shaving a point lookup from `1,654 ns` to `216 ns` matters enormously in a 60 FPS game loop, a local telemetry pipeline, or a 100k-ops/sec read cache. It matters **almost nothing** on a durable write waiting for an SSD to flush. As we saw in Part 1, once `LsmStrictFsync = true` hits an Apple APFS SSD or Windows `FlushFileBuffers`, both DataVo and SQLite sit at the exact same **~4.0 ms** wall—roughly **72,000×** longer than our 55 ns lookup.
+1. **Dual-path parity is an ongoing tax.** `PackedKeyReader<T>`, `CompiledSelectPlan`, `IRowRefFilter`, and the general SQL evaluator are four distinct execution paths over the same tables. Every shortcut must fail closed—if a transaction is open, a schema version changed, a row is `StatusKeptApart`, or a `FLOAT` sum on LSM might reorder rounding, the fast path must decline cleanly so the general evaluator produces exact SQL semantics. Keeping those paths bit-for-bit identical is why Part 6's differential oracle became essential.
+2. **Lock-free ordering and borrowed lifetimes.** Optimistic reads over `FlatRowStore` rely on exact `Volatile.Write` / `Volatile.Read` pairing on weakly ordered CPUs. Likewise, `RowResultSlot`'s `Unsafe.Unbox<T>` box reuse in `ExecuteBorrowed` is safe *only* because generated readers unbox immediately before returning—exposing borrowed mutable boxes carelessly to callers would invite silent aliasing bugs.
+3. **Compile-time surface limits.** Roslyn interceptors require C# 12+ and `static` lambdas with explicit state arguments. They compile single-table predicates, sorts, paging, projections, aggregates, and bulk updates—not joins, `GROUP BY`, `DISTINCT`, or arbitrary vector expressions, which remain SQL territory. Even on `DataVoTable<T>`, placing a `string` column *before* fixed-width columns disables fixed-offset byte-scan kernels because variable-width text shifts subsequent cell offsets.
+4. **Amdahl's Law still rules disk durability.** Dropping a lookup from `1,654 ns` to `216 ns` transforms a 60 FPS game loop, telemetry pipeline, or high-QPS read cache. It barely registers on a durable write waiting for an SSD to flush: once `LsmStrictFsync = true` hits Apple's APFS SSD or Windows `FlushFileBuffers`, both DataVo and SQLite hit the exact same **~4.0 ms** wall—roughly **72,000×** longer than a 55 ns lookup.
 
-Choosing the right API layer follows directly from those boundaries (see [Choosing an Interface](/manual/getting-started/choosing-an-interface)): use `[DataVoTable]` + compiled LINQ for hot single-table lookups, aggregates, and HUD windows; use `ctx.Prepare(...)` for parameterized SQL, joins, and multi-tenant reactive views; and use `DataVo.Data` / Dapper when ADO.NET ecosystem compatibility matters more than shaving the last few hundred nanoseconds.
+In practice, let your workload pick the interface (see [Choosing an Interface](/manual/getting-started/choosing-an-interface)): use `[DataVoTable]` + compiled LINQ for hot single-table lookups, aggregates, and HUD windows; use `ctx.Prepare(...)` for parameterized SQL, joins, and multi-tenant reactive views; and use `DataVo.Data` / Dapper when ADO.NET ecosystem compatibility matters more than shaving the last few hundred nanoseconds.
 
 > [!TIP]
 > Follow the repository at [`ArintonAkos/DataVo-DBMS`](https://github.com/ArintonAkos/DataVo-DBMS) to inspect `FlatRowStore`, `PackedKeyReader<T>`, `DataVo.Generators`, and `DataVo.AotSmoke` directly—or star the repo to catch Parts 3–7.

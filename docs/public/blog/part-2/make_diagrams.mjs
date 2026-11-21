@@ -191,63 +191,63 @@ function createCanvas(width, height, ariaLabel, theme) {
 function fig01(theme) {
   const c = createCanvas(
     780,
-    318,
+    330,
     "Figure 1 — SQLite managed-to-native P/Invoke boundary versus DataVo single managed compilation unit",
     theme
   );
 
   // Left: SQLite via ADO.NET / Dapper
-  c.text(20, 26, "SQLite via ADO.NET / Dapper", { size: 14, weight: 600, anchor: "start" });
+  c.text(20, 26, "SQLite via ADO.NET", { size: 14, weight: 600, anchor: "start" });
 
-  c.box(20, 44, 332, 38);
-  c.text(186, 68, ".NET App + SqliteCommand / Reader", { size: 12.5, weight: 600 });
+  c.box(20, 46, 330, 40);
+  c.text(185, 71, ".NET App + SqliteCommand", { size: 13, weight: 600 });
 
-  c.arrow(186, 82, 186, 114, { muted: true });
-  c.text(196, 102, "marshal params (608 B)", { mono: true, size: 10.5, anchor: "start", muted: true });
+  c.arrow(185, 86, 185, 118, { muted: true });
+  c.text(196, 106, "608 B managed alloc", { mono: true, size: 11, anchor: "start", muted: true });
 
   // Interop wall
-  c.line(20, 120, 352, 120, { dashed: true, faint: true });
-  c.text(186, 134, "P/Invoke ABI boundary (JIT cannot inline)", { size: 11, muted: true });
+  c.line(20, 124, 350, 124, { dashed: true, faint: true });
+  c.text(185, 139, "P/Invoke ABI boundary (no inlining)", { size: 11.2, muted: true });
 
-  c.box(20, 144, 332, 38, { dashed: true, muted: true });
-  c.text(186, 168, "sqlite3_bind_* → sqlite3_step() (C VM)", { mono: true, size: 11.5, muted: true });
+  c.box(20, 150, 330, 40, { dashed: true, muted: true });
+  c.text(185, 175, "sqlite3_bind_* → sqlite3_step()", { mono: true, size: 12, muted: true });
 
-  c.arrow(186, 182, 186, 200, { muted: true });
+  c.arrow(185, 190, 185, 208, { muted: true });
 
-  c.box(20, 200, 332, 38, { dashed: true, muted: true });
-  c.text(186, 224, "sqlite3_column_* + UTF-8 → UTF-16 decode", { mono: true, size: 11.5, muted: true });
+  c.box(20, 208, 330, 40, { dashed: true, muted: true });
+  c.text(185, 233, "sqlite3_column_* + UTF-8 decode", { mono: true, size: 12, muted: true });
 
-  c.box(20, 254, 332, 32, { dashed: true, muted: true });
-  c.text(186, 275, "715.7 ns (mem) · 1,654 ns (file) · 608 B", { mono: true, size: 11.5, muted: true });
+  c.box(20, 264, 330, 34, { dashed: true, muted: true });
+  c.text(185, 286, "715.7 ns (mem) · 1,654 ns (file)", { mono: true, size: 12, muted: true });
 
-  c.text(20, 306, "Native .dll/.so/.dylib per OS; FFI tax on every row.", { size: 11.5, anchor: "start", muted: true });
+  c.text(20, 318, "Native binaries per OS; FFI tax on every row.", { size: 11.5, anchor: "start", muted: true });
 
   // Vertical divider
-  c.line(376, 16, 376, 306, { dashed: true, faint: true });
+  c.line(376, 16, 376, 316, { dashed: true, faint: true });
 
   // Right: DataVo single JIT / AOT compilation unit
-  c.text(400, 26, "DataVo (one JIT / AOT compilation unit)", { size: 14, weight: 600, anchor: "start" });
+  c.text(400, 26, "DataVo (one managed compilation unit)", { size: 14, weight: 600, anchor: "start" });
 
-  c.box(400, 44, 360, 194);
-  c.box(416, 58, 328, 36);
-  c.text(580, 81, "db.Table<Player>().FirstOrDefault(...)", { mono: true, size: 11.5, weight: 600 });
+  c.box(400, 46, 360, 202);
+  c.box(418, 60, 324, 38);
+  c.text(580, 84, "db.Table<Player>().FirstOrDefault(...)", { mono: true, size: 11.8, weight: 600 });
 
-  c.arrow(580, 94, 580, 118);
-  c.text(590, 110, "[InterceptsLocation]", { mono: true, size: 10.5, anchor: "start", muted: true });
+  c.arrow(580, 98, 580, 124);
+  c.text(592, 115, "[InterceptsLocation]", { mono: true, size: 11, anchor: "start", muted: true });
 
-  c.box(416, 118, 328, 38, { hatch: true });
-  c.text(580, 142, "PackedKeyReader<Player> (inlined)", { size: 12.5, weight: 600 });
+  c.box(418, 124, 324, 40, { hatch: true });
+  c.text(580, 149, "PackedKeyReader<Player>", { size: 13, weight: 600 });
 
-  c.arrow(580, 156, 580, 180);
-  c.text(590, 172, "ReadOnlySpan<byte> + ref", { mono: true, size: 10.5, anchor: "start", muted: true });
+  c.arrow(580, 164, 580, 190);
+  c.text(592, 181, "ReadOnlySpan<byte>", { mono: true, size: 11, anchor: "start", muted: true });
 
-  c.box(416, 180, 328, 42, { hatch: true });
-  c.text(580, 206, "FlatRowStore (64-byte aligned POH)", { size: 12.5, weight: 600 });
+  c.box(418, 190, 324, 42, { hatch: true });
+  c.text(580, 216, "FlatRowStore (64 B aligned)", { size: 13, weight: 600 });
 
-  c.box(400, 254, 360, 32, { hatch: true });
-  c.text(580, 275, "55.0 ns (mem) · 56 B (= Player object)", { mono: true, size: 12, weight: 600 });
+  c.box(400, 264, 360, 34, { hatch: true });
+  c.text(580, 286, "55.0 ns (mem) · 56 B (= Player)", { mono: true, size: 12.2, weight: 600 });
 
-  c.text(400, 306, "Zero native binaries · zero marshalling · 0 B engine overhead.", { size: 11.5, anchor: "start", muted: true });
+  c.text(400, 318, "Zero native binaries · zero marshalling.", { size: 11.5, anchor: "start", muted: true });
 
   return c.render();
 }
@@ -263,81 +263,70 @@ function fig02(theme) {
     theme
   );
 
-  c.text(20, 26, "FlatRowStore record for Player (32 B fixed record + 1 ref slot)", {
+  c.text(20, 26, "FlatRowStore record for Player (32 B fixed + 1 ref slot)", {
     size: 14,
     weight: 600,
     anchor: "start",
   });
-  c.text(20, 46, "64-byte aligned FlatChunk (4,096 slots on Pinned Object Heap) · widest-first alignment", {
+  c.text(20, 47, "64-byte aligned chunk (4,096 slots on Pinned Object Heap) · widest-first alignment", {
     size: 11.5,
     anchor: "start",
     muted: true,
   });
 
-  // Main 32-byte record bar: x=20..760 (w=740), y=62..124 (h=62)
-  const y0 = 62;
-  const h0 = 62;
+  // Main 32-byte record bar: x=20..760 (w=740), y=66..130 (h=64)
+  const y0 = 66;
+  const h0 = 64;
   const cells = [
-    { x: 20, w: 164, title: "Gold (long)", off: "0..7 (8 B)", hatch: true },
-    { x: 184, w: 164, title: "Ratio (double)", off: "8..15 (8 B)", hatch: true },
+    { x: 20, w: 164, title: "Gold (long)", off: "0..7", hatch: true },
+    { x: 184, w: 164, title: "Ratio (double)", off: "8..15", hatch: true },
     { x: 348, w: 94, title: "Id (int)", off: "16..19", hatch: true },
     { x: 442, w: 94, title: "Level", off: "20..23", hatch: true },
     { x: 536, w: 50, title: "Act", off: "24", hatch: false },
     { x: 586, w: 52, title: "Stat", off: "25", hatch: false },
     { x: 638, w: 52, title: "Null", off: "26", hatch: false },
-    { x: 690, w: 70, title: "Pad 5B", off: "27..31", hatch: false, dashed: true, muted: true },
+    { x: 690, w: 70, title: "Pad", off: "27..31", hatch: false, dashed: true, muted: true },
   ];
 
-  // Outer hachure on fixed-width values 0..23
   c.box(20, y0, 516, h0, { hatch: true });
-  // Status/Act/Null cells
   c.box(536, y0, 154, h0);
-  // Pad cell
   c.box(690, y0, 70, h0, { dashed: true, muted: true });
 
-  // Vertical separators inside record
   for (const sep of [184, 348, 442, 586, 638]) {
     c.line(sep, y0, sep, y0 + h0);
   }
 
   for (const cell of cells) {
     const cx = cell.x + cell.w / 2;
-    c.text(cx, y0 + 27, cell.title, {
-      size: 12,
+    c.text(cx, y0 + 28, cell.title, {
+      size: 12.2,
       weight: cell.muted ? 400 : 600,
       muted: !!cell.muted,
     });
-    c.text(cx, y0 + 48, cell.off, {
+    c.text(cx, y0 + 49, cell.off, {
       mono: true,
-      size: 10.5,
+      size: 11,
       muted: true,
     });
   }
 
-  // Three bottom callout boxes (no crossing arrows)
-  // Left: ReferenceDirectory
-  c.box(20, 162, 240, 72);
-  c.text(140, 184, "ReferenceDirectory (parallel)", { size: 12, weight: 600 });
-  c.text(140, 204, "slot 0 → string Name", { mono: true, size: 11.5 });
-  c.text(140, 223, "Volatile.Read on load · same row idx", { size: 10.5, muted: true });
+  // Three crisp bottom callout boxes (2 lines each for breathing room)
+  c.box(20, 168, 232, 66);
+  c.text(136, 194, "ReferenceDirectory", { size: 12.5, weight: 600 });
+  c.text(136, 216, "slot 0 → string Name", { mono: true, size: 11.5, muted: true });
 
-  // Middle: Memory comparison
-  c.box(280, 162, 220, 72, { hatch: true });
-  c.text(390, 184, "Retained memory (13× drop)", { size: 12, weight: 600 });
-  c.text(390, 205, "640.3 B → 49.2 B / row", { mono: true, size: 11.5, weight: 600 });
-  c.text(390, 223, "(shared strings; 145.3 B unique)", { size: 10.5, muted: true });
+  c.box(274, 168, 232, 66, { hatch: true });
+  c.text(390, 194, "13× smaller footprint", { size: 12.5, weight: 600 });
+  c.text(390, 216, "640.3 B → 49.2 B / row", { mono: true, size: 11.5, weight: 600 });
 
-  // Right: Status + NullBits + KeptApart escape hatch
-  c.box(520, 162, 240, 72, { dashed: true });
-  c.text(640, 184, "Status @ 25 · NullBits @ 26", { size: 12, weight: 600 });
-  c.text(640, 204, "0=Empty 1=Packed 2=KeptApart", { mono: true, size: 10.8 });
-  c.text(640, 223, "Side spill map only if Status = 2", { size: 10.5, muted: true });
+  c.box(528, 168, 232, 66, { dashed: true });
+  c.text(644, 194, "Status @ 25 · Null @ 26", { size: 12.5, weight: 600 });
+  c.text(644, 216, "0=Empty · 1=Packed · 2=Spill", { mono: true, size: 11, muted: true });
 
-  // Vertical arrows from Status & NullBits down to right callout
-  c.arrow(612, 124, 612, 160);
-  c.arrow(664, 124, 664, 160, { muted: true });
+  c.arrow(612, 130, 612, 166);
+  c.arrow(664, 130, 664, 166, { muted: true });
 
-  c.text(20, 260, "Every fixed-width column sits on a multiple of its own width; string/vector references sit in a parallel chunk array.", {
+  c.text(20, 260, "Fixed-width columns sit on natural alignment boundaries; string and vector references sit in a parallel chunk array.", {
     size: 11.5,
     anchor: "start",
     muted: true,
@@ -347,122 +336,86 @@ function fig02(theme) {
 }
 
 // =============================================================================
-// Figure 3: Dual Lookup Pipeline (55 ns vs 216 ns) + ARM64 Lock-Free Ordering
+// Figure 3: Dual Lookup Pipeline (55 ns In-Memory vs. 216 ns LSM Fallback)
 // =============================================================================
 function fig03(theme) {
   const c = createCanvas(
     780,
-    364,
-    "Figure 3 — 55 ns lock-free packed lookup versus 216 ns LSM fallback and ARM64 volatile memory ordering",
+    240,
+    "Figure 3 — 55 ns lock-free packed lookup versus 216 ns LSM clustered point path",
     theme
   );
 
   // Entry box
-  c.box(20, 76, 134, 54);
-  c.text(87, 99, "FirstOrDefault", { size: 12.5, weight: 600 });
-  c.text(87, 117, "p.Id == id", { mono: true, size: 11.5, muted: true });
+  c.box(20, 82, 134, 58);
+  c.text(87, 106, "FirstOrDefault", { size: 13, weight: 600 });
+  c.text(87, 126, "p.Id == id", { mono: true, size: 11.5, muted: true });
 
-  c.arrow(154, 103, 184, 103);
+  c.arrow(154, 111, 184, 111);
 
   // Diamond: Packed?
-  c.diamond(232, 103, 46, 34);
-  c.text(232, 107, "Packed?", { size: 12, weight: 600 });
+  c.diamond(232, 111, 46, 36);
+  c.text(232, 115, "Packed?", { size: 12.2, weight: 600 });
 
   // Upper branch (yes -> InMemory 55 ns)
   c.polyArrow(
     [
-      [232, 69],
-      [232, 46],
-      [296, 46],
+      [232, 75],
+      [232, 48],
+      [296, 48],
     ],
     {}
   );
   c.text(264, 38, "yes", { mono: true, size: 11.5 });
 
-  c.box(300, 20, 146, 52);
-  c.text(373, 42, "PackedKeyReader", { size: 12, weight: 600 });
-  c.text(373, 60, "PK map → slot", { mono: true, size: 11, muted: true });
+  c.box(300, 20, 146, 56);
+  c.text(373, 44, "PackedKeyReader", { size: 12.5, weight: 600 });
+  c.text(373, 64, "PK map → slot", { mono: true, size: 11.2, muted: true });
 
-  c.arrow(446, 46, 468, 46);
+  c.arrow(446, 48, 468, 48);
 
-  c.box(472, 20, 138, 52, { hatch: true });
-  c.text(541, 42, "ReadPackedRow", { size: 12, weight: 600 });
-  c.text(541, 60, "DataVoPackedRow", { mono: true, size: 10.5, muted: true });
+  c.box(472, 20, 138, 56, { hatch: true });
+  c.text(541, 44, "ReadPackedRow", { size: 12.5, weight: 600 });
+  c.text(541, 64, "inlined offsets", { mono: true, size: 11, muted: true });
 
-  c.arrow(610, 46, 632, 46);
+  c.arrow(610, 48, 632, 48);
 
-  c.box(636, 20, 124, 52, { hatch: true });
-  c.text(698, 42, "55.0 ns", { mono: true, size: 12.5, weight: 600 });
-  c.text(698, 60, "56 B · no lock", { mono: true, size: 10.8, muted: true });
+  c.box(636, 20, 124, 56, { hatch: true });
+  c.text(698, 44, "55.0 ns", { mono: true, size: 13, weight: 600 });
+  c.text(698, 64, "56 B · no lock", { mono: true, size: 11, muted: true });
 
   // Lower branch (no -> LSM File / Tx 216 ns)
   c.polyArrow(
     [
-      [232, 137],
-      [232, 160],
-      [296, 160],
+      [232, 147],
+      [232, 174],
+      [296, 174],
     ],
     { dashed: true, muted: true }
   );
-  c.text(264, 152, "no / LSM", { mono: true, size: 10.8, muted: true });
+  c.text(264, 165, "no / LSM", { mono: true, size: 11, muted: true });
 
-  c.box(300, 134, 146, 52);
-  c.text(373, 156, "PreparedStmt", { size: 12, weight: 600 });
-  c.text(373, 174, "ExecuteBorrowed", { mono: true, size: 10.8, muted: true });
+  c.box(300, 146, 146, 56);
+  c.text(373, 170, "PreparedStmt", { size: 12.5, weight: 600 });
+  c.text(373, 190, "ExecuteBorrowed", { mono: true, size: 11, muted: true });
 
-  c.arrow(446, 160, 468, 160, { muted: true });
+  c.arrow(446, 174, 468, 174, { muted: true });
 
-  c.box(472, 134, 138, 52);
-  c.text(541, 156, "ClusteredPoint", { size: 12 });
-  c.text(541, 174, "Latest / mmap", { mono: true, size: 10.8, muted: true });
+  c.box(472, 146, 138, 56);
+  c.text(541, 170, "ClusteredPoint", { size: 12.5 });
+  c.text(541, 190, "Latest / mmap", { mono: true, size: 11, muted: true });
 
-  c.arrow(610, 160, 632, 160, { muted: true });
+  c.arrow(610, 174, 632, 174, { muted: true });
 
-  c.box(636, 134, 124, 52, { dashed: true });
-  c.text(698, 156, "216.2 ns", { mono: true, size: 12.5, weight: 600 });
-  c.text(698, 174, "144 B · slot box", { mono: true, size: 10.5, muted: true });
-
-  // Divider before ARM64 memory-ordering panel
-  c.line(20, 208, 760, 208, { dashed: true, faint: true });
-
-  c.text(20, 232, "Lock-free optimistic read vs. concurrent delete (weakly ordered ARM64 / M4 Pro)", {
-    size: 13,
-    weight: 600,
-    anchor: "start",
-  });
-
-  // Writer lane (left)
-  c.text(20, 254, "Writer (FlatRowStore.Remove)", { size: 11.5, weight: 600, anchor: "start", muted: true });
-  c.box(20, 264, 158, 48);
-  c.text(99, 285, "1. Volatile.Write", { mono: true, size: 11, weight: 600 });
-  c.text(99, 302, "Status = Empty", { mono: true, size: 11, muted: true });
-
-  c.arrow(178, 288, 200, 288);
-
-  c.box(204, 264, 158, 48);
-  c.text(283, 285, "2. Volatile.Write", { mono: true, size: 11, weight: 600 });
-  c.text(283, 302, "refs[slot] = null", { mono: true, size: 11, muted: true });
-
-  // Vertical mini divider
-  c.line(384, 248, 384, 318, { dashed: true, faint: true });
-
-  // Reader lane (right)
-  c.text(406, 254, "Reader (PackedKeyReader.TryReadFrom)", { size: 11.5, weight: 600, anchor: "start", muted: true });
-  c.box(406, 264, 162, 48);
-  c.text(487, 285, "1. Volatile.Read", { mono: true, size: 11, weight: 600 });
-  c.text(487, 302, "copy fields + refs", { mono: true, size: 11, muted: true });
-
-  c.arrow(568, 288, 590, 288);
-
-  c.box(594, 264, 166, 48, { hatch: true });
-  c.text(677, 285, "2. Volatile.Read", { mono: true, size: 11, weight: 600 });
-  c.text(677, 302, "IsTypedLive() ?", { mono: true, size: 11 });
+  c.box(636, 146, 124, 56, { dashed: true });
+  c.text(698, 170, "216.2 ns", { mono: true, size: 13, weight: 600 });
+  c.text(698, 190, "144 B · slot box", { mono: true, size: 11, muted: true });
 
   c.text(
     20,
-    346,
-    "Opposite volatile order guarantees: any reader that observes a cleared ref also observes Status=Empty and retries via statement.",
-    { size: 11.2, anchor: "start", muted: true }
+    228,
+    "In-memory reads bypass SQL and locks; LSM, transactions, and misses fall back cleanly to the prepared statement.",
+    { size: 11.5, anchor: "start", muted: true }
   );
 
   return c.render();
@@ -481,17 +434,16 @@ function fig04(theme) {
 
   // Left: Shared immutable template
   c.box(20, 74, 198, 96, { hatch: true });
-  c.text(119, 98, "DataVoPreparedStatement", { size: 12.2, weight: 600 });
-  c.text(119, 118, "SELECT Id, Name, Score", { mono: true, size: 10.5 });
-  c.text(119, 134, "WHERE Team=@t LIMIT @k", { mono: true, size: 10.5 });
-  c.text(119, 155, "parsed once · immutable AST", { size: 10.5, muted: true });
+  c.text(119, 100, "PreparedStatement", { size: 12.8, weight: 600 });
+  c.text(119, 124, "WHERE Team=@t LIMIT @k", { mono: true, size: 11 });
+  c.text(119, 148, "parsed once · read-only", { size: 11, muted: true });
 
   c.arrow(218, 122, 246, 122);
 
   // Middle: SqlParameterBinder
   c.box(250, 88, 146, 68);
-  c.text(323, 116, "SqlParameterBinder", { size: 12, weight: 600 });
-  c.text(323, 136, "clone + bind AST", { mono: true, size: 11, muted: true });
+  c.text(323, 117, "SqlParameterBinder", { size: 12.2, weight: 600 });
+  c.text(323, 138, "clone + bind AST", { mono: true, size: 11, muted: true });
 
   // Fan-out to 3 isolated consumers
   c.polyArrow([
@@ -508,25 +460,25 @@ function fig04(theme) {
     [440, 198],
   ]);
 
-  // Consumer 1: Point / prepared execution
+  // Consumer 1
   c.box(444, 18, 316, 56);
-  c.text(602, 40, "Thread A · ExecuteBorrowed((t,\"Red\"), (k,1))", { mono: true, size: 10.8, weight: 600 });
-  c.text(602, 59, "Fast-path plan → thread-local RowResultSlot", { size: 11, muted: true });
+  c.text(602, 42, "Thread A · ExecuteBorrowed", { size: 12.5, weight: 600 });
+  c.text(602, 61, "Team='Red', k=1 · thread-local slot", { mono: true, size: 11, muted: true });
 
-  // Consumer 2: Borrowed reactive view
+  // Consumer 2
   c.box(444, 94, 316, 56, { hatch: true });
-  c.text(602, 116, "SubscribeZeroAlloc(stmt, (t,\"Red\"), (k,3))", { mono: true, size: 10.8, weight: 600 });
-  c.text(602, 135, "Isolated AST #1 → TopKReactiveQuery (QueryChangeRef)", { size: 10.8, muted: true });
+  c.text(602, 118, "SubscribeZeroAlloc", { size: 12.5, weight: 600 });
+  c.text(602, 137, "AST #1 (Red, k=3) → QueryChangeRef", { mono: true, size: 11, muted: true });
 
-  // Consumer 3: Owned reactive view
+  // Consumer 3
   c.box(444, 170, 316, 56);
-  c.text(602, 192, "Subscribe(stmt, (t,\"Blue\"), (k,5))", { mono: true, size: 10.8, weight: 600 });
-  c.text(602, 211, "Isolated AST #2 → TopKReactiveQuery (QueryChange)", { size: 10.8, muted: true });
+  c.text(602, 194, "Subscribe", { size: 12.5, weight: 600 });
+  c.text(602, 213, "AST #2 (Blue, k=5) → QueryChange", { mono: true, size: 11, muted: true });
 
   c.text(
     20,
     256,
-    "Template AST is never mutated in place: concurrent queries and multi-tenant reactive views share one parsed handle.",
+    "The template AST is never mutated in place: concurrent queries and multi-tenant reactive views share one parsed handle.",
     { size: 11.5, anchor: "start", muted: true }
   );
 
@@ -545,54 +497,54 @@ function fig05(theme) {
   );
 
   // Left: Build time
-  c.text(20, 34, "Build time (Roslyn IIncrementalGenerator)", { size: 13.8, weight: 600, anchor: "start" });
+  c.text(20, 34, "Build time (Roslyn generators)", { size: 14, weight: 600, anchor: "start" });
 
-  c.box(20, 52, 336, 46);
-  c.text(188, 71, "[DataVoTable] Player + static LINQ lambdas", { mono: true, size: 11.2, weight: 600 });
-  c.text(188, 88, "Where · OrderBy · Take · Select · FirstOrDefault", { size: 10.8, muted: true });
+  c.box(20, 52, 336, 48);
+  c.text(188, 73, "[DataVoTable] + static lambdas", { mono: true, size: 11.8, weight: 600 });
+  c.text(188, 91, "Where · OrderBy · Take · Select", { size: 11, muted: true });
 
-  c.arrow(100, 98, 100, 122);
-  c.arrow(276, 98, 276, 122);
+  c.arrow(100, 100, 100, 124);
+  c.arrow(276, 100, 276, 124);
 
-  c.box(20, 124, 160, 68);
-  c.text(100, 145, "DataVoTableGenerator", { size: 11.5, weight: 600 });
-  c.text(100, 163, "ReadPackedRow", { mono: true, size: 10.8, muted: true });
-  c.text(100, 179, "ReadReactiveRow", { mono: true, size: 10.8, muted: true });
+  c.box(20, 126, 160, 68);
+  c.text(100, 148, "TableGenerator", { size: 12.2, weight: 600 });
+  c.text(100, 166, "ReadPackedRow", { mono: true, size: 11, muted: true });
+  c.text(100, 182, "ReadReactiveRow", { mono: true, size: 11, muted: true });
 
-  c.box(196, 124, 160, 68);
-  c.text(276, 145, "LinqInterceptorGen", { size: 11.5, weight: 600 });
-  c.text(276, 163, "[InterceptsLocation]", { mono: true, size: 10.5, muted: true });
-  c.text(276, 179, "IRowRefFilter / Proj", { mono: true, size: 10.5, muted: true });
+  c.box(196, 126, 160, 68);
+  c.text(276, 148, "LinqInterceptorGen", { size: 12.2, weight: 600 });
+  c.text(276, 166, "[InterceptsLocation]", { mono: true, size: 10.8, muted: true });
+  c.text(276, 182, "Filter / Projector", { mono: true, size: 11, muted: true });
 
-  c.arrow(100, 192, 100, 216);
-  c.arrow(276, 192, 276, 216);
+  c.arrow(100, 194, 100, 218);
+  c.arrow(276, 194, 276, 218);
 
-  c.box(20, 218, 336, 58, { hatch: true });
-  c.text(188, 240, "Generated C# (0 reflection · 0 Expression.Compile)", { size: 11.8, weight: 600 });
-  c.text(188, 260, "DataVoLinqPlan · IColumnarFilter · RowRefProjector", { mono: true, size: 10.5 });
+  c.box(20, 220, 336, 56, { hatch: true });
+  c.text(188, 243, "Generated C# (zero reflection)", { size: 12.5, weight: 600 });
+  c.text(188, 263, "DataVoLinqPlan · Filter · Projector", { mono: true, size: 11, muted: true });
 
-  c.text(20, 308, "Uncompilable shapes warn DATAVOL001–004 and stream safely.", { size: 11.2, anchor: "start", muted: true });
+  c.text(20, 308, "Uncompilable shapes warn and stream safely.", { size: 11.5, anchor: "start", muted: true });
 
   // Vertical compile boundary
   c.line(382, 22, 382, 314, { dashed: true, faint: true });
-  c.text(382, 14, "PublishAot=true", { mono: true, size: 10, faint: true });
+  c.text(382, 14, "PublishAot=true", { mono: true, size: 10.5, faint: true });
 
   // Right: Native AOT runtime
-  c.text(406, 34, "Native AOT binary (IL2026 / IL3050 = 0)", { size: 13.8, weight: 600, anchor: "start" });
+  c.text(406, 34, "Native AOT binary (0 IL warnings)", { size: 14, weight: 600, anchor: "start" });
 
   c.box(406, 56, 354, 60, { hatch: true });
-  c.text(583, 80, "Point Lookup (PackedKeyReader)", { size: 12.5, weight: 600 });
-  c.text(583, 101, "55.0 ns · 56 B alloc (Apple M4 Pro)", { mono: true, size: 11.2 });
+  c.text(583, 81, "Point Lookup", { size: 13, weight: 600 });
+  c.text(583, 102, "55.0 ns · 56 B alloc", { mono: true, size: 11.5 });
 
   c.box(406, 134, 354, 60, { hatch: true });
-  c.text(583, 158, "Compiled Scan & [Columnar] Kernels", { size: 12.5, weight: 600 });
-  c.text(583, 179, "27.1 – 89.6 µs (200k rows) · 0 B alloc", { mono: true, size: 11.2 });
+  c.text(583, 159, "Compiled & [Columnar] Scans", { size: 13, weight: 600 });
+  c.text(583, 180, "27.1 – 89.6 µs (200k rows) · 0 B", { mono: true, size: 11.5 });
 
   c.box(406, 212, 354, 60, { hatch: true });
-  c.text(583, 236, "Typed Reactive SubscribeInto(Memory<T>)", { size: 12.5, weight: 600 });
-  c.text(583, 257, "BufferedWindowReactiveQuery · 0 B / drain", { mono: true, size: 11.2 });
+  c.text(583, 237, "Typed Reactive SubscribeInto", { size: 13, weight: 600 });
+  c.text(583, 258, "Memory<T> · 0 B / drain", { mono: true, size: 11.5 });
 
-  c.text(406, 308, "Verified end-to-end by DataVo.AotSmoke native binary.", { size: 11.2, anchor: "start", muted: true });
+  c.text(406, 308, "Verified end-to-end by DataVo.AotSmoke.", { size: 11.5, anchor: "start", muted: true });
 
   return c.render();
 }
