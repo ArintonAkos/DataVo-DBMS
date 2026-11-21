@@ -61,6 +61,12 @@ db.Execute("USE App");
 
 `LsmStrictFsync = true` is the conservative durability setting. It waits for the LSM write-ahead log to reach stable storage before acknowledging writes. Use relaxed LSM only for caches, rebuildable data, or benchmark runs where recent-write loss is acceptable.
 
+## Lazy SQL Streaming (`StreamQuery`) and Live Views (`Subscribe`)
+
+For large scans that should stream incrementally rather than buffering every row in memory, `DataVoContext.StreamQuery(sql, ...)` yields `DataVoRow` objects lazily over 1,024-row pages via `yield return` (short-circuiting cleanly on `LIMIT` or `break`). For continuous query updates without polling, `DataVoContext.Subscribe(sql, onChanged)` and zero-allocation `SubscribeZeroAlloc(sql, onChanged)` maintain Z-set deltas as data commits and drain on caller demand via `DispatchPendingNotifications()`.
+
+See [Streaming Queries](/manual/client-interfaces/streaming-queries) and [Live Reactive Views (Z-set IVM)](/manual/client-interfaces/reactive-views) for API signatures, examples, and supported query shapes.
+
 ## Zero-Copy Table Streaming (`StreamRef` and `RowRef`)
 
 For performance-critical loops (such as 60/120 FPS game simulation loops, real-time physics, or high-throughput batch pipelines), allocating C# heap objects per row creates GC pressure. DataVo provides `StreamRef()` on both `DataVoTable<T>` and `DataVoContext`:

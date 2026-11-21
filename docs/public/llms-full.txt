@@ -1563,6 +1563,11 @@ ORDER BY distance ASC
 LIMIT 5;
 ```
 
+## Streaming and Reactive Execution
+
+- **Lazy `yield` row streaming:** Pass a single-table `SELECT` to `db.StreamQuery(sql, ...)` to read 1,024-row pages incrementally (`IEnumerable<DataVoRow>`) and stop early on `LIMIT` or `break` without buffering the whole result. See [Streaming Queries](/manual/client-interfaces/streaming-queries).
+- **Standing incremental views:** Pass a supported `SELECT` to `db.Subscribe(sql, onChanged)` or `db.SubscribeZeroAlloc(sql, onChanged)` to receive Z-set deltas (`Added`, `Removed`, `Updated`) on `DispatchPendingNotifications()` instead of re-running queries. See [Live Reactive Views (Z-set IVM)](/manual/client-interfaces/reactive-views).
+
 ## Query Support Summary
 
 Supported: projection and aliases; `WHERE` with `AND`, `OR`, `NOT`, comparisons, `IN`, `BETWEEN`, `LIKE`/`NOT LIKE`, `IS [NOT] NULL` and vector-distance predicates; `ORDER BY` (including vector ranking), `LIMIT` and `OFFSET`; `COUNT`, `SUM`, `AVG`, `MIN`, `MAX`, with `DISTINCT` inside the parentheses; `GROUP BY` and `HAVING`, including `HAVING` without `GROUP BY`; `INNER`, `LEFT`, `RIGHT`, `FULL` and `CROSS` joins; `IN` and `EXISTS` subqueries; non-recursive common table expressions; `RANK() OVER (PARTITION BY ... ORDER BY ...)`; `UNION` and `UNION ALL`; and vector distance (`<=>` cosine, `<->` Euclidean).
@@ -1784,7 +1789,7 @@ LIMIT 5;
 | Window functions | Limited | `RANK() OVER (PARTITION BY ... ORDER BY ...)` only. No `ROW_NUMBER`, frames, or other window functions. |
 | Scalar functions | Limited | `UPPER` and `LOWER`. No `LEN`, `CASE`, `CAST`, `COALESCE` or date functions. |
 | Vector distance | Supported | `<=>` (cosine), `<->` (Euclidean) in projections, `WHERE` and `ORDER BY`. |
-| Views (`CREATE VIEW`) | Not supported | Reactive queries cover the "keep a query result current" use case from C#. |
+| Views (`CREATE VIEW`) | Not supported | [Live Reactive Views (Z-set IVM)](/manual/client-interfaces/reactive-views) (`Subscribe` / `SubscribeZeroAlloc`) cover continuous queries from C#. |
 | Stored procedures, triggers, user-defined functions | Not supported | |
 | PostgreSQL system catalogs (`pg_class`, ...) | Not supported | |
 | Security commands | Supported | `CREATE USER`, `CREATE ROLE`, `GRANT`, `REVOKE`, `LOGIN`, `LOGOUT`, `SHOW USERS/ROLES/GRANTS`. Not a PostgreSQL role system. |
@@ -2354,6 +2359,12 @@ db.Execute("USE App");
 ```
 
 `LsmStrictFsync = true` is the conservative durability setting. It waits for the LSM write-ahead log to reach stable storage before acknowledging writes. Use relaxed LSM only for caches, rebuildable data, or benchmark runs where recent-write loss is acceptable.
+
+## Lazy SQL Streaming (`StreamQuery`) and Live Views (`Subscribe`)
+
+For large scans that should stream incrementally rather than buffering every row in memory, `DataVoContext.StreamQuery(sql, ...)` yields `DataVoRow` objects lazily over 1,024-row pages via `yield return` (short-circuiting cleanly on `LIMIT` or `break`). For continuous query updates without polling, `DataVoContext.Subscribe(sql, onChanged)` and zero-allocation `SubscribeZeroAlloc(sql, onChanged)` maintain Z-set deltas as data commits and drain on caller demand via `DispatchPendingNotifications()`.
+
+See [Streaming Queries](/manual/client-interfaces/streaming-queries) and [Live Reactive Views (Z-set IVM)](/manual/client-interfaces/reactive-views) for API signatures, examples, and supported query shapes.
 
 ## Zero-Copy Table Streaming (`StreamRef` and `RowRef`)
 

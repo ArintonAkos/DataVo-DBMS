@@ -125,6 +125,8 @@ export default withMermaid(
             { text: "Dapper Support", link: "/manual/client-interfaces/dapper" },
             { text: "Entity Framework Support", link: "/manual/client-interfaces/entity-framework" },
             { text: "Roslyn Source Generators", link: "/manual/client-interfaces/source-generators" },
+            { text: "Streaming Queries", link: "/manual/client-interfaces/streaming-queries" },
+            { text: "Live Reactive Views (Z-set IVM)", link: "/manual/client-interfaces/reactive-views" },
             { text: "Native AOT", link: "/manual/client-interfaces/native-aot" },
           ],
         },

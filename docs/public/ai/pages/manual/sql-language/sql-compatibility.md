@@ -73,7 +73,7 @@ LIMIT 5;
 | Window functions | Limited | `RANK() OVER (PARTITION BY ... ORDER BY ...)` only. No `ROW_NUMBER`, frames, or other window functions. |
 | Scalar functions | Limited | `UPPER` and `LOWER`. No `LEN`, `CASE`, `CAST`, `COALESCE` or date functions. |
 | Vector distance | Supported | `<=>` (cosine), `<->` (Euclidean) in projections, `WHERE` and `ORDER BY`. |
-| Views (`CREATE VIEW`) | Not supported | Reactive queries cover the "keep a query result current" use case from C#. |
+| Views (`CREATE VIEW`) | Not supported | [Live Reactive Views (Z-set IVM)](/manual/client-interfaces/reactive-views) (`Subscribe` / `SubscribeZeroAlloc`) cover continuous queries from C#. |
 | Stored procedures, triggers, user-defined functions | Not supported | |
 | PostgreSQL system catalogs (`pg_class`, ...) | Not supported | |
 | Security commands | Supported | `CREATE USER`, `CREATE ROLE`, `GRANT`, `REVOKE`, `LOGIN`, `LOGOUT`, `SHOW USERS/ROLES/GRANTS`. Not a PostgreSQL role system. |

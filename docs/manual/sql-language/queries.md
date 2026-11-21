@@ -165,6 +165,11 @@ ORDER BY distance ASC
 LIMIT 5;
 ```
 
+## Streaming and Reactive Execution
+
+- **Lazy `yield` row streaming:** Pass a single-table `SELECT` to `db.StreamQuery(sql, ...)` to read 1,024-row pages incrementally (`IEnumerable<DataVoRow>`) and stop early on `LIMIT` or `break` without buffering the whole result. See [Streaming Queries](/manual/client-interfaces/streaming-queries).
+- **Standing incremental views:** Pass a supported `SELECT` to `db.Subscribe(sql, onChanged)` or `db.SubscribeZeroAlloc(sql, onChanged)` to receive Z-set deltas (`Added`, `Removed`, `Updated`) on `DispatchPendingNotifications()` instead of re-running queries. See [Live Reactive Views (Z-set IVM)](/manual/client-interfaces/reactive-views).
+
 ## Query Support Summary
 
 Supported: projection and aliases; `WHERE` with `AND`, `OR`, `NOT`, comparisons, `IN`, `BETWEEN`, `LIKE`/`NOT LIKE`, `IS [NOT] NULL` and vector-distance predicates; `ORDER BY` (including vector ranking), `LIMIT` and `OFFSET`; `COUNT`, `SUM`, `AVG`, `MIN`, `MAX`, with `DISTINCT` inside the parentheses; `GROUP BY` and `HAVING`, including `HAVING` without `GROUP BY`; `INNER`, `LEFT`, `RIGHT`, `FULL` and `CROSS` joins; `IN` and `EXISTS` subqueries; non-recursive common table expressions; `RANK() OVER (PARTITION BY ... ORDER BY ...)`; `UNION` and `UNION ALL`; and vector distance (`<=>` cosine, `<->` Euclidean).
