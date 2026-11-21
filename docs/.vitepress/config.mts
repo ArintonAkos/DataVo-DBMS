@@ -1,5 +1,24 @@
-import { defineConfig } from "vitepress";
+import { defineConfig, type HeadConfig } from "vitepress";
 import { withMermaid } from "vitepress-plugin-mermaid";
+
+const isProdBuild =
+  process.env.NODE_ENV === "production" || process.argv.includes("build");
+
+const head: HeadConfig[] = [
+  ["link", { rel: "icon", type: "image/svg+xml", href: "/DataVo-DBMS/favicon.svg" }],
+  ["link", { rel: "icon", type: "image/x-icon", href: "/DataVo-DBMS/favicon.ico" }],
+];
+
+if (isProdBuild) {
+  head.push([
+    "script",
+    {
+      "data-goatcounter": "https://YOUR_GOATCOUNTER_CODE.goatcounter.com/count",
+      async: "",
+      src: "//gc.zgo.at/count.js",
+    },
+  ]);
+}
 
 export default withMermaid(
   defineConfig({
@@ -8,10 +27,7 @@ export default withMermaid(
     description:
       "C#-native embedded database documentation for DataVo v0.2.0-rc.3.",
     cleanUrls: true,
-    head: [
-      ["link", { rel: "icon", type: "image/svg+xml", href: "/DataVo-DBMS/favicon.svg" }],
-      ["link", { rel: "icon", type: "image/x-icon", href: "/DataVo-DBMS/favicon.ico" }],
-    ],
+    head,
     srcExclude: [
       "superpowers/**",
       "specs/**",
