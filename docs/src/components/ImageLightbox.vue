@@ -121,20 +121,25 @@ function onPointerDown(e: PointerEvent) {
   dragStartY = e.clientY;
   startTranslateX = translateX.value;
   startTranslateY = translateY.value;
-  (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+  window.addEventListener('pointermove', onPointerMove);
+  window.addEventListener('pointerup', onPointerUp);
+  window.addEventListener('pointercancel', onPointerUp);
 }
 
 function onPointerMove(e: PointerEvent) {
   if (!isDragging.value) return;
   const dx = e.clientX - dragStartX;
   const dy = e.clientY - dragStartY;
-  if (Math.hypot(dx, dy) > 3) didDrag = true;
+  if (Math.hypot(dx, dy) > 4) didDrag = true;
   translateX.value = startTranslateX + dx;
   translateY.value = startTranslateY + dy;
 }
 
 function onPointerUp() {
   isDragging.value = false;
+  window.removeEventListener('pointermove', onPointerMove);
+  window.removeEventListener('pointerup', onPointerUp);
+  window.removeEventListener('pointercancel', onPointerUp);
 }
 
 function onCanvasClick(e: MouseEvent) {
@@ -143,7 +148,8 @@ function onCanvasClick(e: MouseEvent) {
     return;
   }
   const target = e.target as HTMLElement | null;
-  if (target?.classList.contains('dv-lb-canvas')) {
+  if (!target || target.closest('.dv-lb-card')) return;
+  if (target.classList.contains('dv-lb-canvas')) {
     closeLightbox();
   }
 }
@@ -175,6 +181,7 @@ onMounted(() => {
 onUnmounted(() => {
   document.removeEventListener('click', onDocumentClick);
   document.removeEventListener('keydown', onKeyDown);
+  onPointerUp();
   document.documentElement.style.overflow = '';
 });
 </script>
@@ -224,9 +231,6 @@ onUnmounted(() => {
           @click="onCanvasClick"
           @dblclick="toggleDoubleClick"
           @pointerdown="onPointerDown"
-          @pointermove="onPointerMove"
-          @pointerup="onPointerUp"
-          @pointercancel="onPointerUp"
         >
           <div
             class="dv-lb-card"
