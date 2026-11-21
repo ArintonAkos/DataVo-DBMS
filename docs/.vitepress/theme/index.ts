@@ -1,5 +1,6 @@
 import DefaultTheme from 'vitepress/theme';
 import { h } from 'vue';
+import './custom.css';
 // @ts-ignore
 import SqlEditor from '../../src/components/SqlEditor.vue';
 // @ts-ignore

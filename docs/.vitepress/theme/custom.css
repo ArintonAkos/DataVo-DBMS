@@ -1,0 +1,23 @@
+html.dark .light-only {
+  display: none;
+}
+
+html:not(.dark) .dark-only {
+  display: none;
+}
+
+.sketch-diagram {
+  margin: 1.5rem 0;
+  padding: 16px 12px;
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 6px;
+  background: var(--vp-c-bg);
+}
+
+.sketch-diagram img {
+  display: block;
+  width: 100%;
+  max-width: 780px;
+  height: auto;
+  margin: 0 auto;
+}

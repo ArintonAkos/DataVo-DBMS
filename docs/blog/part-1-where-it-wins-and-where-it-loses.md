@@ -42,28 +42,33 @@ DataVo exists for four narrower situations where the usual stack starts to show 
 
 It is equally important to be clear about what DataVo is **not**. It is not a client/server database: a lock file (`datavo.lock`) gives one process exclusive ownership of a database directory. Transactions provide snapshot isolation rather than serializability. Its SQL dialect is its own, and at `0.4.0-rc.1` it is prerelease software whose on-disk format does not yet carry a cross-version compatibility guarantee.
 
+<div class="sketch-diagram light-only">
+
+![Figure 1 — Typical stack vs. single .NET 10 process](/blog/part-1/fig-01-single-process-light.svg)
+
+</div>
+<div class="sketch-diagram dark-only">
+
+![Figure 1 — Typical stack vs. single .NET 10 process](/blog/part-1/fig-01-single-process-dark.svg)
+
+</div>
+
 ---
 
 ## How the engine is put together
 
-```mermaid
-flowchart LR
-  PG[("PostgreSQL 17")] <-->|"bidirectional sync"| SYNC["DataVo-Sync (commercial)"]
-  SYNC <-->|"WebSocket / Wire v2"| CORE
-
-  subgraph APP["Application process (.NET 10 / Native AOT)"]
-    subgraph CORE["DataVo.Core (MIT)"]
-      SQL["SQL / Compiled LINQ"] --> TYPED["Typed paths (0–144 B alloc)"]
-      SQL --> GEN["General path (fallback)"]
-      TYPED --> MEM["InMemory: FlatRowStore"]
-      TYPED --> LSM["LSM: WAL + MemTable + Columnar SSTables"]
-      SQL --> VEC["Flat / HNSW vector search"]
-      SQL --> IVM["Z-set incremental views"]
-    end
-  end
-```
-
 ### Two storage layouts, plus opt-in columnar segments
+
+<div class="sketch-diagram light-only">
+
+![Figure 2 — FlatRowStore memory & Columnar SSTable pruning](/blog/part-1/fig-02-storage-layout-light.svg)
+
+</div>
+<div class="sketch-diagram dark-only">
+
+![Figure 2 — FlatRowStore memory & Columnar SSTable pruning](/blog/part-1/fig-02-storage-layout-dark.svg)
+
+</div>
 
 **InMemory (`FlatRowStore`)** packs rows as fixed-width cells inside contiguous byte buffers instead of allocating one heap object per row. On the benchmark schema, this reduces memory footprint from **640.3 bytes/row** (the object-per-row layout it replaced) down to **49.2 bytes/row** with shared strings. Integer primary keys map directly to row slots via a hash map. Nothing survives process exit.
 
@@ -73,14 +78,16 @@ flowchart LR
 
 ### Typed execution versus the general fallback
 
-```mermaid
-flowchart TD
-  Q["Incoming SQL or Compiled LINQ"] --> R{"Matches a Typed Path?"}
-  R -->|"Yes (single-table scan, int hash join, columnar agg, PK range, vector)"| T["Read packed cells / column arrays directly"]
-  T --> FAST["Microseconds, 0–144 B managed alloc"]
-  R -->|"No (e.g. cross-table OR, DISTINCT agg, join in explicit tx)"| G["General evaluator (row dictionaries)"]
-  G --> SLOW["Exact result, KB-scale alloc/row"]
-```
+<div class="sketch-diagram light-only">
+
+![Figure 3 — Typed execution paths vs. general fallback](/blog/part-1/fig-03-typed-vs-general-light.svg)
+
+</div>
+<div class="sketch-diagram dark-only">
+
+![Figure 3 — Typed execution paths vs. general fallback](/blog/part-1/fig-03-typed-vs-general-dark.svg)
+
+</div>
 
 Every incoming query is first offered to a set of **typed execution paths** that read cells directly from packed buffers: single-table scans (`AND`, `OR`, `LIKE`, grouping, bounded top-k, key ranges, index lookups), integer-key hash joins (`INNER` and `LEFT`), columnar aggregates, and the vector planner. Each typed path guarantees that it either produces the exact same answer as the general evaluator or declines cleanly.
 
@@ -166,13 +173,16 @@ Two caveats keep this result honest. First, this table compares DataVo's build-t
 
 Consider a reactive dashboard, trading blotter, or live game leaderboard that joins three tables—`Orders × Accounts × Markets`—with a `GROUP BY`, while new rows arrive continuously. In a traditional embedded database, every refresh re-executes the entire join. With Z-set incremental view maintenance (IVM), each write pushes a tiny `+1` / `-1` delta through the view operator graph and updates only the affected groups:
 
-```mermaid
-flowchart LR
-  W["50,000 incoming writes"] --> TRAD["SQLite / DuckDB: re-run 3-table JOIN + GROUP BY"]
-  W --> IVM["DataVo IVM: apply +1 / -1 Z-set row delta to materialized view"]
-  TRAD --> T1["126 – 248 s (SQLite) / 34 – 136 s (DuckDB)"]
-  IVM --> T2["0.19 – 0.60 s total"]
-```
+<div class="sketch-diagram light-only">
+
+![Figure 4 — Full recomputation vs. Z-set incremental views](/blog/part-1/fig-04-zset-ivm-light.svg)
+
+</div>
+<div class="sketch-diagram dark-only">
+
+![Figure 4 — Full recomputation vs. Z-set incremental views](/blog/part-1/fig-04-zset-ivm-dark.svg)
+
+</div>
 
 ![Incremental view vs recomputing a 3-table JOIN + GROUP BY](/blog/part-1/06-incremental-views-complex-vip.png)
 
