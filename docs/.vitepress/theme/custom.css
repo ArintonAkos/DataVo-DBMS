@@ -22,6 +22,10 @@ html:not(.dark) .dark-only {
   margin: 0 auto;
 }
 
+.vp-doc img {
+  cursor: zoom-in;
+}
+
 .cite-badge {
   display: inline-flex;
   align-items: center;

@@ -7,12 +7,15 @@ import SqlEditor from '../../src/components/SqlEditor.vue';
 import BenchmarkChart from '../../src/components/BenchmarkChart.vue';
 // @ts-ignore
 import CopyAiMarkdown from '../../src/components/CopyAiMarkdown.vue';
+// @ts-ignore
+import ImageLightbox from '../../src/components/ImageLightbox.vue';
 
 export default {
   extends: DefaultTheme,
   Layout() {
     return h(DefaultTheme.Layout, null, {
       'doc-before': () => h(CopyAiMarkdown),
+      'layout-bottom': () => h(ImageLightbox),
     });
   },
   enhanceApp({ app }: { app: any }) {
@@ -20,5 +23,6 @@ export default {
     app.component('SqlEditor', SqlEditor);
     app.component('BenchmarkChart', BenchmarkChart);
     app.component('CopyAiMarkdown', CopyAiMarkdown);
+    app.component('ImageLightbox', ImageLightbox);
   }
 };
