@@ -1,0 +1,7 @@
+name = "datavo-docs-mcp"
+main = "worker.js"
+compatibility_date = "2026-11-01"
+
+[vars]
+DOCS_BASE_URL = "https://arintonakos.github.io/DataVo-DBMS"
+CACHE_TTL_SECONDS = "300"

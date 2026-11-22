@@ -1,6 +1,6 @@
 {
   "name": "DataVo Documentation",
-  "generatedAt": "2026-11-22T14:51:20.221Z",
+  "generatedAt": "2026-11-22T17:09:15.385Z",
   "pages": [
     {
       "title": "Introduction",
@@ -253,6 +253,24 @@
       "route": "/manual/reference/ai-access",
       "source": "manual/reference/ai-access.md",
       "aiPath": "/ai/pages/manual/reference/ai-access.md"
+    },
+    {
+      "title": "Engineering Blog",
+      "route": "/blog",
+      "source": "blog/index.md",
+      "aiPath": "/ai/pages/blog.md"
+    },
+    {
+      "title": "I wrote an embedded database and Postgres sync engine in C#. Here is where it wins and where it loses.",
+      "route": "/blog/part-1-where-it-wins-and-where-it-loses",
+      "source": "blog/part-1-where-it-wins-and-where-it-loses.md",
+      "aiPath": "/ai/pages/blog/part-1-where-it-wins-and-where-it-loses.md"
+    },
+    {
+      "title": "Packed byte buffers, Native AOT, and Roslyn codegen: how a 55 ns point lookup works with zero native binaries",
+      "route": "/blog/part-2-packed-buffers-aot-and-roslyn-codegen",
+      "source": "blog/part-2-packed-buffers-aot-and-roslyn-codegen.md",
+      "aiPath": "/ai/pages/blog/part-2-packed-buffers-aot-and-roslyn-codegen.md"
     }
   ]
 }

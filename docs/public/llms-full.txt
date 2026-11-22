@@ -4890,13 +4890,13 @@ DataVo provides a calendar `DATE` type (`YYYY-MM-DD`) and has **no** `DATETIME` 
 > Source route: /manual/reference/ai-access
 > Source file: manual/reference/ai-access.md
 
-DataVo publishes a curated, AI-readable Markdown export of the `v0.4.0-rc.1` manual alongside the VitePress site. Only public manual pages are exported — internal architecture notes, audits, and raw source directories are excluded.
+DataVo publishes a curated, AI-readable Markdown export of the `v0.4.0-rc.1` manual and Engineering Blog alongside the VitePress site. Only public manual and blog pages are exported — internal architecture notes, audits, and raw source directories are excluded.
 
 ## Static AI Endpoints
 
 | Endpoint | Purpose |
 | --- | --- |
-| `/llms.txt` | Concise entry point listing all 38 public manual pages |
+| `/llms.txt` | Concise entry point listing all 45 public manual and blog pages |
 | `/llms-full.txt` | Complete public manual concatenated into a single Markdown file |
 | `/ai/index.json` | Structured JSON index mapping routes to Markdown export paths |
 | `/ai/pages/<route>.md` | Canonical Markdown export for an individual page (e.g., `/ai/pages/manual/getting-started/quickstart.md`) |
@@ -4936,9 +4936,946 @@ get_doc("architecture/index-manager.md")       -> Access Denied
 ```
 :::
 
+## Remote HTTP MCP Server (Gemini Web / Connected Apps)
+
+GitHub Pages serves static files only and cannot process `POST` JSON-RPC requests directly. To connect remote MCP clients (such as Gemini's **Connect to an MCP server** dialog) via an `https://.../mcp` URL, deploy the lightweight Cloudflare Worker in `docs/mcp-worker/`:
+
+```bash
+cd docs/mcp-worker
+npx wrangler deploy
+```
+
+The worker exposes `POST /mcp` (`list_docs`, `get_doc`, `search_docs`, and `datavo-docs://` resources) by reading and caching the hosted `/ai/index.json` and `/ai/pages/*.md` files from GitHub Pages.
+
 ## See Also
 
 - [Introduction](/manual/getting-started/introduction) — Overview of DataVo v0.4.
 - [Quickstart](/manual/getting-started/quickstart) — Get started in C# in 60 seconds.
+
+---
+
+# Engineering Blog
+
+> Source route: /blog
+> Source file: blog/index.md
+
+Notes on building **DataVo-DBMS** (an MIT-licensed embedded relational and vector database in C# for .NET 10) and **DataVo-Sync** (its commercial offline-first PostgreSQL sync add-on), with reproducible measurements and postmortems.
+
+## Series: Building DataVo
+
+1. **[Part 1: I wrote an embedded database and Postgres sync engine in C#. Here is where it wins and where it loses.](/blog/part-1-where-it-wins-and-where-it-loses)** *(21 November 2026)*
+   Architecture overview, cross-platform benchmarks (macOS M4 Pro, Linux x64, Windows x64) against SQLite, DuckDB, and ElectricSQL `1.8.1`, five wrong-answer bugs caught by a differential SQL oracle, and open trade-offs.
+2. **[Part 2: Packed byte buffers, Native AOT, and Roslyn codegen: how a 55 ns point lookup works with zero native binaries](/blog/part-2-packed-buffers-aot-and-roslyn-codegen)** *(21 November 2026)*
+   Deconstructing the managed-to-native P/Invoke tax, 64-byte aligned `FlatRowStore` records on the Pinned Object Heap, lock-free ARM64 optimistic reads, AST-isolated prepared statements, Roslyn `[InterceptsLocation]` codegen, and locking the Native AOT fence from 184 warnings to zero.
+
+### Planned
+
+- **Part 3:** What an fsync costs, across operating systems: the 4 ms tie, the 0.1 ms Linux case, and the Windows scaling problem.
+- **Part 4:** Z-sets, from incremental views to a 36 MB sync: wire protocol, offline conflict convergence, and reproducible Docker benchmarks against PostgreSQL 17 and ElectricSQL 1.8.1.
+- **Part 5:** HNSW, the JIT, and the exact fallback: recall on clustered data, and why a graph search sometimes loses to a scan.
+- **Part 6:** Differential oracle testing: how the matrix found five wrong answers before tuning anything.
+- **Part 7:** Building an offline-first .NET 10 app end-to-end: combining Native AOT, filtered `VECTOR(n)` search, live Z-set views, and bidirectional Postgres sync in a real desktop/mobile architecture.
+
+---
+
+# I wrote an embedded database and Postgres sync engine in C#. Here is where it wins and where it loses.
+
+> Source route: /blog/part-1-where-it-wins-and-where-it-loses
+> Source file: blog/part-1-where-it-wins-and-where-it-loses.md
+
+*Part 1 of 7.*
+
+When you build a local-first .NET application today—a desktop tool that has to stay responsive offline, a local AI assistant, or a real-time simulation—you rarely pick one database. You assemble three. You ship SQLite for relational state, bolt on a separate store for vector embeddings, and write a custom JSON-over-WebSocket layer to keep that local cache reconciled with PostgreSQL. Each boundary costs you something: native binaries per target OS, P/Invoke marshalling on every call, duplicated schemas, and hand-rolled conflict handling.
+
+I wanted to know what happens if you collapse all of that into a single managed .NET 10 process.
+
+Over the last several months, I have been building two pieces to test that idea. **DataVo-DBMS** is an MIT-licensed embedded relational, columnar, and vector database written from scratch in pure C# (compiling cleanly under Native AOT). **DataVo-Sync** is a separate, proprietary commercial add-on that keeps a local DataVo store synchronized with PostgreSQL in both directions, including writes made while offline.
+
+This first post is a map of the whole system: why it is structured the way it is, what kinds of applications it actually fits, and what the numbers look like when measured against SQLite, DuckDB, and ElectricSQL across macOS, Linux, and Windows.
+
+At a glance, the approach pays off in four specific places:
+
+- **In-process reads without an interop boundary:** Using build-time Roslyn code generation, primary-key lookups take **55 ns** in memory and **216 ns** on LSM disk files (**7.7–13× faster** than SQLite on an Apple M4 Pro), allocating **56–144 B** per call.
+- **Continuous views instead of repeated re-queries:** Maintaining a live 3-table `JOIN + GROUP BY` view across 50,000 incoming writes using Z-set incremental view maintenance takes **192 ms**, compared to **34.3 s** in DuckDB (**179×**) and **126.1 s** in SQLite (**658×**).
+- **Filtered vector search inside ordinary SQL:** Top-10 search over 50,000 × 384-dimensional embeddings with SQL `JOIN` and `WHERE` filters runs in **0.26–3.62 ms** at **100% recall@10**, in the same transaction log as the relational tables.
+- **Compact offline-first Postgres sync:** End-to-end PostgreSQL 17 replication transfers **45.5 bytes per row** over the wire (**8.0× smaller** than ElectricSQL `1.8.1`) with **5.1–6.9× lower** client GC allocations, converging automatically after a burst of 500 offline writes.
+
+It also loses in predictable places—unindexed substring scans (**1.35× slower** than SQLite on `LIKE '%042-%'`), whole-table analytical scans without `[Columnar]` (**3–340× slower** than DuckDB), Linux single-row durable `StrictFsync` latency (**0.241 ms** vs **0.108 ms**, **2.2× slower** than SQLite WAL `FULL`), and sync hub cold-start time (**2.4 s** to load 100k rows). Those losses are reported alongside the wins below, because an embedded database is only useful once you know where its boundaries are.
+
+## Why put all of this in one process?
+
+The default embedded relational database is SQLite, and in most projects it remains the right default. It is small, extraordinarily well tested, and backed by two decades of production failure experience. Nothing in this series argues against that.
+
+DataVo exists for four narrower situations where the usual stack starts to show friction:
+
+- **Local-first desktop and mobile apps (MAUI, Avalonia, WPF) backed by PostgreSQL.** As argued in Kleppmann et al.'s *Local-First Software* <a class="cite-badge" href="#ref-1">1</a>, an application feels fundamentally different when the primary copy of the data lives on the user's device and the network runs in the background (as shown in Figure 1). When the server-side store is already PostgreSQL, keeping a local relational replica that accepts offline writes and syncs compressed deltas removes an entire tier of loading spinners and ad-hoc caching code.
+- **Offline AI and local RAG in C#.** Real applications rarely ask for "the ten nearest vectors in the universe." They ask for the ten nearest document chunks belonging to a specific tenant, folder, or permission group. Keeping `VECTOR(n)` columns in the same tables and transaction log as relational metadata lets a single `SELECT ... JOIN ... WHERE ... ORDER BY Embedding <=> @q LIMIT 10` answer that question without running Qdrant or `pgvector` locally.
+- **Live dashboards, leaderboards, and game HUDs (Unity and real-time simulations).** Applications with continuously mutating state often run the same aggregate or multi-table join on every frame or tick. Updating a materialized view from small `+1` / `-1` write deltas avoids recomputing the entire query when only one row changed.
+- **Single-binary Native AOT .NET deployments.** SQLite is a C library: shipping it means per-platform native binaries and a boundary the .NET JIT cannot inline across. `DataVo.Core` and `DataVo.Data` compile with trimming and Native AOT analyzers treated as errors, so an application can publish with `PublishAot=true` and zero `.dll`/`.so`/`.dylib` dependencies. That is a packaging property rather than a speed claim, and it only matters if the engine underneath is correct and fast enough.
+
+<div class="sketch-diagram light-only">
+
+![Figure 1: Traditional .NET local-first assembly vs. single-process consolidation in DataVo](/blog/part-1/fig-01-single-process-light.svg)
+
+</div>
+<div class="sketch-diagram dark-only">
+
+![Figure 1: Traditional .NET local-first assembly vs. single-process consolidation in DataVo](/blog/part-1/fig-01-single-process-dark.svg)
+
+</div>
+
+*Figure 1: Traditional .NET local-first assembly vs. single-process consolidation in DataVo.*
+
+It is equally important to be clear about what DataVo is **not**. It is not a client/server database: a lock file (`datavo.lock`) gives one process exclusive ownership of a database directory. Transactions provide snapshot isolation rather than serializability <a class="cite-badge" href="#ref-2">2</a>. Its SQL dialect intentionally leaves out features teams expect from full-scale SQL engines—no `CASE`/`CAST`/`COALESCE` or date functions, no window functions beyond `RANK()`, and no `CREATE VIEW`, triggers, or stored procedures. At `0.4.0-rc.1` it is prerelease software whose on-disk format does not yet carry a cross-version compatibility guarantee: standalone local databases require an export and re-import across breaking format changes, whereas `DataVo-Sync` setups treat PostgreSQL as the source of truth and can simply wipe and re-hydrate the local replica (**~0.7 s** for 100k rows).
+
+## How the engine is put together
+
+### Two storage layouts, plus opt-in columnar segments
+
+DataVo organizes data in two ways to strike a balance between fast point lookups and analytical scans (as shown in Figure 2):
+
+- **InMemory (`FlatRowStore`)** packs rows as fixed-width cells inside contiguous byte buffers instead of allocating one heap object per row (as illustrated in Figure 2a). On the benchmark schema, this reduces memory footprint from **640.3 bytes/row** (the object-per-row layout it replaced) down to **49.2 bytes/row** with shared strings. Integer primary keys map directly to row slots via a hash map. Nothing survives process exit.
+- **LSM** follows the log-structured merge tree described by O'Neil et al. <a class="cite-badge" href="#ref-3">3</a> (and surveyed in *Designing Data-Intensive Applications* <a class="cite-badge" href="#ref-2">2</a>). Writes append to a commit log (`LsmStrictFsync = true` waits for stable storage before acknowledging), enter an arena-backed MemTable, flush at 32 MB into immutable memory-mapped SSTables on a background thread, and compact asynchronously. When a table has a single `INT` or `GUID` primary key, rows are stored **clustered** under that key—so a key lookup or range scan seeks straight to the row instead of probing a secondary index and performing a separate row fetch.
+- **Columnar SSTables (`[Columnar]` / `CREATE INDEX ... USING COLUMNAR`)** store selected columns a second time as dense, contiguous typed arrays (Figure 2b). On LSM, flush and compaction write those columns into each SSTable in 4,096-row segments paired with min/max zone maps and `NULL`/`NaN` bitmasks. Analytical queries like `COUNT(*) WHERE Amount >= @lo` skip excluded chunks via zone maps and scan surviving chunks directly from memory-mapped files, requiring no index rebuild when the database reopens. This borrows the core insight from Abadi et al.'s column-store work <a class="cite-badge" href="#ref-4">4</a>, kept opt-in per column because rows remain DataVo's primary layout.
+
+<div class="sketch-diagram light-only">
+
+![Figure 2: Memory footprint and on-disk columnar segment layouts](/blog/part-1/fig-02-storage-layout-light.svg)
+
+</div>
+<div class="sketch-diagram dark-only">
+
+![Figure 2: Memory footprint and on-disk columnar segment layouts](/blog/part-1/fig-02-storage-layout-dark.svg)
+
+</div>
+
+*Figure 2: Memory footprint (a) and on-disk columnar segment layouts (b).*
+
+### Typed execution versus the general fallback
+
+Every incoming query is first offered to a set of **typed execution paths** that read cells directly from packed buffers (as mapped in Figure 3): single-table scans (`AND`, `OR`, `LIKE`, grouping, bounded top-k, key ranges, index lookups), integer-key hash joins (`INNER` and `LEFT`), columnar aggregates, and the vector planner. Each typed path guarantees that it either produces the exact same answer as the general evaluator or declines cleanly.
+
+Queries that no typed path accepts fall back to the general evaluator, which materializes a dictionary per row and allocates kilobytes per row read. Which side of that boundary a query lands on explains far more of the benchmark numbers below than any micro-optimization. Today, `EXPLAIN` reports only the general planner's `Volcano` vs `Legacy` mode rather than whether a typed bypass accepted the query, so teams check eligibility against the documented fast-path shape rules (exposing typed-versus-fallback dispatch directly in `EXPLAIN` diagnostics is planned for `0.5.0`).
+
+<div class="sketch-diagram light-only">
+
+![Figure 3: Typed execution versus the general evaluator fallback](/blog/part-1/fig-03-typed-vs-general-light.svg)
+
+</div>
+<div class="sketch-diagram dark-only">
+
+![Figure 3: Typed execution versus the general evaluator fallback](/blog/part-1/fig-03-typed-vs-general-dark.svg)
+
+</div>
+
+*Figure 3: Typed execution versus the general evaluator fallback.*
+
+### Vector search, incremental views, and Postgres sync
+
+- **Vector search (`VECTOR(n)`):** `FLAT` computes exact distances using SIMD intrinsics (`AVX2` / Arm `AdvSimd`). `HNSW` implements Malkov and Yashunin's hierarchical navigable small-world graph <a class="cite-badge" href="#ref-5">5</a>. Because filtering inside a graph traversal is tricky, a filtered query does not push predicates into the graph edges; instead it requests roughly `LIMIT / selectivity` candidates, evaluates the relational filter on stored rows, and expands the search if too few survive. When walking the graph would cost more than scanning—or when expansion still falls short—it switches to an exact filter-first scan and ranks only the passing rows, preventing short results.
+- **Z-set incremental views:** Following Budiu et al.'s DBSP model <a class="cite-badge" href="#ref-6">6</a>, a table is represented as a *Z-set* where every row carries an integer weight (`+1` for an insert, `-1` for a delete). Writes emit small Z-set deltas that update materialized views without re-running the underlying query. This applies only to query shapes the reactive planner supports; unsupported shapes execute normally.
+- **DataVo-Sync:** Because DataVo-Sync is a commercial product, I keep its internal architecture private and describe only the external behaviour tested here. It connects a sync server reading PostgreSQL logical replication to an embedded client library writing into a local DataVo store (`InMemory` or `Lsm`), streaming compressed columnar deltas over WebSockets (`wire v2` + Brotli) and queuing offline local writes for upload and conflict resolution.
+
+## How the measurements were collected
+
+Before looking at any chart, four ground rules govern how to read the numbers below:
+
+1. **Matching durability.** A database that acknowledges writes from RAM will always beat one waiting on the drive. Every disk comparison pairs equivalent durability guarantees:
+
+   | DataVo | SQLite | What a commit guarantees |
+   | --- | --- | --- |
+   | `LsmStrictFsync = true` ("Production") | WAL, `synchronous=FULL` | Waits for stable storage on every commit |
+   | `LsmStrictFsync = false` ("Relaxed") | WAL, `synchronous=NORMAL` | Survives process crash; may lose recent commits on power loss |
+
+   Where a benchmark harness lacked a matched `SQLite WAL FULL` row, I state that explicitly.
+
+2. **No interpolation.** Every figure comes directly from a logged run or CI artifact listed under [Data sources](#data-sources).
+3. **Single-run noise.** Only the BenchmarkDotNet suites carry confidence intervals. On single-run suites, I treat differences under ~20% as unestablished.
+4. **Shared CI runners.** GitHub Actions runners are shared virtual machines; compare engines *within* a run, not across runs or platforms.
+
+<details>
+<summary>Test environments (macOS M4 Pro, Linux x64 CI, Windows x64 CI, Sync CI)</summary>
+
+| Environment | Hardware | Runtime | Used for |
+| --- | --- | --- | --- |
+| Apple M4 Pro | 12 cores, 48 GiB, APFS SSD | .NET 10.0.3, macOS 26.3 | BDN lookups/aggregates, concurrent-ops & space-recovery (`02fa240f`, 20–21 Nov), SQL/vector matrix (17 Nov), sync/update workloads (12 Nov) |
+| Linux x64 CI | AMD EPYC 9V45, 4 logical / 2 physical cores | .NET 10.0.15, Ubuntu 26.04 | BenchmarkDotNet and research matrix, run `44748508039` (20 Nov); `concurrent-ops` WAL re-run `44916996459` (21 Nov) |
+| Windows x64 CI | Xeon Platinum 8370C, 4 logical / 2 physical cores (Hyper-V) | .NET 10.0.15, Windows 11 24H2 | runs `44748508039` (20 Nov) and `concurrent-ops` WAL re-run `44916996459` (21 Nov) |
+| Sync CI | Ubuntu 26.04 x64, **2 vCPU**, PostgreSQL 17.12, ElectricSQL `1.8.1` in Docker | .NET 10.0.15 | DataVo-Sync E2E and 1,000-client stress, run `44756364158` (20 Nov) |
+
+</details>
+
+## Point lookups and columnar scans
+
+In a game loop, an in-process cache, or a local telemetry aggregator, the cost of crossing into a native database driver—parsing SQL, binding parameters, marshalling strings—often dwarfs the lookup itself. `DataVo.Generators` is a Roslyn incremental source generator that compiles LINQ predicates at build time directly into packed-byte readers, staying completely inside managed code and Native AOT safe:
+
+```csharp
+[DataVoTable("players")]
+public sealed class Player
+{
+    [PrimaryKey] public int Id { get; set; }
+    [Columnar]   public int Level { get; set; }
+    [Columnar]   public long Gold { get; set; }
+}
+
+// Compiled at build time to zero-allocation packed reads / columnar scans:
+int highLevel = db.Table<Player>().Where(50, static (p, min) => p.Level >= min).Count();
+```
+
+As charted in Figure 4, removing the native boundary pays off on frequent, tiny queries:
+
+![Figure 4: Primary-key point lookup and filtered COUNT(*) latencies on the Apple M4 Pro and CI platforms](/blog/part-1/01-cross-platform-lookup-and-count.png)
+
+*Figure 4: Primary-key point lookup and filtered COUNT(\*) latencies on the Apple M4 Pro and CI platforms.*
+
+| Primary-key lookup (100k rows) | DataVo, memory | DataVo, file (LSM) | SQLite, memory | SQLite, file | DuckDB, 1 thread, file |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| **Apple M4 Pro** (`02fa240f`, 20 Nov) | **55.0 ns** | **216.2 ns** | 715.7 ns | 1,654.0 ns | 62.7 µs |
+| **Linux x64 CI** (20 Nov) | **130.8 ns** | **288.3 ns** | 1,398.2 ns | 3,642.7 ns | 204.1 µs |
+| **Windows x64 CI** (20 Nov) | **239.6 ns** | **666.9 ns** | 2,024.0 ns | 6,741.1 ns | 380.7 µs |
+
+| Filtered `COUNT(*)`, `[Columnar]` (200k rows) | DataVo, memory | DataVo, file (LSM) | SQLite, memory | SQLite, file | DuckDB, 1 thread, file |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| **Apple M4 Pro** (`02fa240f`, 20 Nov) | **27.11 µs** | **27.44 µs** | 3,655.8 µs | 4,449.5 µs | 229.8 µs |
+| **Linux x64 CI** (20 Nov) | **9.29 µs** | **8.81 µs** | 4,553.2 µs | 5,603.4 µs | 538.4 µs |
+| **Windows x64 CI** (20 Nov) | **16.20 µs** | **15.94 µs** | 8,607.6 µs | 13,446.1 µs | 1,102.2 µs |
+
+Per lookup, DataVo allocates **56 B** in memory (just the returned entity) and **144 B** on LSM, versus **608 B** for SQLite through `Microsoft.Data.Sqlite`. The columnar `COUNT(*)` allocates **0 B** on the managed heap (versus **504 B** for SQLite).
+
+Two caveats keep this result honest. First, this table compares DataVo's build-time compiled LINQ path against SQLite and DuckDB over ADO.NET; when all engines execute SQL text prepared statements, integer-key lookups narrow considerably (**1.4 µs** vs **2.0 µs** on the M4 Pro). Second, if a column is *not* marked `[Columnar]`, DataVo falls back to scanning packed rows, where single-threaded DuckDB is substantially faster (**137 µs** vs **386 µs** on the M4 Pro).
+
+## Maintaining views incrementally
+
+Consider a reactive dashboard, trading blotter, or live game leaderboard that joins three tables—`Orders × Accounts × Markets`—with a `GROUP BY`, while new rows arrive continuously (visualized in Figure 5). In a traditional embedded database, every refresh re-executes the entire join unless you maintain custom summary tables by hand (for example, with SQLite `AFTER INSERT/UPDATE/DELETE` triggers). With declarative Z-set incremental view maintenance (IVM), each write pushes a tiny `+1` / `-1` delta through the view operator graph and updates only the affected groups without trigger boilerplate:
+
+<div class="sketch-diagram light-only">
+
+![Figure 5: Full view recomputation vs. incremental Z-set delta propagation](/blog/part-1/fig-04-zset-ivm-light.svg)
+
+</div>
+<div class="sketch-diagram dark-only">
+
+![Figure 5: Full view recomputation vs. incremental Z-set delta propagation](/blog/part-1/fig-04-zset-ivm-dark.svg)
+
+</div>
+
+*Figure 5: Full view recomputation vs. incremental Z-set delta propagation.*
+
+Over 10,000 orders, 1,000 accounts, and 50 markets running **50,000 insert-and-read iterations** (`complex-vip`), avoid-the-join gains grow with write density, as mapped in Figure 6:
+
+![Figure 6: Cumulative time to apply 50,000 updates to a 3-table JOIN + GROUP BY view](/blog/part-1/06-incremental-views-complex-vip.png)
+
+*Figure 6: Cumulative time to apply 50,000 updates to a 3-table JOIN + GROUP BY view on macOS, Linux, and Windows.*
+
+In C#, the subscription uses `SubscribeZeroAlloc` (or the owned `Subscribe` overload) and drains deltas on demand via `DispatchPendingNotifications()` (see [Live Reactive Views (Z-set IVM)](/manual/fundamentals/reactive-views)):
+
+```csharp
+using var view = db.SubscribeZeroAlloc(
+    "SELECT m.Category, SUM(o.Stake) AS TotalExposure FROM Orders o " +
+    "JOIN Accounts a ON o.AccountId = a.Id JOIN Markets m ON o.MarketId = m.Id " +
+    "WHERE a.IsVip = true GROUP BY m.Category",
+    (in QueryChangeRef delta) => ApplyDeltas(delta.Added, delta.Updated, delta.Removed));
+db.DispatchPendingNotifications(); // pull-drain deltas on the caller thread
+```
+
+- **Apple M4 Pro (12 Nov):** DataVo **191.7 ms** (p50 `3.1 µs`) vs DuckDB **34.3 s** (**179×**) vs SQLite **126.1 s** (**658×**).
+- **Linux x64 CI (20 Nov):** DataVo **599.9 ms** (p50 `10.9 µs`) vs DuckDB **112.9 s** (**188×**) vs SQLite **237.1 s** (**395×**).
+- **Windows x64 CI (20 Nov):** DataVo **545.5 ms** (p50 `9.6 µs`) vs DuckDB **135.5 s** (**248×**) vs SQLite **247.8 s** (**454×**).
+
+This speedup is specifically a property of incremental maintenance on multi-table views supported by the reactive planner (documented in full in [Live Reactive Views (Z-set IVM)](/manual/fundamentals/reactive-views)). On a simple single-table aggregate without joins, where recomputation is already cheap, the gap over SQLite shrinks to roughly **1.1×**.
+
+## Vector search with SQL filters
+
+In local RAG tools and desktop AI agents, vector similarity almost always comes wrapped in relational filters and joins—filtering by user, workspace, category, or author metadata before returning the top results:
+
+```sql
+SELECT d.Id, d.Title, d.Embedding <=> @query AS distance
+FROM Docs d
+JOIN Authors a ON d.AuthorId = a.Id
+WHERE a.Country = @country AND d.Category = @category
+ORDER BY distance ASC
+LIMIT 10;
+```
+
+On **50,000 × 384-dimensional clustered embeddings** (Apple M4 Pro, 17 Nov), comparing DataVo's `FLAT` and `HNSW` indexes against SQLite with `sqlite-vec` (`vec0` exact scan):
+
+| Query shape | DataVo Flat (exact) | DataVo HNSW | `sqlite-vec` (exact) |
+| --- | ---: | ---: | ---: |
+| `V0` no filter | 2.19 ms | **0.26 ms** | 18.2 ms |
+| `V1` filter, ~5% of rows | 2.64 ms | **2.48 ms** | 9.78 ms |
+| `V2` filter, ~50% of rows | 2.04 ms | **0.67 ms** | 14.4 ms |
+| `V3` `V1` + `JOIN` | 2.56 ms | **2.42 ms** | 9.76 ms |
+| `V4` `JOIN`, ~10% survive | 4.34 ms | **3.62 ms** | 13.1 ms |
+
+Every query shape above achieved **100% recall@10**, zero short result sets, and zero rows violating the filter. At 1,536 dimensions, distance computation dominates more heavily and margins narrow; the closest case is `V4`, where `FLAT` is **1.4× faster** than `sqlite-vec`.
+
+Note also that HNSW is not free to construct: at 10,000 × 1,536-dimensional vectors, building the graph takes **6–10 seconds**. If a session runs 100 queries or fewer, an exact `FLAT` scan (**571–793 ms** total) finishes sooner overall; HNSW pays back its build cost only after roughly **290+ queries** (running at **2.38 ms** p50 per query).
+
+## Twenty-eight SQL queries, and five wrong answers
+
+To test general SQL behaviour rather than cherry-picked microbenchmarks, the research matrix runs 28 prepared statements over identical generated data (**1,000,000 orders**, **100,000 customers**, **1,000 products**). Before any timing starts, the runner verifies every engine's output against an exact oracle computed directly from the data generator, favoring DataVo on joins and aggregates while highlighting SQLite’s strength in scan performance (Figure 7).
+
+![Figure 7: DataVo execution time relative to SQLite across 28 standard SQL and 5 vector shapes on the Apple M4 Pro](/blog/part-1/05-sql-matrix-vs-sqlite.png)
+
+*Figure 7: DataVo execution time relative to SQLite across 28 standard SQL and 5 vector shapes on the Apple M4 Pro.*
+
+Using a ±20% equivalence band against SQLite WAL `NORMAL` on the M4 Pro (17 Nov follow-up run), **18 SQL shapes favour DataVo, 6 are within 20%, and 4 favour SQLite**:
+
+- **Where DataVo pulls ahead:** 3-table inner join `J1` (**10.28×**, `70.2 ms` vs `721.4 ms`), `Orders × Customers GROUP BY` `J6` (**5.87×**), low-cardinality `GROUP BY` `G1`/`G2` (**3.3–4.7×**), columnar aggregates `C1`/`C2`/`C4`/`C6` (**4.8–13.7×**), secondary index lookup `W1` (**2.42×**), and clustered primary-key ranges `R1–R4` (**1.35–1.76×**).
+- **Where SQLite wins:** unindexed substring search `LIKE '%042-%'` (`W6`, SQLite **1.35×** faster), unindexed `ORDER BY ... LIMIT 10` (`C8`, **1.3×**), and high-cardinality 125k-group `GROUP BY` over a nullable indexed key (`G3`, **1.4×**).
+
+### Five wrong answers caught before timing
+
+The first run of this oracle on 14 November, against the unmodified engine, caught **five queries where DataVo returned the wrong answer** on both storage engines:
+
+| # | Query shape | DataVo returned | Correct |
+| --- | --- | --- | --- |
+| `B1` | `LEFT JOIN ... WHERE c.Id IS NULL` | `0` | `250,395` |
+| `B2` | `COUNT(DISTINCT CustomerId)` | `2,000` | `175` |
+| `B3` | Filtered vector search over aliased tables | `0–2` rows (`recall@10` 5%) | `10` rows |
+| `B4` | `AND` across two joined tables | `0` rows | `1,827` rows |
+| `B5` | Vector search joined to a filtered table | `10` rows (9 failing filter on avg) | `10` rows from that country |
+
+Each had a distinct bug underneath: a `WHERE` filter on the `NULL`-supplying side of an outer join evaluated before `NULL` padding existed; a parser dropping `DISTINCT` inside an aggregate; a planner comparing a table alias string against a raw table name; row keys emitted in a different order depending on join drive side; and a vector join path applying only the portion of `WHERE` that referenced the vector table.
+
+All five are fixed and covered by regression tests in `0.4.0-rc.1`. I include them here because speed numbers mean little without them: a fast wrong answer is not fast. Rigger and Su's *Pivoted Query Synthesis* <a class="cite-badge" href="#ref-7">7</a> and Slutz's *Massive Stochastic Testing of SQL* <a class="cite-badge" href="#ref-8">8</a> are the intellectual ancestors of this check, though here the oracle is an exact computation from the generator rather than a second database.
+
+## Durability, concurrency, and recovery
+
+Storage benchmarks expose operating-system behaviour as much as engine design, particularly around `fsync` and lock contention.
+
+### Durable single-row updates and YCSB mixed workloads
+
+| 50,000 point updates (median latency) | Linux x64 CI | Windows x64 CI | Apple M4 Pro (20k, 12 Nov) |
+| --- | ---: | ---: | ---: |
+| **DataVo Production** (`StrictFsync`) | 0.2405 ms | **3.9163 ms** | **4.0396 ms** |
+| **SQLite WAL `FULL`** | **0.1076 ms** | **3.9218 ms** | **4.0419 ms** |
+| **DataVo Relaxed** | **0.0086 ms** | 0.0272 ms | **0.0045 ms** |
+| **SQLite WAL `NORMAL`** | 0.0114 ms | **0.0134 ms** | 0.0054 ms |
+
+Where the operating system and drive enforce a genuine multi-millisecond flush—Apple's APFS SSD and the Windows runner's `FlushFileBuffers`—both durable engines hit the exact same **~3.9–4.0 ms** wall. Where flush is cheap (~0.1 ms on the Linux CI virtual disk), engine overhead becomes visible and SQLite WAL `FULL` is roughly **2.2× faster** per commit than DataVo Production.
+
+Under mixed 80% read / 20% write YCSB load:
+
+| YCSB 80/20 mixed | DataVo Relaxed | SQLite WAL `NORMAL` | DataVo Production |
+| --- | ---: | ---: | ---: |
+| **Linux x64 CI** (4 threads) | **230,912 ops/s** (write p99 `0.43 ms`) | 98,295 ops/s (`3.20 ms`) | 35,645 ops/s (`1.13 ms`) |
+| **Windows x64 CI** (4 threads) | **70,735 ops/s** (`1.05 ms`) | 33,256 ops/s (`7.49 ms`) | 1,360 ops/s (`48.67 ms`) |
+| **Apple M4 Pro** (12 threads, 12 Nov) | **510,695 ops/s** (`0.66 ms`) | 261,618 ops/s (`3.77 ms`) | 4,326 ops/s (`27.83 ms`) |
+
+### Space and clean reopen
+
+Inserting **1,000,000 records** in one batch, closing the database, and reopening it in the same process with a warm OS page cache (a clean reopen, not crash recovery):
+
+| Platform & Engine | Batch insert | On disk | Reopen | First read after |
+| --- | ---: | ---: | ---: | ---: |
+| Apple M4 Pro — DataVo Production (`02fa240f`, 21 Nov) | 704.9 ms | **27.725 MB** | 4.5 ms | 3.8 ms |
+| Apple M4 Pro — DataVo Relaxed (`02fa240f`, 21 Nov) | **403.1 ms** | **27.725 MB** | 1.7 ms | **< 0.1 ms** |
+| Apple M4 Pro — SQLite `WAL NORMAL` (`02fa240f`, 21 Nov) | 697.4 ms | 29.082 MB | **0.4 ms** | 1.2 ms |
+| Linux x64 — DataVo Production (20 Nov) | 1,365.8 ms | **28.155 MB** | 27.3 ms | 10.4 ms |
+| Linux x64 — DataVo Relaxed (20 Nov) | **946.4 ms** | **28.155 MB** | 1.6 ms | **0.1 ms** |
+| Linux x64 — SQLite `WAL NORMAL` (20 Nov) | 1,839.1 ms | 29.082 MB | **0.6 ms** | 3.9 ms |
+| Windows x64 — DataVo Production (20 Nov) | 1,811.5 ms | **28.155 MB** | 40.3 ms | 14.1 ms |
+| Windows x64 — DataVo Relaxed (20 Nov) | **1,299.3 ms** | **28.155 MB** | 3.9 ms | **0.1 ms** |
+| Windows x64 — SQLite `WAL NORMAL` (20 Nov) | 2,605.2 ms | 29.082 MB | **1.8 ms** | 5.4 ms |
+
+*(As with YCSB, the `WhitepaperEngineMatrix` harness does not currently instantiate an `SQLite WAL FULL` comparator in `space-and-recovery`; the matched pair in this table is `DataVo Relaxed` against `SQLite WAL NORMAL`.)*
+
+### Concurrent operations, and two caveats worth flagging
+
+The concurrent-ops scenario runs **8 reader threads and 2 writer threads for 5 seconds** against 100,000 in-memory records.
+
+On 12 November (`0.2.0-rc.3`), DataVo's writers starved completely (**0 writes completed**) on the 4-core CI runners. Between 12 November and 20 November (`02fa240f`), a series of concurrency fixes landed—commit-ordered snapshots, bounded waits on the snapshot gate, corrected write-lock owner accounting, and coordination between row and table write locks—so writers completed on both CI runners in `44748508039` (`302,878` writes on Linux, `98,696` writes on Windows). However, in our 21 November re-measurement (`44916996459`), starvation still triggered intermittently under heavy oversubscription (10 active workers on 4 logical cores): DataVo completed `224,522` writes on Apple M4 Pro and `50,986` writes on Linux x64, but stalled at **0 writes** (`9,297 ms` total runtime) on Windows x64 CI. We will isolate that Windows lock/scheduling interaction in Part 3.
+
+We can visualize concurrent contention under multiple threads in Figure 8:
+
+![Figure 8: Throughput and latency under 8-reader, 2-writer contention](/blog/part-1/04-concurrent-ops.png)
+
+*Figure 8: Throughput and latency under 8-reader, 2-writer contention.*
+
+| Platform | Engine | Reported ops/s | Reads | Writes | Read p99 | Write p99 |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| **Apple M4 Pro** (`02fa240f`, 21 Nov) | DataVo (`InMemory`) | **1,087,329** | 5,214,990 | **224,522** | 0.190 ms | **0.620 ms** |
+| **Apple M4 Pro** (`02fa240f`, 21 Nov) | SQLite (`WAL, normal`) | 389,341 | 1,857,503 | 91,458 | 0.142 ms | 1.299 ms |
+| **Apple M4 Pro** (`02fa240f`, 21 Nov) | SQLite (`shared-cache`) | 381,982 | 1,914,864 | 2 | **0.111 ms** | 5,012 ms |
+| **Linux x64 CI** (`44916996459`, 21 Nov) | DataVo (`InMemory`) | **1,552,810** | 7,719,876 | **50,986** | **0.006 ms** | **0.212 ms** |
+| **Linux x64 CI** (`44916996459`, 21 Nov) | SQLite (`WAL, normal`) | 819,171 | 4,048,881 | 49,367 | 0.178 ms | 2.515 ms |
+| **Linux x64 CI** (`44916996459`, 21 Nov) | SQLite (`shared-cache`) | 336,952 | 1,721,428 | 2 | 0.095 ms | 5,105 ms |
+| **Windows x64 CI** (`44916996459`, 21 Nov) | DataVo (`InMemory`) | **1,879,968** | 17,477,611 | **0** *(starved)* | **0.006 ms** | — *(0 writes)* |
+| **Windows x64 CI** (`44916996459`, 21 Nov) | SQLite (`WAL, normal`) | 339,416 | 2,375,126 | **20,592** | 0.206 ms | **3.796 ms** |
+| **Windows x64 CI** (`44916996459`, 21 Nov) | SQLite (`shared-cache`) | 613,042 | 3,855,821 | 1 | 0.012 ms | 6,286 ms |
+
+Two distinct behaviours jump out of the full 21 November matrix:
+
+1. **Why SQLite `shared-cache` completes only 1–2 writes everywhere.** `SqliteConcurrentOpsEngine` originally opened only `mode=memory&cache=shared`, which does not support WAL and takes table-level locks (`SQLITE_LOCKED`), so 8 continuous readers starve both writers until `PRAGMA busy_timeout = 3000` expires repeatedly (`5,012–6,286 ms` write p99). Adding a file-backed `SQLite (WAL, normal)` comparator (`journal_mode=WAL`, `synchronous=NORMAL`) eliminates SQLite's starvation across every OS (**91,458** writes on Apple M4 Pro, **49,367** on Linux CI, and **20,592** on Windows CI).
+2. **Where DataVo wins and where it loses against SQLite `WAL, normal`.** Where DataVo's writers are not starved, DataVo beats `SQLite (WAL, normal)` cleanly: on Apple M4 Pro it delivers **2.79×** higher overall throughput (`1,087,329` vs `389,341` ops/s), **2.45×** more completed writes, and **2.1×** lower write p99 latency (`0.620 ms` vs `1.299 ms`); on Linux x64 CI it delivers **1.90×** higher overall throughput (`1,552,810` vs `819,171` ops/s), comparable completed writes (`50,986` vs `49,367`), **29.7×** lower read p99 (`0.006 ms` vs `0.178 ms`), and **11.9×** lower write p99 (`0.212 ms` vs `2.515 ms`). On the 4-vCPU Windows Hyper-V runner, however, `SQLite (WAL, normal)` sustained steady progress (`20,592` writes at `3.796 ms` p99) while DataVo's writers starved in this run (`0` writes; `9,297 ms` runtime), so mixed-contention reliability under Windows 4-vCPU oversubscription remains an open fix.
+
+## Synchronising with PostgreSQL
+
+For field-service tablets, desktop POS terminals, or collaborative .NET apps, the local engine is only half the story; the other half is keeping it in step with PostgreSQL over unreliable networks.
+
+All sync measurements below ran on CI (`44756364158`, Ubuntu 26.04 x64, **2 vCPU**, PostgreSQL 17.12, loopback sockets) with nothing mocked: real PostgreSQL logical replication, real Kestrel WebSockets, and `electricsql/electric:latest` (`electric-1.8.1`) in Docker. On synced local replicas, point lookups take **4.06–5.19 µs** on DataVo versus **8.27–8.86 µs** on SQLite WAL.
+
+![Figure 9: Warm initial sync of 100,000 rows over a local WebSocket link](/blog/part-1/02-initial-sync-100k.png)
+
+*Figure 9: Warm initial sync of 100,000 rows over a local WebSocket link.*
+
+| 100k-row warm initial sync (10k warm) | Sync time | Wire B/row | Client GC alloc |
+| --- | ---: | ---: | ---: |
+| **DataVo-Sync → `inmemory`** | **605 ms** (162 ms) | **45.5 B** | **36.4 MB** |
+| **DataVo-Sync → `lsm`** | **726 ms** (226 ms) | **45.5 B** | **49.1 MB** |
+| **DataVo-Sync → `lsm-strict`** | **706 ms** (80 ms) | **45.5 B** | **49.1 MB** |
+| Custom JSON/WS → SQLite `WAL NORMAL` | 832 ms (195 ms) | 214.8 B | 129.9 MB |
+| Custom JSON/WS + deflate → SQLite `NORMAL` | 852 ms (219 ms) | 58.5 B | 130.2 MB |
+| Custom JSON/WS → SQLite `WAL FULL` | 702 ms (168 ms) | 214.8 B | 129.9 MB |
+| Custom JSON/WS + deflate → SQLite `FULL` | 909 ms (218 ms) | 58.5 B | 130.0 MB |
+| ElectricSQL `1.8.1` → SQLite `WAL NORMAL` | 1,167 ms (348 ms) | 362.7 B | 251.4 MB |
+
+Four observations stand out across the sync suite (as seen in Figure 9):
+
+- **Wire size and client memory.** Over loopback, wall-clock sync times are relatively close, but wire payload and GC pressure diverge sharply. DataVo-Sync transfers **45.5 B/row** (**4.7× smaller** than plain JSON and **8.0× smaller** than ElectricSQL) while allocating **36.4–49.1 MB** on the client (**2.6–3.6× less** than custom JSON/SQLite and **5.1–6.9× less** than ElectricSQL's `251.4 MB` / `259 MB` peak RSS). On cellular or metered field connections, wire size dominates sync time.
+- **Live commit propagation (PG commit → visible locally).** DataVo-Sync `lsm` reaches **1.98 ms p50** (and **1.09 ms p50** in Scenario B), compared to **3.44 ms p50** for ElectricSQL's HTTP long-poll and **1.33–1.53 ms p50** for the custom direct-push JSON/WebSocket baseline.
+- **Offline burst and convergence.** Two replicas (`A` and `B`) sync 1,000 rows from PostgreSQL; `A` disconnects, commits **500 local writes** (400 inserts and 100 updates), and reconnects. Across **6 of 6 CI runs**, PostgreSQL, `A`, and `B` converged identically row-for-row across all 1,400 rows—peer `B` observed `A`'s writes in **80.9–243.4 ms**, and PostgreSQL committed them in **188.6–259.0 ms**.
+- **Fan-out and 1,000-client hub stress.** Fanning 20,000 rows out to 50 concurrent WebSocket clients finishes in **7.13 s** (**140,218 aggregate rows/s**). Pushing the hub alone (PostgreSQL bridge off) from **10 → 100 → 1,000 concurrent WebSocket clients** on a single 2-vCPU VM holds **9.8k–14.3k rows/s** aggregate throughput, graphed in Figure 10:
+
+![Figure 10: WebSocket sync scaling from 10 to 1,000 concurrent clients on a 2-vCPU hub](/blog/part-1/03-websocket-client-scaling.png)
+
+*Figure 10: WebSocket sync scaling from 10 to 1,000 concurrent clients on a 2-vCPU hub.*
+
+At 1,000 concurrent clients saturating a 2-vCPU VM, median latency rises to **1,220 ms** and p99 to **4.6 s**. This stress test has no SQLite or ElectricSQL comparator.
+
+## Where it loses, and choosing the right tool
+
+Every storage engine is a set of trade-offs. Beyond the SQLite wins on `W6`, `C8`, and `G3` and the Linux durable-commit gap noted earlier, three limits are worth knowing before trying DataVo today:
+
+- **Whole-table analytics without `[Columnar]`:** On full-table scans over non-columnar columns, **DuckDB** is **3–340× faster**.
+- **Windows durable throughput:** Strict `FlushFileBuffers` caps single-commit latency at ~4 ms on Windows (affecting both DataVo Production and SQLite `FULL`), holding DataVo Production YCSB throughput on Windows to **1,360 ops/s**.
+- **Sync hub startup and synced range scans:** The DataVo-Sync hub takes **2.4 s** to load 100k rows into memory on cold startup, and 100-row primary-key range aggregates on synced replicas are currently faster on SQLite (**16.8 µs** vs **133–277 µs**).
+
+Put those limits together with the wins, and the decision boundary is straightforward:
+
+- **Use SQLite** if you want the default embedded SQL database with the broadest SQL support, the largest ecosystem, and two decades of failure experience. DataVo's dialect is its own and its `0.4.0-rc.1` on-disk format may still change.
+- **Use DuckDB** if your workload is whole-table OLAP analytics over large datasets or Parquet/CSV files. It is one to three orders of magnitude faster than either DataVo or SQLite on those queries.
+- **Use ElectricSQL** if you want read-path sync from PostgreSQL into a browser or app from an established, maintained product. My comparison covers one workload—initial sync and live latency over loopback—not its full feature set. In this setup it served as a read path; DataVo-Sync adds an offline write path, which is a different scope rather than a better implementation of the same one.
+- **Try DataVo** if you are building in .NET and specifically want managed Native AOT packaging with zero native binaries, SQL + `VECTOR(n)` search + Z-set incremental views in one transaction log, or bidirectional offline-first PostgreSQL sync.
+
+## Getting started
+
+```bash
+dotnet add package DataVo.Core --prerelease
+dotnet add package DataVo.Generators --prerelease   # optional: zero-alloc compiled LINQ
+```
+
+```csharp
+using DataVo.Core;
+using DataVo.Core.StorageEngine.Config;
+
+using var db = new DataVoContext(new DataVoConfig { StorageMode = StorageMode.Lsm, DiskStoragePath = "./app_data" });
+db.Execute("CREATE TABLE Notes (Id INT PRIMARY KEY, Tag VARCHAR(32), Embedding VECTOR(384))");
+```
+
+- **Open-source engine and documentation:** [github.com/ArintonAkos/DataVo-DBMS](https://github.com/ArintonAkos/DataVo-DBMS) · [Full Manual](https://arintonakos.github.io/DataVo-DBMS/)
+- **Commercial `DataVo-Sync` add-on:** For early access or licensing for offline-first PostgreSQL sync, reach out via `@ArintonAkos` on GitHub.
+
+> [!TIP]
+> Enjoyed the deep dive? Star [`ArintonAkos/DataVo-DBMS`](https://github.com/ArintonAkos/DataVo-DBMS) on GitHub to follow Parts 2–7.
+
+## What comes next
+
+- **[Part 2.](/blog/part-2-packed-buffers-aot-and-roslyn-codegen)** Packed byte buffers, Native AOT, and Roslyn codegen: how a 55 ns point lookup works with zero native binaries, prepared statements, and typed execution paths.
+- **Part 3.** What an fsync costs, across operating systems: the 4 ms tie, the 0.1 ms Linux case, and the Windows scaling problem.
+- **Part 4.** Cutting 100k-row sync allocations from 1.2 GB to 36 MB: zero-allocation initial sync and compressed columnar wire transfer.
+- **Part 5.** HNSW, the JIT, and the exact fallback: recall on clustered data, and why a graph search sometimes loses to a scan.
+- **Part 6.** Differential oracle testing: how our matrix caught five wrong-answer bugs before we tuned a single microsecond.
+- **Part 7.** Building an offline-first .NET 10 app end-to-end: combining Native AOT, filtered `VECTOR(n)` search, live Z-set views, and bidirectional Postgres sync in a real desktop/mobile architecture.
+
+## References
+
+<ol class="ref-list">
+  <li id="ref-1">Martin Kleppmann, Adam Wiggins, Peter van Hardenberg, Mark McGranaghan. "Local-First Software: You Own Your Data, in spite of the Cloud." <em>Onward! 2019</em> (ACM SIGPLAN).</li>
+  <li id="ref-2">Martin Kleppmann. <em>Designing Data-Intensive Applications.</em> O'Reilly Media, 2017.</li>
+  <li id="ref-3">Patrick O'Neil, Edward Cheng, Dieter Gawlick, Elizabeth O'Neil. "The Log-Structured Merge-Tree (LSM-Tree)." <em>Acta Informatica</em> 33(4), pp. 351–385, 1996.</li>
+  <li id="ref-4">Daniel J. Abadi, Samuel R. Madden, Nabil Hachem. "Column-Stores vs. Row-Stores: How Different Are They Really?" <em>SIGMOD 2008</em>.</li>
+  <li id="ref-5">Yu. A. Malkov, D. A. Yashunin. "Efficient and Robust Approximate Nearest Neighbor Search Using Hierarchical Navigable Small World Graphs." <em>IEEE Transactions on Pattern Analysis and Machine Intelligence</em>, vol. 42, no. 4, pp. 824–836, 2020 (online 2018).</li>
+  <li id="ref-6">Mihai Budiu, Frank McSherry, Leonid Ryzhyk, Val Tannen. "DBSP: Automatic Incremental View Maintenance for Rich Query Languages." <em>Proceedings of the VLDB Endowment</em> 16(7), pp. 1601–1614, 2023.</li>
+  <li id="ref-7">Manuel Rigger, Zhendong Su. "Testing Database Engines via Pivoted Query Synthesis." <em>OSDI 2020</em>.</li>
+  <li id="ref-8">Donald R. Slutz. "Massive Stochastic Testing of SQL." <em>VLDB 1998</em>.</li>
+</ol>
+
+### Data sources
+
+- DataVo-DBMS: `README.md`, `docs/manual/performance/benchmarks.md`, `docs/manual/performance/datavo-vs-sqlite.md`, and raw results under `docs/public/benchmarks/` (`2026-11-12`, `2026-11-16-v04-final`, `2026-11-17-engine-perf-followups`, `2026-11-21-m4pro`, `2026-11-21-ci`).
+- Apple M4 Pro BenchmarkDotNet (`02fa240f`, 20 Nov 2026, `--job short`), local M4 Pro `concurrent-ops` and `space-and-recovery` (`02fa240f`, 21 Nov 2026, under `docs/public/benchmarks/2026-11-21-m4pro/`), CI run `44748508039` (`master` @ `02fa240f`, 20 Nov 2026, Linux & Windows x64), and CI re-run `44916996459` (`21 Nov 2026`, Linux & Windows x64 `concurrent-ops` with `SQLite WAL NORMAL` under `docs/public/benchmarks/2026-11-21-ci/`).
+- DataVo-Sync CI run `44756364158` (20 Nov 2026, Ubuntu 26.04 x64, PG 17.12, ElectricSQL `1.8.1`): `compare.md`, `e2e.md`, `stress-10-100-1000.md`.
+
+---
+
+# Packed byte buffers, Native AOT, and Roslyn codegen: how a 55 ns point lookup works with zero native binaries
+
+> Source route: /blog/part-2-packed-buffers-aot-and-roslyn-codegen
+> Source file: blog/part-2-packed-buffers-aot-and-roslyn-codegen.md
+
+*Part 2 of 7.*
+
+In [Part 1](/blog/part-1-where-it-wins-and-where-it-loses), one benchmark line stood out above the rest: looking up a single row by primary key out of 100,000 shuffled records took **55.0 ns** in memory and **216.2 ns** on LSM disk files on an Apple M4 Pro—**7.7–13× faster** than SQLite, allocating **56 B** in memory (literally the size of the returned `Player` object) and **144 B** on disk, versus **608 B** for `Microsoft.Data.Sqlite`.
+
+That result raises an obvious question: **how can C# beat a battle-tested C database library by an order of magnitude on an in-memory lookup?**
+
+It is not because C# executes instructions faster than C. It is because calling *into* a C library from a managed runtime is never free, and neither is asking a general-purpose SQL engine to rediscover your schema on every row. When the storage engine lives in the same managed compilation unit as your code, and the C# compiler knows your table layout and query predicate at build time, four layers of runtime ceremony collapse into a handful of inlined bounds checks, aligned loads, and a single object allocation.
+
+At a glance, five engineering choices drive both the speed and the packaging story:
+
+- **Zero native binaries and zero interop marshalling:** Keeping the entire engine in pure .NET 10 removes per-OS native libraries and lets the JIT and AOT compilers inline straight from your query call into storage buffers.
+- **Cache-aligned packed byte buffers:** Fixed-width columns sit contiguously inside 64-byte aligned Pinned Object Heap buffers rather than per-row objects, shrinking retained memory **13×** from **640.3 B/row** to **49.2 B/row** (with shared strings).
+- **Lock-free optimistic reads:** In-memory primary-key lookups take no lock, pairing opposite volatile write/read ordering so a concurrent delete can never surface a half-read row.
+- **Immutable prepared-statement templates:** Parsing SQL once and cloning parameter-bound syntax trees lets concurrent threads, LSM point lookups, and live reactive views share one prepared query safely.
+- **Compile-time Roslyn code generation under Native AOT:** Incremental source generators replace runtime reflection and expression-tree compilation with static readers and build-time interceptors, passing `PublishAot=true` with **0** trim/AOT warnings.
+
+None of this is free. Every shortcut introduces parity invariants against the general SQL evaluator, memory-ordering subtleties, or compiler constraints, all tallied honestly in the final section.
+
+## The invisible tax of crossing the managed–native boundary
+
+When a .NET application reads one row from an in-memory SQLite database via a prepared `SqliteCommand`, the lookup is far more than a B-tree probe in RAM. Even after `Prepare()` compiles the SQL into VDBE bytecode, every row fetch crosses an ABI boundary and navigates a dynamically typed C API <a class="cite-badge" href="#ref-2">2</a> <a class="cite-badge" href="#ref-3">3</a> (Figure 1).
+
+1. **Managed command and parameter overhead.** Setting `_sqliteId.Value = id` boxes the integer into `object?`, and `ExecuteReader()` allocates a `SqliteDataReader` and steps through `Microsoft.Data.Sqlite`'s state machine.
+2. **Crossing the P/Invoke boundary.** Each call into `e_sqlite3` (`sqlite3_reset`, `sqlite3_bind_int64`, `sqlite3_step`, and one `sqlite3_column_*` call per column) crosses an unmanaged calling convention. The .NET JIT cannot inline across `DllImport` or eliminate redundant checks, so it pays a fixed transition tax on every invocation.
+3. **Dynamic column typing and string transcoding.** SQLite uses dynamic type affinity per cell <a class="cite-badge" href="#ref-2">2</a>. Reading `Name` calls `sqlite3_column_text`, inspects a null-terminated UTF-8 pointer in unmanaged memory, and transcodes it into a newly allocated UTF-16 `.NET` `string` on every lookup—even in `:memory:`.
+4. **Optional ORM mapping overhead.** Mapping rows through Dapper adds dynamic reader-to-POCO reflection on top of ADO.NET (DataVo supports Dapper via `DataVoConnection` as documented in [Dapper](/manual/client-interfaces/dapper), though the BenchmarkDotNet suite below tests raw ADO.NET readers rather than Dapper). Under Native AOT, reflection-heavy mapping also conflicts with IL trimming.
+
+<div class="sketch-diagram light-only">
+
+![Figure 1: SQLite managed-to-native P/Invoke boundary versus DataVo single managed compilation unit](/blog/part-2/fig-01-interop-boundary-light.svg)
+
+</div>
+<div class="sketch-diagram dark-only">
+
+![Figure 1: SQLite managed-to-native P/Invoke boundary versus DataVo single managed compilation unit](/blog/part-2/fig-01-interop-boundary-dark.svg)
+
+</div>
+
+*Figure 1: SQLite managed-to-native P/Invoke boundary versus DataVo's single managed compilation unit.*
+
+Keeping the engine in managed C# eliminates that entire boundary. On `net10.0`, `DataVo.Core.csproj` has only one NuGet package reference (`System.Numerics.Tensors` `10.0.0`, which compiles to managed SIMD intrinsics), and `DataVo.Data.csproj` references only `DataVo.Core`—meaning zero `.dll`, `.so`, or `.dylib` files per target platform and zero UTF-8-to-UTF-16 transcoding for in-memory strings.
+
+Yet removing the FFI wall alone is not enough: an earlier pure-managed build of DataVo still took **405–566 ns** and allocated **1,008 B** per in-memory lookup—slower than its own LSM disk engine (**241 ns**)—because every row still lived as a scattered heap object.
+
+## Packing rows into cache-aligned byte buffers (`FlatRowStore`)
+
+In a straightforward managed in-memory store, each row is an object holding a `CellValue[]` or dictionary. On our six-column `Player` benchmark model, that object-per-row layout retained **640.3 bytes per row** (with shared strings), forcing the CPU to chase scattered pointers and handing the garbage collector hundreds of thousands of heap references to scan during Gen-2 collections <a class="cite-badge" href="#ref-1">1</a>.
+
+```csharp
+[DataVoTable("players")]
+public sealed class Player
+{
+    [PrimaryKey] public int Id { get; set; }
+    public bool Active { get; set; }
+    [Columnar] public int Level { get; set; }
+    [Columnar] public long Gold { get; set; }
+    [Columnar] public double Ratio { get; set; }
+    public string Name { get; set; } = "";
+}
+```
+
+To replace per-row objects without risking manual `Marshal.AllocHGlobal` memory management, DataVo's in-memory storage packs rows into **`FlatRowStore`** (`DataVo.Core/StorageEngine/Memory/FlatRowStore.cs`), splitting each table into two parallel 4,096-slot chunk structures indexed by an immutable, append-only row number.
+
+### 64-byte aligned Pinned Object Heap chunks
+
+Fixed-width columns live inside `FlatSlotList` → `FlatChunk` (`DataVo.Core/Memory/Flat/FlatChunk.cs`). Each chunk allocates 4,096 slots (`1 << 12`; tiny tables start at `FirstChunkRows = 16`) directly on the .NET 10 **Pinned Object Heap (POH)** <a class="cite-badge" href="#ref-3">3</a> and offsets slot 0 to a 64-byte cache-line boundary:
+
+```csharp
+// DataVo.Core/Memory/Flat/FlatChunk.cs
+_memory = GC.AllocateArray<byte>(length + Alignment - 1, pinned: true);
+_start = AlignmentGap(_memory); // Alignment = 64
+```
+
+Because the GC owns the chunk and never moves or frees it while referenced, a lock-free reader holding a `ReadOnlySpan<byte>` can never touch dangling memory. Variable-length managed references—strings and `float[]` vectors—cannot sit inside raw byte arrays without hiding pointers from the GC, so `ReferenceDirectory` stores them in parallel `object?[]` chunks indexed by the same slot number (`slot & 4095`).
+
+### Widest-first alignment and the 32-byte `Player` record
+
+Inside each slot, `RowLayout.Create` (`DataVo.Core/StorageEngine/Memory/RowLayout.cs`) packs fixed-width columns **widest first**—16-byte (`Decimal`, `Guid`), 8-byte (`Int64`, `Double`), 4-byte (`Int32`, `Date`), then 1-byte (`Boolean`)—followed by a 1-byte status flag, a null bitmask (`(cols + 7) >> 3` bytes), and 8-byte alignment padding. Every primitive sits on a multiple of its own width with zero interior padding holes, compressing `Player` into **32 bytes** plus one reference slot for `Name` (Figure 2):
+
+- `Gold` (`Int64`, 8 B): bytes `0..7` · `Ratio` (`Double`, 8 B): bytes `8..15`
+- `Id` (`Int32`, 4 B): bytes `16..19` · `Level` (`Int32`, 4 B): bytes `20..23`
+- `Active` (`Boolean`, 1 B): byte `24` · `Status`: byte `25` (`0 = Empty`, `1 = Packed`, `2 = KeptApart`)
+- `NullBits`: byte `26` · Padding: bytes `27..31` → `RecordBytes = 32`
+
+<div class="sketch-diagram light-only">
+
+![Figure 2: FlatRowStore 32-byte widest-first packed record layout for Player and parallel ReferenceDirectory](/blog/part-2/fig-02-flatrowstore-layout-light.svg)
+
+</div>
+<div class="sketch-diagram dark-only">
+
+![Figure 2: FlatRowStore 32-byte widest-first packed record layout for Player and parallel ReferenceDirectory](/blog/part-2/fig-02-flatrowstore-layout-dark.svg)
+
+</div>
+
+*Figure 2: `FlatRowStore` 32-byte widest-first packed record layout for `Player` and its parallel `ReferenceDirectory`.*
+
+Switching to `FlatRowStore` cut retained row-store memory **13×**: from **640.3 B/row** down to **49.2 B/row** with shared strings (**145.3 B/row** with unique `"player-N"` strings; **231.6 B/row** including the primary-key index). If dynamic SQL inserts a mismatched cell type (such as a `BIGINT` into an `INT` column), `FlatRowStore.Add` spills only that row into a side `ConcurrentDictionary<int, CellValue[]>` marked `StatusKeptApart = 2` so ordinary rows pay zero overhead.
+
+For streaming scans over serialized rows (including LSM SSTables), DataVo applies the same principle via **`RowRef`** (`DataVo.Core/Streaming/RowRef.cs`)—a stack-only `readonly ref struct` wrapping `ReadOnlySpan<byte>` that decodes cells on demand without heap allocations (see [Zero-Allocation Row Model](/manual/internals/zero-allocation-rows)).
+
+Compact memory alone still leaves hundreds of nanoseconds on the table if every lookup parses SQL, takes a table lock, or allocates a row dictionary—so the lookup path itself had to bypass all three.
+
+## Tracing a 55 ns point lookup—and the 216 ns LSM fallback
+
+Here is the BenchmarkDotNet lookup in [PointLookupBenchmarks.cs](https://github.com/ArintonAkos/DataVo-DBMS/blob/master/benchmarks/DataVo.Benchmarks/PointLookupBenchmarks.cs):
+
+```csharp
+// Intercepted at build time via [InterceptsLocation]:
+Player? found = _players.FirstOrDefault(id, static (p, key) => p.Id == key);
+```
+
+At build time, `DataVo.Generators` intercepts that call site and routes it to a generated `DataVoLinqPlan<Player, int>` that extracts the integer primary key directly without building SQL or boxing parameters. At runtime, execution splits cleanly between the in-memory shortcut and the LSM disk path (Figure 3).
+
+<div class="sketch-diagram light-only">
+
+![Figure 3: 55 ns lock-free packed lookup versus 216 ns LSM clustered point path](/blog/part-2/fig-03-lookup-pipeline-and-liveness-light.svg)
+
+</div>
+<div class="sketch-diagram dark-only">
+
+![Figure 3: 55 ns lock-free packed lookup versus 216 ns LSM clustered point path](/blog/part-2/fig-03-lookup-pipeline-and-liveness-dark.svg)
+
+</div>
+
+*Figure 3: The 55 ns lock-free `PackedKeyReader<T>` shortcut versus the 216 ns LSM `ClusteredPoint` path.*
+
+### Path A: In-memory `PackedKeyReader<T>` (55.0 ns, 56 B)
+
+When `DataVoLinqPlan.FirstOrDefault` calls `table.TryReadByIntegerKey(key, out item)`, `PackedKeyReader<T>` (`DataVo.Core/Tables/PackedKeyReader.cs`) first checks a fail-closed guard (`MustUseStatement()`): it steps aside if storage is not packed, authorization or diagnostics are enabled, or the session is inside an explicit transaction, MVCC snapshot, or active row write lock.
+
+Otherwise, it reads **without taking any lock**:
+
+1. Probes the cached concurrent primary-key map (`ConcurrentInt64Int64Map`) for `key → rowId`.
+2. Borrows a `FlatRow` span at `position = (int)(rowId - 1)` via `rows.TryReadPacked(...)` and verifies `binding.KeyOf(row.Record) == key`.
+3. Wraps the span in a stack-only `DataVoPackedRow` `ref struct` and calls the generated `ReadPackedRow` delegate to populate `new Player { ... }` directly from fixed byte offsets.
+4. Verifies `rows.IsTypedLive(position)` **after** constructing `Player` so a concurrent delete can never return a torn or half-cleared row.
+
+<details>
+<summary>Under the hood: lock-free ARM64 liveness proof &amp; 56-byte allocation math</summary>
+
+A packed row in `FlatRowStore` is immutable once published—its fixed-width bytes are never rewritten in place. The only concurrent mutation is **`FlatRowStore.Remove(index)`**, which writes the empty status byte *before* clearing managed references:
+
+```csharp
+// Writer: DataVo.Core/StorageEngine/Memory/FlatRowStore.cs + RowLayout.cs
+Layout.MarkEmpty(record);                   // 1. Volatile.Write(ref record[StatusOffset], 0)
+FlatRowCodec.ClearReferences(Layout, ...);  // 2. Volatile.Write(ref references[base + slot], null)
+```
+
+`PackedKeyReader<T>.TryReadFrom` reads in the **exact opposite volatile order** <a class="cite-badge" href="#ref-4">4</a>:
+
+```csharp
+// Reader: DataVo.Core/Tables/PackedKeyReader.cs
+try
+{
+    // 1. Fixed-width bytes (immutable) + reference slots via Volatile.Read
+    item = _read(new DataVoPackedRow(row, binding.Fields!));
+}
+catch (Exception) when (!rows.IsTypedLive(position))
+{
+    // Row was removed mid-read, so a cleared non-null string threw NullColumn.
+    return false;
+}
+
+// 2. Trailing acquire load on StatusOffset: Volatile.Read(ref record[StatusOffset]) != 0
+return rows.IsTypedLive(position) && source.Table.CurrentRows is not null;
+```
+
+Because the writer issues a release store on `Status = Empty` before clearing `references`, and the reader issues acquire loads on every reference before checking `IsTypedLive`, any reader that sees a cleared reference is guaranteed to also see `Status = Empty`—even on weakly ordered ARM64 cores like the Apple M4 Pro. If a delete raced with the lookup, the partial object is discarded and the call falls back cleanly to the prepared statement.
+
+As for the **56 bytes** of managed heap allocation on 64-bit .NET, that is literally the `Player` instance itself: 16 B object/MethodTable header + 8 B `Gold` + 8 B `Ratio` + 8 B `Name` reference + 4 B `Id` + 4 B `Level` + 1 B `Active` + 7 B alignment padding = **56 B** (**0 B** engine overhead).
+
+</details>
+
+### Path B: LSM file `ClusteredPoint` (216.2 ns, 144 B)
+
+Under `StorageMode.Lsm`, `PackedKeyReader<T>` declines (`!_packedStorage`), so `DataVoLinqPlan` executes the slot's cached `DataVoPreparedStatement` via `ExecuteBorrowed(p0)`. Because `Player` has a single `INT` primary key, LSM stores rows **clustered** directly under that key—so `SelectAccessKind.ClusteredPoint` (`DataVoPreparedStatement.Plans.cs`) skips any secondary index hop and calls `LsmStorageEngine.TryVisitStoredRowByKey`.
+
+`LsmStorageEngine` probes the lock-free `LatestRows` write overlay first, then acquires an immutable `TableVersion` to search memory-mapped SSTable V2 files (`SsTableV2Reader.Lookup`) into a thread-local `_singleRowScratch` buffer. `VisitClusteredPointRow` decodes only the projected columns into a reusable thread-local `RowResultSlot` (avoiding fresh primitive boxes), and `ReadRow` constructs `Player` (`56 B`) plus the decoded UTF-8 `Name` string (`~48–56 B`), totaling **144 B** and **216.2 ns**.
+
+<details>
+<summary>Under the hood: reusing boxed primitives in RowResultSlot</summary>
+
+When returning rows through `ExecuteBorrowed`, `RowResultSlot` (`DataVo.Core/PreparedStatements/DataVoPreparedStatement.Plans.cs`) avoids allocating fresh boxed `int`, `long`, `float`, `double`, and `Guid` objects on every lookup by reusing pre-allocated per-slot boxes in place (using `BoxedIntegerCache` for `-1..32767` and `Unsafe.Unbox<T>` for everything else):
+
+```csharp
+// DataVo.Core/PreparedStatements/DataVoPreparedStatement.Plans.cs
+[MethodImpl(MethodImplOptions.AggressiveInlining)]
+public object BoxInt64(int ordinal, long value)
+{
+    object box = _boxedLongs[ordinal];
+    Unsafe.Unbox<long>(box) = value;
+    return box;
+}
+```
+
+This is safe only because `ExecuteBorrowed` callers—such as generated `ReadRow` delegates—unbox every cell immediately before the next query executes on the same thread.
+
+</details>
+
+### Cross-platform BenchmarkDotNet results
+
+Figure 6 and the table below summarize `PointLookupBenchmarks` across Apple M4 Pro (`02fa240f`), Linux x64 CI, and Windows x64 CI (run `44748508039`).
+
+<details>
+<summary>Test environments (Apple M4 Pro, Linux x64 CI, Windows x64 CI)</summary>
+
+| Environment | Hardware | Runtime | Source |
+| --- | --- | --- | --- |
+| Apple M4 Pro | 12 cores, 48 GiB, APFS SSD | .NET 10.0.3, Arm64 RyuJIT, macOS 26.3 | BDN `0.15.8` (`--job short`, `02fa240f`, 20 Nov 2026) under `docs/public/benchmarks/2026-11-21-m4pro/` |
+| Linux x64 CI | AMD EPYC 9V45, 4 logical / 2 physical cores | .NET 10.0.15, Ubuntu 26.04 | GitHub Actions run `44748508039` (`master` @ `02fa240f`, 20 Nov 2026) |
+| Windows x64 CI | Xeon Platinum 8370C, 4 logical / 2 physical cores (Hyper-V) | .NET 10.0.15, Windows 11 24H2 | GitHub Actions run `44748508039` (`master` @ `02fa240f`, 20 Nov 2026) |
+
+</details>
+
+| Primary-key lookup (100k rows, shuffled) | DataVo (Mem) | DataVo (LSM File) | SQLite (Mem) | SQLite (WAL File) | DuckDB 1t (File) |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| **Apple M4 Pro** (`02fa240f`) | **55.01 ns** *(±5.61 ns)* | **216.22 ns** *(±12.90 ns)* | 715.65 ns | 1,654.00 ns | 62,702 ns |
+| **Linux x64 CI** (`44748508039`) | **130.8 ns** | **288.3 ns** | 1,398.2 ns | 3,642.7 ns | 204,140 ns |
+| **Windows x64 CI** (`44748508039`) | **239.6 ns** | **666.9 ns** | 2,024.0 ns | 6,741.1 ns | 380,684 ns |
+| **Managed alloc / call** (64-bit .NET 10) | **56 B** | **144 B** | 608 B | 608 B | 2,144 B |
+
+*(On the full-job 13 November M4 Pro run `ce818d4`, DataVo in-memory measured **52.1 ns** mean / **49.3 ns** median, ±2.3 ns error.)*
+
+![Figure 6: Cross-platform point-lookup latency and managed heap allocation per call](/blog/part-2/01-lookup-latency-and-alloc.png)
+
+*Figure 6: Primary-key point lookup latency across Apple M4 Pro, Linux x64 CI, and Windows x64 CI (Panel A), and managed heap allocation per operation for point lookups and filtered `COUNT(*)` (Panel B).*
+
+One honest caveat: **this benchmark compares DataVo's build-time compiled LINQ path against SQLite and DuckDB over ADO.NET.** When all engines run raw SQL text prepared statements (`sql-workload` over 1,000,000 file-backed rows on the M4 Pro; see [Benchmark Results](/manual/performance/benchmarks#sql-over-1-000-000-rows)), DataVo takes **1.4 µs** (`INT` key) and **1.2 µs** (`GUID` key) versus SQLite's **2.0 µs** and **2.2 µs** (**1.4–1.8×** faster)—because raw SQL callers pay for owned `QueryResult` dictionaries rather than `ExecuteBorrowed`.
+
+Still, every path outside an in-memory integer key—including LSM lookups, parameterized SQL, and live reactive queries—relies on one shared prepared-statement engine that must stay safe under concurrency.
+
+## Prepared statements, AST isolation, and the bridge to reactive views
+
+Underneath both raw SQL and generated LINQ sits **`DataVoPreparedStatement`** (`DataVo.Core/PreparedStatements/DataVoPreparedStatement.cs`). Calling `ctx.Prepare(sql)` runs `Lexer` and `Parser` **once**, stores the template `List<SqlStatement>`, and runs `InitializeFastPathCandidates()` to classify eligible single-table `SELECT`, `UPDATE`, and `DELETE` shapes—caching a schema-versioned `CompiledSelectPlan` on first execution that automatically invalidates on `ALTER TABLE`.
+
+### Why template ASTs are never mutated
+
+Mutating parameter placeholder nodes in place during binding breaks concurrency as soon as two threads or two standing views share one prepared statement. DataVo prevents that structurally via **`SqlParameterBinder`** (`DataVo.Core/PreparedStatements/SqlParameterBinder.cs`): whenever execution falls back to the general evaluator or seeds a reactive view, `BindStatement` clones the template AST and replaces every `ParameterNode` (across `WHERE`, `SELECT`, CTEs, `HAVING`, and `LIMIT/OFFSET`) with immutable `BoundValueLiteralNode` or `NullLiteralNode` values, keeping the shared template strictly read-only (Figure 4).
+
+<div class="sketch-diagram light-only">
+
+![Figure 4: Prepared statement AST isolation via SqlParameterBinder serving point queries and reactive views concurrently](/blog/part-2/fig-04-prepared-ast-isolation-light.svg)
+
+</div>
+<div class="sketch-diagram dark-only">
+
+![Figure 4: Prepared statement AST isolation via SqlParameterBinder serving point queries and reactive views concurrently](/blog/part-2/fig-04-prepared-ast-isolation-dark.svg)
+
+</div>
+
+*Figure 4: Prepared statement AST isolation via `SqlParameterBinder` serving concurrent executions and independent reactive views from one parsed handle.*
+
+### Owned vs. borrowed execution—and zero-reparse reactive subscriptions
+
+`DataVoPreparedStatement` provides `Execute(...)` (returning an owned `QueryResult`) alongside `ExecuteBorrowed(...)`, which returns the thread-local `RowResultSlot.HitResult` and uses 1-to-4 parameter stack-struct overloads (`TwoParams`, `ThreeParams`, `FourParams`) to avoid `params[]` array allocations. That same AST-isolation pipeline feeds DataVo's Z-set incremental view engine <a class="cite-badge" href="#ref-7">7</a> through `BindSingleReactiveStatement`:
+
+```csharp
+// Parse once, bind independently for multiple live views:
+DataVoPreparedStatement teamTop = ctx.Prepare(
+    "SELECT Id, Name, Score FROM Player WHERE Team = @team ORDER BY Score DESC LIMIT @k");
+
+using var redTop3 = ctx.SubscribeZeroAlloc(
+    teamTop,
+    (in QueryChangeRef change) => ApplyHudDelta(change.Added, change.Updated, change.Removed),
+    ("team", "Red"), ("k", 3));
+
+using var blueTop5 = ctx.Subscribe(
+    teamTop,
+    change => LogTeamChanges(change),
+    ("team", "Blue"), ("k", 5));
+```
+
+Before attaching any capture hook, `BindSingleReactiveStatement` validates that the template holds a single `SELECT`, rejects unsupported constructs like `DISTINCT` aggregates, clones an isolated AST bound to each subscription's parameters, and passes it straight to `ReactiveRegistry` with zero SQL re-parsing (see [Live Reactive Views (Z-set IVM)](/manual/fundamentals/reactive-views)).
+
+Preparing SQL once removes parse overhead, yet raw SQL still leaves schema discovery and typed object mapping to runtime—unless we move both into the C# compiler itself.
+
+## Replacing runtime reflection and `Expression.Compile()` with Roslyn codegen
+
+Traditional .NET LINQ providers turn lambdas into heap-allocated `Expression<Func<T, bool>>` trees, walk them at runtime, and compile mappers via `Expression.Compile()` or `Reflection.Emit`. Under Native AOT, `Reflection.Emit` is unavailable, `Expression.Compile()` drops to a slow interpreter, and reflection over arbitrary model properties fights the IL trimmer <a class="cite-badge" href="#ref-6">6</a>.
+
+`DataVo.Generators` flips that pipeline: it uses ordinary `Func<...>` lambdas, zero `Expression` trees, and two Roslyn `IIncrementalGenerator`s <a class="cite-badge" href="#ref-5">5</a> to move schema discovery, SQL generation, predicate compilation, and row materialization entirely to `csc` build time (Figure 5).
+
+<div class="sketch-diagram light-only">
+
+![Figure 5: Build-time Roslyn source generators versus trimmed Native AOT runtime execution](/blog/part-2/fig-05-roslyn-build-vs-runtime-light.svg)
+
+</div>
+<div class="sketch-diagram dark-only">
+
+![Figure 5: Build-time Roslyn source generators versus trimmed Native AOT runtime execution](/blog/part-2/fig-05-roslyn-build-vs-runtime-dark.svg)
+
+</div>
+
+*Figure 5: What moves to build time in `DataVo.Generators` versus what ships inside the trimmed Native AOT binary.*
+
+### `DataVoTableGenerator`: four readers, zero reflection
+
+Marking a model `[DataVoTable("players")]` triggers `DataVoTableGenerator` via `ForAttributeWithMetadataName` to emit `PlayerDataVoExtensions`, registering `DataVoTableInfo<Player>` automatically through `[ModuleInitializer]`. Instead of reflecting over properties at startup, it generates four specialized readers—`ReadRow`, `ReadStreamedRow`, `ReadPackedRow`, and `ReadReactiveRow`—with column ordinals baked into IL as compile-time constants:
+
+```csharp
+// Simplified excerpt of what DataVoTableGenerator emits for Player:
+private static readonly DataVoPackedReader<Player> ReadPackedRow = static row =>
+    new Player()
+    {
+        Id     = row.ReadInt32(0, "Id"),
+        Active = row.ReadBoolean(1, "Active"),
+        Level  = row.ReadInt32(2, "Level"),
+        Gold   = row.ReadInt64(3, "Gold"),
+        Ratio  = row.ReadDouble(4, "Ratio"),
+        Name   = row.ReadString(5, "Name"),
+    };
+
+private static Player ReadReactiveRow(in DataVo.Core.Runtime.Reactive.RowRef row)
+{
+    return new Player()
+    {
+        Id     = row.ReadInt32(0, "Id"),
+        Active = row.ReadBoolean(1, "Active"),
+        Level  = row.ReadInt32(2, "Level"),
+        Gold   = row.ReadInt64(3, "Gold"),
+        Ratio  = row.ReadDouble(4, "Ratio"),
+        Name   = row.ReadString(5, "Name"),
+    };
+}
+```
+
+### `DataVoLinqInterceptorGenerator`: `[InterceptsLocation]` at every call site
+
+For LINQ-shaped calls on `DataVoTable<T>` (`FirstOrDefault`, `SingleOrDefault`, `Where`, `OrderBy`/`ThenBy`, `Select`, `Sum`, `Min`, `Max`, `ExecuteUpdate`), `DataVoLinqInterceptorGenerator` emits C# 12+ `[InterceptsLocation]` interceptors <a class="cite-badge" href="#ref-5">5</a> targeting each exact call site. For `_players.FirstOrDefault(id, static (p, key) => p.Id == key)`, Roslyn rewrites the call to invoke the generated plan directly:
+
+```csharp
+// Simplified excerpt of what DataVoLinqInterceptorGenerator emits:
+private sealed class Plan0 : DataVoLinqPlan<Player, int>
+{
+    public static readonly Plan0 Instance = new Plan0();
+    private Plan0() : base("Id = @p0", unique: true) { }
+
+    // Enables PackedKeyReader<Player> to skip the prepared statement completely:
+    protected override bool TryGetIntegerKey(int state, out long key)
+    {
+        key = (long)state;
+        return true;
+    }
+
+    // Fallback path (LSM file, explicit transaction, miss):
+    protected override QueryResult Run(DataVoPreparedStatement statement, int state, bool borrowed)
+    {
+        DataVoQueryParameter p0 = new DataVoQueryParameter("p0", state);
+        return borrowed ? statement.ExecuteBorrowed(p0) : statement.Execute(p0);
+    }
+}
+
+[InterceptsLocation(version: 1, data: "...")]
+public static Player? FirstOrDefault0(
+    this DataVoTable<Player> table, int state, Func<Player, int, bool> predicate)
+{
+    return Plan0.Instance.FirstOrDefault(table, state, predicate);
+}
+```
+
+Beyond point lookups, the same generator powers two other zero-allocation paths:
+
+- **Compiled scan kernels (`IRowRefFilter` / `IColumnarFilter`).** For predicates over fixed-width columns (`Where(50, static (p, min) => p.Level >= min).Count()`), `DataVoLinqEmitter` emits a value-type `struct Kernel`. Generic specialization across the storage loop eliminates delegate calls and row allocations, running `[Columnar]` `Count`, `Sum`, `Min`, and `Max` over 200,000 rows in **27.1–89.6 µs** with **0 B** heap allocation versus **504 B** for SQLite and **1,136–1,169 B** for DuckDB (Figure 6, Panel B; see [Compiled Scan Kernels](/manual/internals/compiled-scan-kernels)).
+- **Zero-allocation reactive HUD buffers (`SubscribeInto`).** When a composed query ends in `.Select(...)`, `DataVoLinqShapeEmitter` emits a value-type `IReactiveRowProjector<TProjection>` struct reading `RowRef` cells by constant ordinal into `BufferedWindowReactiveQuery`, updating a caller-owned `Memory<HudSlot>` slice on `DispatchPendingNotifications()` with **0 bytes** allocated in steady state:
+
+```csharp
+public readonly record struct HudSlot(int Id, int Score);
+
+var hud = new HudSlot[3];
+using var sub = db.Table<Player>()
+    .Where(100, static (p, min) => p.Score >= min)
+    .OrderByDescending(static p => p.Score)
+    .Take(3)
+    .Select(static p => new HudSlot(p.Id, p.Score))
+    .SubscribeInto(hud.AsMemory(), count => RenderHud(hud.AsSpan(0, count)));
+```
+
+### Transparent fallbacks when a lambda cannot compile
+
+Any filter, sort key, or projection that the generator cannot translate still executes and returns exact results by streaming pages, while emitting a build diagnostic explaining why. Outside `[InterceptsLocation]`, emitted code stays within C# 9 so older compilers (such as Unity's) compile `[DataVoTable]` models cleanly and keep `Get<Model>ById` and prepared statements fast (see [Roslyn Source Generators](/manual/client-interfaces/source-generators)).
+
+<details>
+<summary>Compiler fallback diagnostics (DATAVOL001–DATAVOL005)</summary>
+
+| Diagnostic | Severity | Meaning |
+| --- | --- | --- |
+| `DATAVOL001` | Warning | Lambda captures a local variable or instance member; pass it as `state` with a `static` lambda. |
+| `DATAVOL002` | Warning | Predicate uses an untranslatable construct (arbitrary method call, arithmetic, column-to-column comparison, or mismatched type). |
+| `DATAVOL003` | Warning | Project has not enabled `<InterceptorsNamespaces>$(InterceptorsNamespaces);DataVo.Generated</InterceptorsNamespaces>`. |
+| `DATAVOL004` | Warning | `OrderBy` key or `Select` selector runs in memory over whole models. |
+| `DATAVOL005` | **Error** | `ExecuteUpdate` cannot be compiled (it has no in-memory fallback, so failing at build time prevents a runtime `NotSupportedException`). |
+
+</details>
+
+Compile-time codegen removes runtime reflection from user queries, but single-binary deployment only holds if the database engine itself passes the Native AOT trimmer cleanly.
+
+## Locking the Native AOT fence (184 warnings to zero)
+
+Declaring a library "Native AOT compatible" is easy; keeping it trim-clean as features ship every week is harder. One unannotated `JsonSerializer.Serialize`, one `Activator.CreateInstance`, or one `dynamic` dispatch can break trimming <a class="cite-badge" href="#ref-6">6</a>.
+
+When we first enabled `<IsAotCompatible>true</IsAotCompatible>` on `DataVo.Core`, the Roslyn trim and AOT analyzers reported **184 diagnostics**. Rather than hiding them behind `[UnconditionalSuppressMessage]`, we ratcheted the baseline down to zero across five passes (recorded in `scripts/check-aot-baseline.sh`):
+
+| Milestone | Remaining IL Warnings | What was eliminated |
+| --- | ---: | --- |
+| **Baseline fence** | 184 | Initial enablement of .NET trim & AOT analyzers across `DataVo.Core` |
+| **T1 — Catalog persistence** | 144 | Removed `XmlSerializer` from schema catalog serialization |
+| **T2 — Core JSON serialization** | 100 | Replaced `Newtonsoft.Json` / reflection JSON with `System.Text.Json` source generation |
+| **T3 — Execution & planner JSON** | 76 | Migrated remaining Volcano / `Select` serialization paths to source-generated STJ |
+| **T4 + T5 — Dynamic dispatch & factories** | **0** | Eliminated all `dynamic`/DLR call sites and reflection `Activator` factories |
+
+Once the count hit zero, we locked both `DataVo.Core.csproj` and `DataVo.Data.csproj` by promoting every trim and AOT analyzer code (`IL2026` through `IL3056`) to a build error:
+
+```xml
+<!-- DataVo.Core/DataVo.Core.csproj -->
+<IsAotCompatible Condition="'$(TargetFramework)' == 'net10.0'">true</IsAotCompatible>
+<WarningsAsErrors Condition="'$(TargetFramework)' == 'net10.0'">$(WarningsAsErrors);IL2026;IL2046;IL2055;IL2057;IL2070;IL2072;IL2075;IL2080;IL2087;IL2090;IL2091;IL2092;IL2093;IL3050;IL3051;IL3052;IL3053;IL3054;IL3055;IL3056</WarningsAsErrors>
+```
+
+Two CI gates enforce this fence on every commit: `scripts/check-aot-baseline.sh` rebuilds both locked libraries in `Release`, and **`DataVo.AotSmoke`** publishes a standalone native executable (`<PublishAot>true</PublishAot>`, `<InvariantGlobalization>true</InvariantGlobalization>`) that runs dynamic SQL, `InsertTyped`, `SubscribeZeroAlloc`, ADO.NET (`DataVoConnection`/`DataVoDataReader`), `[DataVoTable]` registration, intercepted LINQ (`Where`, `OrderBy`, `Skip`, `Take`, `Select`, `ExecuteUpdate`, `ExecuteDelete`), `RowRefStream`, HNSW `Vector3` search, prepared-statement reactive views, and `SubscribeInto` inside a trimmed native binary. Only `DataVo.EntityFrameworkCore` sits outside this guarantee due to EF Core's own upstream AOT constraints (see [Native AOT](/manual/client-interfaces/native-aot)).
+
+Every shortcut and AOT guarantee described so far shifts complexity from runtime into architecture—so before adopting them, it is worth tallying the real cost.
+
+## What this cost in complexity—and where it stops paying off
+
+In Part 1, I promised that Part 2 would explain not only how a 55 ns lookup is built, but **what it cost in complexity**. Shaving 660 nanoseconds out of a lookup shifts work into invariants, concurrency subtleties, and surface constraints:
+
+1. **Dual-path parity is an ongoing tax.** `PackedKeyReader<T>`, `CompiledSelectPlan`, `IRowRefFilter`, and the general SQL evaluator are four distinct execution paths over the same tables. Every shortcut must fail closed—if a transaction is open, a schema version changed, a row is `StatusKeptApart`, or a `FLOAT` sum on LSM might reorder rounding, the fast path must decline cleanly so the general evaluator produces exact SQL semantics. Keeping those paths bit-for-bit identical is why Part 6's differential oracle became essential.
+2. **Lock-free ordering and borrowed lifetimes.** Optimistic reads over `FlatRowStore` rely on exact `Volatile.Write` / `Volatile.Read` pairing on weakly ordered CPUs. Likewise, `RowResultSlot`'s `Unsafe.Unbox<T>` box reuse in `ExecuteBorrowed` is safe *only* because generated readers unbox immediately before returning—exposing borrowed mutable boxes carelessly to callers would invite silent aliasing bugs.
+3. **Compile-time surface limits.** Roslyn interceptors require C# 12+ and `static` lambdas with explicit state arguments. They compile single-table predicates, sorts, paging, projections, aggregates, and bulk updates—not joins, `GROUP BY`, `DISTINCT`, or arbitrary vector expressions, which remain SQL territory. Even on `DataVoTable<T>`, placing a `string` column *before* fixed-width columns disables fixed-offset byte-scan kernels because variable-width text shifts subsequent cell offsets.
+4. **Amdahl's Law still rules disk durability.** Dropping a lookup from `1,654 ns` to `216 ns` transforms a 60 FPS game loop, telemetry pipeline, or high-QPS read cache. It barely registers on a durable write waiting for an SSD to flush: once `LsmStrictFsync = true` hits Apple's APFS SSD or Windows `FlushFileBuffers`, both DataVo and SQLite hit the exact same **~4.0 ms** wall—roughly **72,000×** longer than a 55 ns lookup.
+
+In practice, let your workload pick the interface (see [Choosing an Interface](/manual/getting-started/choosing-an-interface)): use `[DataVoTable]` + compiled LINQ for hot single-table lookups, aggregates, and HUD windows; use `ctx.Prepare(...)` for parameterized SQL, joins, and multi-tenant reactive views; and use `DataVo.Data` / Dapper when ADO.NET ecosystem compatibility matters more than shaving the last few hundred nanoseconds.
+
+> [!TIP]
+> Follow the repository at [`ArintonAkos/DataVo-DBMS`](https://github.com/ArintonAkos/DataVo-DBMS) to inspect `FlatRowStore`, `PackedKeyReader<T>`, `DataVo.Generators`, and `DataVo.AotSmoke` directly—or star the repo to catch Parts 3–7.
+
+## What comes next
+
+- **Part 3.** What an fsync costs, across operating systems: the 4 ms tie, the 0.1 ms Linux case, and the Windows scaling problem.
+- **Part 4.** Z-sets, from incremental views to a 36 MB sync: wire protocol, offline conflict convergence, and reproducible Docker benchmarks against PostgreSQL 17 and ElectricSQL 1.8.1.
+- **Part 5.** HNSW, the JIT, and the exact fallback: recall on clustered data, and why a graph search sometimes loses to a scan.
+- **Part 6.** Differential oracle testing: how the matrix found five wrong answers before tuning anything.
+- **Part 7.** Building an offline-first .NET 10 app end-to-end: combining Native AOT, filtered `VECTOR(n)` search, live Z-set views, and bidirectional Postgres sync in a real desktop/mobile architecture.
+
+## References
+
+<ol class="ref-list">
+  <li id="ref-1">Martin Kleppmann. <em>Designing Data-Intensive Applications.</em> Chapter 3: "Storage and Retrieval." O'Reilly Media, 2017.</li>
+  <li id="ref-2">SQLite Documentation. "An Introduction To The SQLite C/C++ Interface" (<code>sqlite3_prepare_v2</code>, <code>sqlite3_bind_*</code>, <code>sqlite3_step</code>, <code>sqlite3_column_*</code>) and "Datatypes In SQLite." <a href="https://www.sqlite.org/cintro.html">sqlite.org/cintro.html</a>.</li>
+  <li id="ref-3">Microsoft .NET Documentation. "Native interoperability best practices" and "Pinned Object Heap (<code>GC.AllocateArray</code>)." <a href="https://learn.microsoft.com/en-us/dotnet/standard/native-interop/best-practices">learn.microsoft.com</a>.</li>
+  <li id="ref-4">ECMA-335 Common Language Infrastructure &amp; .NET Memory Model (<code>System.Threading.Volatile.Read</code> / <code>Volatile.Write</code> acquire-release semantics on weakly ordered ARM64 processors).</li>
+  <li id="ref-5">Roslyn / C# Language Design. "Interceptors" (<code>[InterceptsLocation]</code>) and "Incremental Generators" (<code>IIncrementalGenerator</code>) specifications. <a href="https://github.com/dotnet/roslyn/blob/main/docs/features/interceptors.md">github.com/dotnet/roslyn</a>.</li>
+  <li id="ref-6">Microsoft .NET Documentation. "Native AOT deployment overview" and "Trimming and AOT warnings (<code>IL2026</code>, <code>IL3050</code>)." <a href="https://learn.microsoft.com/en-us/dotnet/core/deploying/native-aot/">learn.microsoft.com</a>.</li>
+  <li id="ref-7">Mihai Budiu, Frank McSherry, Leonid Ryzhyk, Val Tannen. "DBSP: Automatic Incremental View Maintenance for Rich Query Languages." <em>Proceedings of the VLDB Endowment</em> 16(7), pp. 1601–1614, 2023.</li>
+</ol>
+
+### Data sources
+
+- **Source code audited:** `DataVo.Core/StorageEngine/Memory/{FlatRowStore,RowLayout,FlatRowCodec}.cs`, `DataVo.Core/Memory/Flat/{FlatChunk,FlatSlotList,ReferenceDirectory}.cs`, `DataVo.Core/Tables/{DataVoTable,DataVoLinqPlan,PackedKeyReader,DataVoPackedRow,DataVoReactiveLinq}.cs`, `DataVo.Core/PreparedStatements/{DataVoPreparedStatement,DataVoPreparedStatement.Plans,SqlParameterBinder}.cs`, `DataVo.Core/StorageEngine/Lsm/LsmStorageEngine.cs`, `DataVo.Core/Streaming/RowRef.cs`, `DataVo.Core/Runtime/Reactive/{IReactiveRowProjector,BufferedWindowReactiveQuery}.cs`, `DataVo.Generators/{DataVoTableGenerator,DataVoLinqInterceptorGenerator}.cs`, `DataVo.Generators/Tables/DataVoTableEmitter.cs`, `DataVo.Generators/Linq/{DataVoLinqEmitter,DataVoLinqShapeEmitter}.cs`, `DataVo.AotSmoke/{DataVo.AotSmoke.csproj,Program.cs,GeneratedTableSmoke.cs}`, and `scripts/check-aot-baseline.sh`.
+- **Benchmarks:** Apple M4 Pro BenchmarkDotNet `0.15.8` (`02fa240f`, 20 Nov 2026, `--job short`, `docs/public/benchmarks/2026-11-21-m4pro/DataVo.Benchmarks.{PointLookup,FilteredAggregate}Benchmarks-report-github.md`), earlier M4 Pro full-job point-lookup run (`ce818d4`, 13 Nov 2026, `docs/manual/performance/benchmarks.md`), and GitHub Actions Linux x64 & Windows x64 CI run `44748508039` (`master` @ `02fa240f`, 20 Nov 2026).
+- **Diagram & chart scripts:** `docs/public/blog/part-2/make_diagrams.mjs` (`roughjs` 4.6.6) and `docs/public/blog/part-2/make_charts.py` (`matplotlib` 3.10.8).
 
 ---

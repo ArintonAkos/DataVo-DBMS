@@ -1,222 +1,238 @@
 {
   "name": "DataVo public documentation",
-  "description": "HTTP-retrievable AI documentation surface for the curated DataVo v0.4.0-rc.1 manual.",
-  "publicScope": "Curated manual pages only.",
+  "description": "HTTP-retrievable AI documentation surface for the curated DataVo v0.4.0-rc.1 manual and engineering blog.",
+  "publicScope": "Curated manual pages and engineering blog only.",
+  "baseUrl": "https://arintonakos.github.io/DataVo-DBMS/",
   "entrypoints": {
-    "llms": "/llms.txt",
-    "llmsFull": "/llms-full.txt",
-    "aiIndex": "/ai/index.json"
+    "llms": "https://arintonakos.github.io/DataVo-DBMS/llms.txt",
+    "llmsFull": "https://arintonakos.github.io/DataVo-DBMS/llms-full.txt",
+    "aiIndex": "https://arintonakos.github.io/DataVo-DBMS/ai/index.json"
   },
   "pages": [
     {
       "title": "Introduction",
       "route": "/manual/getting-started/introduction",
-      "markdown": "/ai/pages/manual/getting-started/introduction.md"
+      "markdown": "https://arintonakos.github.io/DataVo-DBMS/ai/pages/manual/getting-started/introduction.md"
     },
     {
       "title": "Installation & Packages",
       "route": "/manual/getting-started/installation",
-      "markdown": "/ai/pages/manual/getting-started/installation.md"
+      "markdown": "https://arintonakos.github.io/DataVo-DBMS/ai/pages/manual/getting-started/installation.md"
     },
     {
       "title": "Quickstart",
       "route": "/manual/getting-started/quickstart",
-      "markdown": "/ai/pages/manual/getting-started/quickstart.md"
+      "markdown": "https://arintonakos.github.io/DataVo-DBMS/ai/pages/manual/getting-started/quickstart.md"
     },
     {
       "title": "Choosing an Interface",
       "route": "/manual/getting-started/choosing-an-interface",
-      "markdown": "/ai/pages/manual/getting-started/choosing-an-interface.md"
+      "markdown": "https://arintonakos.github.io/DataVo-DBMS/ai/pages/manual/getting-started/choosing-an-interface.md"
     },
     {
       "title": "Status & Roadmap",
       "route": "/manual/getting-started/roadmap",
-      "markdown": "/ai/pages/manual/getting-started/roadmap.md"
+      "markdown": "https://arintonakos.github.io/DataVo-DBMS/ai/pages/manual/getting-started/roadmap.md"
     },
     {
       "title": "Storage Modes",
       "route": "/manual/fundamentals/storage-modes",
-      "markdown": "/ai/pages/manual/fundamentals/storage-modes.md"
+      "markdown": "https://arintonakos.github.io/DataVo-DBMS/ai/pages/manual/fundamentals/storage-modes.md"
     },
     {
       "title": "LSM & Durability",
       "route": "/manual/fundamentals/lsm-and-durability",
-      "markdown": "/ai/pages/manual/fundamentals/lsm-and-durability.md"
+      "markdown": "https://arintonakos.github.io/DataVo-DBMS/ai/pages/manual/fundamentals/lsm-and-durability.md"
     },
     {
       "title": "Transactions & MVCC",
       "route": "/manual/fundamentals/transactions-and-mvcc",
-      "markdown": "/ai/pages/manual/fundamentals/transactions-and-mvcc.md"
+      "markdown": "https://arintonakos.github.io/DataVo-DBMS/ai/pages/manual/fundamentals/transactions-and-mvcc.md"
     },
     {
       "title": "Vector Search",
       "route": "/manual/fundamentals/vector-search",
-      "markdown": "/ai/pages/manual/fundamentals/vector-search.md"
+      "markdown": "https://arintonakos.github.io/DataVo-DBMS/ai/pages/manual/fundamentals/vector-search.md"
     },
     {
       "title": "Streaming Queries",
       "route": "/manual/fundamentals/streaming-queries",
-      "markdown": "/ai/pages/manual/fundamentals/streaming-queries.md"
+      "markdown": "https://arintonakos.github.io/DataVo-DBMS/ai/pages/manual/fundamentals/streaming-queries.md"
     },
     {
       "title": "Live Reactive Views",
       "route": "/manual/fundamentals/reactive-views",
-      "markdown": "/ai/pages/manual/fundamentals/reactive-views.md"
+      "markdown": "https://arintonakos.github.io/DataVo-DBMS/ai/pages/manual/fundamentals/reactive-views.md"
     },
     {
       "title": "DataVo Sync",
       "route": "/manual/fundamentals/datavo-sync",
-      "markdown": "/ai/pages/manual/fundamentals/datavo-sync.md"
+      "markdown": "https://arintonakos.github.io/DataVo-DBMS/ai/pages/manual/fundamentals/datavo-sync.md"
     },
     {
       "title": "DataVoContext API",
       "route": "/manual/client-interfaces/datavo-context-api",
-      "markdown": "/ai/pages/manual/client-interfaces/datavo-context-api.md"
+      "markdown": "https://arintonakos.github.io/DataVo-DBMS/ai/pages/manual/client-interfaces/datavo-context-api.md"
     },
     {
       "title": "Roslyn Source Generators",
       "route": "/manual/client-interfaces/source-generators",
-      "markdown": "/ai/pages/manual/client-interfaces/source-generators.md"
+      "markdown": "https://arintonakos.github.io/DataVo-DBMS/ai/pages/manual/client-interfaces/source-generators.md"
     },
     {
       "title": "Compiled LINQ & Spatial Queries",
       "route": "/manual/client-interfaces/compiled-linq",
-      "markdown": "/ai/pages/manual/client-interfaces/compiled-linq.md"
+      "markdown": "https://arintonakos.github.io/DataVo-DBMS/ai/pages/manual/client-interfaces/compiled-linq.md"
     },
     {
       "title": "Native AOT Deployment",
       "route": "/manual/client-interfaces/native-aot",
-      "markdown": "/ai/pages/manual/client-interfaces/native-aot.md"
+      "markdown": "https://arintonakos.github.io/DataVo-DBMS/ai/pages/manual/client-interfaces/native-aot.md"
     },
     {
       "title": "ADO.NET Provider (`DataVo.Data`)",
       "route": "/manual/client-interfaces/ado-net",
-      "markdown": "/ai/pages/manual/client-interfaces/ado-net.md"
+      "markdown": "https://arintonakos.github.io/DataVo-DBMS/ai/pages/manual/client-interfaces/ado-net.md"
     },
     {
       "title": "Dapper",
       "route": "/manual/client-interfaces/dapper",
-      "markdown": "/ai/pages/manual/client-interfaces/dapper.md"
+      "markdown": "https://arintonakos.github.io/DataVo-DBMS/ai/pages/manual/client-interfaces/dapper.md"
     },
     {
       "title": "Entity Framework Core",
       "route": "/manual/client-interfaces/entity-framework",
-      "markdown": "/ai/pages/manual/client-interfaces/entity-framework.md"
+      "markdown": "https://arintonakos.github.io/DataVo-DBMS/ai/pages/manual/client-interfaces/entity-framework.md"
     },
     {
       "title": "SQL Compatibility",
       "route": "/manual/sql/compatibility",
-      "markdown": "/ai/pages/manual/sql/compatibility.md"
+      "markdown": "https://arintonakos.github.io/DataVo-DBMS/ai/pages/manual/sql/compatibility.md"
     },
     {
       "title": "Data Types",
       "route": "/manual/sql/data-types",
-      "markdown": "/ai/pages/manual/sql/data-types.md"
+      "markdown": "https://arintonakos.github.io/DataVo-DBMS/ai/pages/manual/sql/data-types.md"
     },
     {
       "title": "SELECT",
       "route": "/manual/sql/statements/select",
-      "markdown": "/ai/pages/manual/sql/statements/select.md"
+      "markdown": "https://arintonakos.github.io/DataVo-DBMS/ai/pages/manual/sql/statements/select.md"
     },
     {
       "title": "INSERT",
       "route": "/manual/sql/statements/insert",
-      "markdown": "/ai/pages/manual/sql/statements/insert.md"
+      "markdown": "https://arintonakos.github.io/DataVo-DBMS/ai/pages/manual/sql/statements/insert.md"
     },
     {
       "title": "UPDATE",
       "route": "/manual/sql/statements/update",
-      "markdown": "/ai/pages/manual/sql/statements/update.md"
+      "markdown": "https://arintonakos.github.io/DataVo-DBMS/ai/pages/manual/sql/statements/update.md"
     },
     {
       "title": "DELETE",
       "route": "/manual/sql/statements/delete",
-      "markdown": "/ai/pages/manual/sql/statements/delete.md"
+      "markdown": "https://arintonakos.github.io/DataVo-DBMS/ai/pages/manual/sql/statements/delete.md"
     },
     {
       "title": "CREATE TABLE",
       "route": "/manual/sql/statements/create-table",
-      "markdown": "/ai/pages/manual/sql/statements/create-table.md"
+      "markdown": "https://arintonakos.github.io/DataVo-DBMS/ai/pages/manual/sql/statements/create-table.md"
     },
     {
       "title": "ALTER TABLE & DROP",
       "route": "/manual/sql/statements/alter-and-drop",
-      "markdown": "/ai/pages/manual/sql/statements/alter-and-drop.md"
+      "markdown": "https://arintonakos.github.io/DataVo-DBMS/ai/pages/manual/sql/statements/alter-and-drop.md"
     },
     {
       "title": "CREATE INDEX",
       "route": "/manual/sql/statements/indexes",
-      "markdown": "/ai/pages/manual/sql/statements/indexes.md"
+      "markdown": "https://arintonakos.github.io/DataVo-DBMS/ai/pages/manual/sql/statements/indexes.md"
     },
     {
       "title": "EXPLAIN",
       "route": "/manual/sql/statements/explain",
-      "markdown": "/ai/pages/manual/sql/statements/explain.md"
+      "markdown": "https://arintonakos.github.io/DataVo-DBMS/ai/pages/manual/sql/statements/explain.md"
     },
     {
       "title": "Transactions",
       "route": "/manual/sql/statements/transactions",
-      "markdown": "/ai/pages/manual/sql/statements/transactions.md"
+      "markdown": "https://arintonakos.github.io/DataVo-DBMS/ai/pages/manual/sql/statements/transactions.md"
     },
     {
       "title": "Databases & Security",
       "route": "/manual/sql/statements/databases-and-security",
-      "markdown": "/ai/pages/manual/sql/statements/databases-and-security.md"
+      "markdown": "https://arintonakos.github.io/DataVo-DBMS/ai/pages/manual/sql/statements/databases-and-security.md"
     },
     {
       "title": "Functions & Operators",
       "route": "/manual/sql/functions",
-      "markdown": "/ai/pages/manual/sql/functions.md"
+      "markdown": "https://arintonakos.github.io/DataVo-DBMS/ai/pages/manual/sql/functions.md"
     },
     {
       "title": "Query Planner & Fast Paths",
       "route": "/manual/internals/query-planner",
-      "markdown": "/ai/pages/manual/internals/query-planner.md"
+      "markdown": "https://arintonakos.github.io/DataVo-DBMS/ai/pages/manual/internals/query-planner.md"
     },
     {
       "title": "Zero-Allocation Row Model",
       "route": "/manual/internals/zero-allocation-rows",
-      "markdown": "/ai/pages/manual/internals/zero-allocation-rows.md"
+      "markdown": "https://arintonakos.github.io/DataVo-DBMS/ai/pages/manual/internals/zero-allocation-rows.md"
     },
     {
       "title": "Compiled Scan Kernels",
       "route": "/manual/internals/compiled-scan-kernels",
-      "markdown": "/ai/pages/manual/internals/compiled-scan-kernels.md"
+      "markdown": "https://arintonakos.github.io/DataVo-DBMS/ai/pages/manual/internals/compiled-scan-kernels.md"
     },
     {
       "title": "DataVo vs SQLite: When Each Engine Wins",
       "route": "/manual/performance/datavo-vs-sqlite",
-      "markdown": "/ai/pages/manual/performance/datavo-vs-sqlite.md"
+      "markdown": "https://arintonakos.github.io/DataVo-DBMS/ai/pages/manual/performance/datavo-vs-sqlite.md"
     },
     {
       "title": "Benchmark Results & Methodology",
       "route": "/manual/performance/benchmarks",
-      "markdown": "/ai/pages/manual/performance/benchmarks.md"
+      "markdown": "https://arintonakos.github.io/DataVo-DBMS/ai/pages/manual/performance/benchmarks.md"
     },
     {
       "title": "Reproducing Benchmarks",
       "route": "/manual/performance/reproducing-benchmarks",
-      "markdown": "/ai/pages/manual/performance/reproducing-benchmarks.md"
+      "markdown": "https://arintonakos.github.io/DataVo-DBMS/ai/pages/manual/performance/reproducing-benchmarks.md"
     },
     {
       "title": "Configuration Reference",
       "route": "/manual/reference/configuration",
-      "markdown": "/ai/pages/manual/reference/configuration.md"
+      "markdown": "https://arintonakos.github.io/DataVo-DBMS/ai/pages/manual/reference/configuration.md"
     },
     {
       "title": "Error Handling",
       "route": "/manual/reference/error-handling",
-      "markdown": "/ai/pages/manual/reference/error-handling.md"
+      "markdown": "https://arintonakos.github.io/DataVo-DBMS/ai/pages/manual/reference/error-handling.md"
     },
     {
       "title": "Limits & Unsupported Features",
       "route": "/manual/reference/limits",
-      "markdown": "/ai/pages/manual/reference/limits.md"
+      "markdown": "https://arintonakos.github.io/DataVo-DBMS/ai/pages/manual/reference/limits.md"
     },
     {
       "title": "AI Access & MCP",
       "route": "/manual/reference/ai-access",
-      "markdown": "/ai/pages/manual/reference/ai-access.md"
+      "markdown": "https://arintonakos.github.io/DataVo-DBMS/ai/pages/manual/reference/ai-access.md"
+    },
+    {
+      "title": "Engineering Blog",
+      "route": "/blog",
+      "markdown": "https://arintonakos.github.io/DataVo-DBMS/ai/pages/blog.md"
+    },
+    {
+      "title": "I wrote an embedded database and Postgres sync engine in C#. Here is where it wins and where it loses.",
+      "route": "/blog/part-1-where-it-wins-and-where-it-loses",
+      "markdown": "https://arintonakos.github.io/DataVo-DBMS/ai/pages/blog/part-1-where-it-wins-and-where-it-loses.md"
+    },
+    {
+      "title": "Packed byte buffers, Native AOT, and Roslyn codegen: how a 55 ns point lookup works with zero native binaries",
+      "route": "/blog/part-2-packed-buffers-aot-and-roslyn-codegen",
+      "markdown": "https://arintonakos.github.io/DataVo-DBMS/ai/pages/blog/part-2-packed-buffers-aot-and-roslyn-codegen.md"
     }
   ]
 }

@@ -3,13 +3,13 @@
 > Source route: /manual/reference/ai-access
 > Source file: manual/reference/ai-access.md
 
-DataVo publishes a curated, AI-readable Markdown export of the `v0.4.0-rc.1` manual alongside the VitePress site. Only public manual pages are exported — internal architecture notes, audits, and raw source directories are excluded.
+DataVo publishes a curated, AI-readable Markdown export of the `v0.4.0-rc.1` manual and Engineering Blog alongside the VitePress site. Only public manual and blog pages are exported — internal architecture notes, audits, and raw source directories are excluded.
 
 ## Static AI Endpoints
 
 | Endpoint | Purpose |
 | --- | --- |
-| `/llms.txt` | Concise entry point listing all 38 public manual pages |
+| `/llms.txt` | Concise entry point listing all 45 public manual and blog pages |
 | `/llms-full.txt` | Complete public manual concatenated into a single Markdown file |
 | `/ai/index.json` | Structured JSON index mapping routes to Markdown export paths |
 | `/ai/pages/<route>.md` | Canonical Markdown export for an individual page (e.g., `/ai/pages/manual/getting-started/quickstart.md`) |
@@ -48,6 +48,17 @@ get_doc("architecture/index-manager.md")       -> Access Denied
 }
 ```
 :::
+
+## Remote HTTP MCP Server (Gemini Web / Connected Apps)
+
+GitHub Pages serves static files only and cannot process `POST` JSON-RPC requests directly. To connect remote MCP clients (such as Gemini's **Connect to an MCP server** dialog) via an `https://.../mcp` URL, deploy the lightweight Cloudflare Worker in `docs/mcp-worker/`:
+
+```bash
+cd docs/mcp-worker
+npx wrangler deploy
+```
+
+The worker exposes `POST /mcp` (`list_docs`, `get_doc`, `search_docs`, and `datavo-docs://` resources) by reading and caching the hosted `/ai/index.json` and `/ai/pages/*.md` files from GitHub Pages.
 
 ## See Also
 

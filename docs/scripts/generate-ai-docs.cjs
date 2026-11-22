@@ -8,6 +8,7 @@ const docsRoot = path.resolve(__dirname, "..");
 const publicRoot = path.join(docsRoot, "public");
 const aiRoot = path.join(publicRoot, "ai");
 const pagesRoot = path.join(aiRoot, "pages");
+const SITE_BASE_URL = "https://arintonakos.github.io/DataVo-DBMS";
 
 function pageOutputPath(route) {
   return `${route.replace(/^\//u, "")}.md`;
@@ -117,15 +118,16 @@ function main() {
     [
       "# DataVo Documentation",
       "",
-      "DataVo is a C#-native embedded database engine. This file exposes the curated public v0.4.0-rc.1 Release Candidate manual.",
+      "DataVo is a C#-native embedded database engine. This file exposes the curated public v0.4.0-rc.1 Release Candidate manual and engineering blog.",
       "",
-      "## Manual Pages",
-      ...pages.map((page) => `- [${page.title}](${page.aiPath})`),
+      "## Public Pages",
+      ...pages.map((page) => `- [${page.title}](${SITE_BASE_URL}${page.aiPath})`),
       "",
       "## Full Index",
-      "- [AI docs index](/ai/index.json)",
-      "- [Full Markdown export](/llms-full.txt)",
-      "- [MCP discovery config](/mcp/datavo-docs.json)",
+      `- [AI docs index](${SITE_BASE_URL}/ai/index.json)`,
+      `- [Full Markdown export](${SITE_BASE_URL}/llms-full.txt)`,
+      `- [MCP discovery config](${SITE_BASE_URL}/mcp/datavo-docs.json)`,
+      `- [Remote HTTP docs index](${SITE_BASE_URL}/mcp/remote-docs.json)`,
       "",
     ].join("\n"),
   );
@@ -145,12 +147,12 @@ function main() {
     `${JSON.stringify(
       {
         name: "datavo-docs",
-        description: "Local MCP server configuration for the curated DataVo v0.4.0-rc.1 manual.",
-        docsBaseUrl: "/",
-        aiIndex: "/ai/index.json",
-        llms: "/llms.txt",
-        llmsFull: "/llms-full.txt",
-        publicScope: "Curated manual pages only. Internal architecture, audit, generated API, and source folders are excluded.",
+        description: "Local MCP server configuration for the curated DataVo v0.4.0-rc.1 manual and engineering blog.",
+        docsBaseUrl: `${SITE_BASE_URL}/`,
+        aiIndex: `${SITE_BASE_URL}/ai/index.json`,
+        llms: `${SITE_BASE_URL}/llms.txt`,
+        llmsFull: `${SITE_BASE_URL}/llms-full.txt`,
+        publicScope: "Curated manual pages and engineering blog only. Internal architecture, audit, generated API, and source folders are excluded.",
         mcpServers: {
           "datavo-docs": {
             command: "node",
@@ -169,17 +171,18 @@ function main() {
     `${JSON.stringify(
       {
         name: "DataVo public documentation",
-        description: "HTTP-retrievable AI documentation surface for the curated DataVo v0.4.0-rc.1 manual.",
-        publicScope: "Curated manual pages only.",
+        description: "HTTP-retrievable AI documentation surface for the curated DataVo v0.4.0-rc.1 manual and engineering blog.",
+        publicScope: "Curated manual pages and engineering blog only.",
+        baseUrl: `${SITE_BASE_URL}/`,
         entrypoints: {
-          llms: "/llms.txt",
-          llmsFull: "/llms-full.txt",
-          aiIndex: "/ai/index.json",
+          llms: `${SITE_BASE_URL}/llms.txt`,
+          llmsFull: `${SITE_BASE_URL}/llms-full.txt`,
+          aiIndex: `${SITE_BASE_URL}/ai/index.json`,
         },
         pages: pages.map((page) => ({
           title: page.title,
           route: page.route,
-          markdown: page.aiPath,
+          markdown: `${SITE_BASE_URL}${page.aiPath}`,
         })),
       },
       null,

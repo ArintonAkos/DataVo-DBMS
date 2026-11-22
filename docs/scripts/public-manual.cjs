@@ -52,6 +52,11 @@ const publicManualPages = [
   { title: "Error Handling", source: "manual/reference/error-handling.md" },
   { title: "Limits & Unsupported Features", source: "manual/reference/limits.md" },
   { title: "AI Access & MCP", source: "manual/reference/ai-access.md" },
+
+  // Engineering Blog
+  { title: "Engineering Blog", source: "blog/index.md" },
+  { title: "Part 1: Where DataVo Wins and Where It Loses", source: "blog/part-1-where-it-wins-and-where-it-loses.md" },
+  { title: "Part 2: Packed Byte Buffers, Native AOT, and Roslyn Codegen", source: "blog/part-2-packed-buffers-aot-and-roslyn-codegen.md" },
 ];
 
 function routeForPublicSource(source) {
