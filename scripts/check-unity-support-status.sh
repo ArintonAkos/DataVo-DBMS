@@ -35,17 +35,21 @@ readonly support_rows=(
   "| Disk/LSM persistence | Verified (narrow smoke) |"
 )
 
-for support_file in \
-  "$ROOT/docs/manual/preface/project-status.md" \
-  "$ROOT/docs/features/unity-and-godot.md"; do
-  for row in "${support_rows[@]}"; do
-    require_text "$support_file" "$row"
-  done
+for row in "${support_rows[@]}"; do
+  require_text "$ROOT/docs/features/unity-and-godot.md" "$row"
 done
 
-require_text \
-  "$ROOT/docs/manual/preface/alpha-scope.md" \
-  "| Unity | Evaluation target |"
+readonly roadmap_rows=(
+  "Unity is an **evaluation target**, not a supported runtime."
+  "| Unity 6000.5.4f1 Editor (macOS) | Narrow smoke pass |"
+  "| macOS IL2CPP Player | Narrow smoke pass |"
+  "| Windows x64 IL2CPP | Unverified |"
+  "| Direct Burst calls | Unsupported by design |"
+)
+
+for row in "${roadmap_rows[@]}"; do
+  require_text "$ROOT/docs/manual/getting-started/roadmap.md" "$row"
+done
 require_text \
   "$ROOT/README.md" \
   "**Unity** is an evaluation target, not a supported runtime."
