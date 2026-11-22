@@ -3,47 +3,40 @@ layout: home
 
 hero:
   name: "DataVo"
-  text: "A C#-native embedded database engine"
-  tagline: "In-process SQL, LSM storage, columnar indexes and vector search for .NET 10. This manual describes the v0.4 line, published on NuGet as 0.4.0-rc.1."
+  text: "C#-native embedded database"
+  tagline: "In-process SQL, LSM storage, vector search, and live Z-set reactive views for .NET 10. Documentation for v0.4 (0.4.0-rc.1)."
   actions:
     - theme: brand
-      text: Get started
-      link: /manual/tutorial/quickstart
+      text: Quickstart
+      link: /manual/getting-started/quickstart
     - theme: alt
-      text: DataVo vs SQLite
-      link: /manual/performance/datavo-vs-sqlite
+      text: Introduction
+      link: /manual/getting-started/introduction
     - theme: alt
-      text: SQL reference
-      link: /manual/sql-language/supported-sql
+      text: SQL Reference
+      link: /manual/sql/compatibility
 
 features:
-  - title: Typed execution paths
-    details: Filters, grouping, top-k and INNER/LEFT joins on integer keys read cells straight from stored rows. A typed path returns exactly what the general evaluator would, or declines.
-    link: /manual/storage-engine/query-planner-fast-paths
-  - title: LSM storage with columnar SSTables
-    details: A commit log with optional per-commit fsync, arena MemTables, clustered primary keys, memory-mapped SSTables, and columnar segments with per-chunk zone maps that are read out of core.
-    link: /manual/storage-engine/lsm-mode
-  - title: Vector search in SQL
-    details: VECTOR(n) columns with FLAT and HNSW indexes. Filtered and joined searches test the filter on stored rows and switch to an exact scan when that is cheaper than the graph.
-    link: /manual/sql-language/vector-search-syntax
-  - title: Compiled LINQ without EF Core
-    details: DataVo.Generators turns DataVoTable<T> lambdas and [DataVoQuery] methods into build-time code. No Entity Framework dependency, Native AOT clean.
+  - title: Typed Execution & Fast Paths
+    details: Filters, grouping, top-k, and integer-key joins read cells directly from stored bytes without per-row dictionary allocations.
+    link: /manual/internals/query-planner
+  - title: LSM Storage & Columnar SSTables
+    details: Crash-safe WAL with strict fsync, clustered primary keys, memory-mapped SSTables, and 4,096-row columnar segments with zone maps.
+    link: /manual/fundamentals/lsm-and-durability
+  - title: Vector Search & Reactive Views
+    details: Native VECTOR(n) columns with FLAT and HNSW indexes plus pull-drain Z-set incremental view maintenance over SQL and LINQ.
+    link: /manual/fundamentals/vector-search
+  - title: Roslyn AOT & Compiled LINQ
+    details: DataVo.Generators compiles DataVoTable<T> lambdas and [DataVoQuery] methods at build time — zero EF Core dependency, Native AOT clean.
     link: /manual/client-interfaces/source-generators
 ---
 
-DataVo is an embedded database engine written in C# that runs inside a .NET 10 process. There is no server and no native library: storage, SQL execution and vector indexes are managed code, built with the trim and Native AOT analyzers as errors.
+DataVo is a managed C# embedded database engine that runs directly inside your `.NET 10` process with no external server, no native DLLs, and full Native AOT compatibility. Choose between packed **InMemory** tables and crash-recoverable **LSM** storage, query via SQL, compiled LINQ, ADO.NET, or Dapper, and optionally pair with the commercial **DataVo-Sync** add-on for offline-first PostgreSQL synchronization.
 
-Two storage engines are under active development. **InMemory** packs rows into contiguous fixed-width cells. **LSM** appends each commit to a log (flushed to stable storage before the commit is acknowledged, unless you choose relaxed durability), applies it to an arena-backed MemTable, flushes 32 MB MemTables to immutable SSTables in the background, and compacts them. Tables keyed by one `INT` or `GUID` are clustered by that key; secondary indexes are themselves keyed SSTables committed with their rows; and a columnar index is written into the SSTables as 4,096-row segments with min/max zone maps, so analytical scans skip chunks and nothing is rebuilt on open.
+## Start Here
 
-On one machine with warm caches, the v0.4 engine is faster than SQLite on key lookups and ranges, low-cardinality `GROUP BY`, integer-key joins, columnar aggregates and filtered vector search, and slower on index-ordered `GROUP BY`, unindexed top-k and `OR`/`LIKE` full scans. DuckDB is far faster than both on whole-table analytics. Every number is checked against an oracle before it is timed.
-
-DataVo is not a client/server database: one process owns a database directory, there is no wire protocol or replication, and transactions are snapshot-isolated rather than serializable. For teams requiring offline-first bidirectional sync with PostgreSQL, **DataVo Sync** is available separately as a commercial add-on (605 ms 100k warm sync, 45.5 B/row wire v2 + Brotli, 1,000-client verified scaling).
-
-## What to read first
-
-- [What Is DataVo?](./manual/preface/what-is-datavo.md): the architecture in one page, and which version this manual describes.
-- [Quickstart](./manual/tutorial/quickstart.md): create a database, table, row, and query from C#.
-- [DataVo vs SQLite](./manual/performance/datavo-vs-sqlite.md): where each engine wins on 28 SQL shapes and five filtered vector queries, and why.
-- [Query Planner And Fast Paths](./manual/storage-engine/query-planner-fast-paths.md): which query shapes run on typed paths.
-- [Release Scope & Boundaries](./manual/preface/alpha-scope.md): durability, isolation and what is out of scope.
-- [Roadmap](./manual/preface/roadmap.md): what v0.3 and v0.4 added, and the v0.5 plan.
+- [Introduction](/manual/getting-started/introduction) — Architecture overview and choose-your-path guide.
+- [Quickstart](/manual/getting-started/quickstart) — Create a database, insert rows, and query in 60 seconds.
+- [Choosing an Interface](/manual/getting-started/choosing-an-interface) — Compare `DataVoContext`, Compiled LINQ, ADO.NET, Dapper, and EF Core.
+- [DataVo vs SQLite](/manual/performance/datavo-vs-sqlite) — Oracle-verified benchmarks across 28 SQL shapes and filtered vector search.
+- [Status & Roadmap](/manual/getting-started/roadmap) — Release candidate scope, durability guarantees, and the v0.5 plan.

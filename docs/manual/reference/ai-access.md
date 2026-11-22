@@ -1,34 +1,28 @@
-# AI Access And MCP
+---
+title: AI Access & MCP
+description: Consume DataVo v0.4 documentation in LLMs and coding assistants via llms.txt, per-page Markdown exports, and the local stdio MCP server.
+---
 
-DataVo publishes an AI-readable version of the manual alongside the VitePress site. The export includes only curated public manual pages. It does not expose generated API pages, architecture notes, audit notes, or internal planning documents.
+# AI Access & MCP
 
-When the docs site is deployed, AI tools can start with `llms.txt`.
+DataVo publishes a curated, AI-readable Markdown export of the `v0.4.0-rc.1` manual alongside the VitePress site. Only public manual pages are exported — internal architecture notes, audits, and raw source directories are excluded.
 
-```text
-https://<docs-host>/llms.txt
-```
+## Static AI Endpoints
 
-For tools that need the whole public manual in one file, use `llms-full.txt`.
+| Endpoint | Purpose |
+| --- | --- |
+| `/llms.txt` | Concise entry point listing all 38 public manual pages |
+| `/llms-full.txt` | Complete public manual concatenated into a single Markdown file |
+| `/ai/index.json` | Structured JSON index mapping routes to Markdown export paths |
+| `/ai/pages/<route>.md` | Canonical Markdown export for an individual page (e.g., `/ai/pages/manual/getting-started/quickstart.md`) |
+| `/mcp/datavo-docs.json` | Local stdio MCP server discovery config |
+| `/mcp/remote-docs.json` | HTTP-retrievable page index for remote AI tools |
 
-```text
-https://<docs-host>/llms-full.txt
-```
+Every manual page also displays a **Copy page for AI** button at the top that copies the canonical Markdown export directly to your clipboard.
 
-For tools that prefer structured discovery, use the JSON index. Each entry points to the canonical Markdown export for a public manual page.
+## Local Stdio MCP Server
 
-```text
-https://<docs-host>/ai/index.json
-```
-
-A single page is exported as Markdown under `/ai/pages/...`.
-
-```text
-https://<docs-host>/ai/pages/manual/tutorial/quickstart.md
-```
-
-Every manual page also has a `Copy page for AI` button. It copies the canonical Markdown export, not the rendered HTML. That makes it suitable for pasting into an assistant, an issue, or a retrieval test.
-
-For local MCP clients, clone the repository and run the stdio server from the `docs` directory.
+GitHub Pages hosts the static Markdown and discovery JSON files, while local coding assistants can run the stdio MCP server directly from the `docs` directory:
 
 ```bash
 cd docs
@@ -36,23 +30,28 @@ npm run docs:ai
 npm run mcp
 ```
 
-The MCP server exposes only public manual pages. If a client asks for an internal architecture file, generated API page, or audit document, the server returns an access-denied/not-found response.
+The MCP server restricts access strictly to the curated public manual:
 
 ```text
-get_doc("/manual/tutorial/quickstart")
-  -> public Markdown
-
-get_doc("architecture/index-manager.md")
-  -> Access Denied
+get_doc("/manual/getting-started/quickstart")  -> public Markdown
+get_doc("architecture/index-manager.md")       -> Access Denied
 ```
 
-GitHub Pages can host the static AI docs and MCP discovery files, but it cannot run the stdio MCP server process. Hosted discovery JSON is still useful because it tells tools where the public docs live and how the local MCP server is intended to be started.
-
-```text
-https://<docs-host>/mcp/datavo-docs.json
-https://<docs-host>/mcp/remote-docs.json
+::: details MCP Client Configuration Example
+```json
+{
+  "mcpServers": {
+    "datavo-docs": {
+      "command": "node",
+      "args": ["./mcp/datavo-docs-server.cjs"],
+      "cwd": "./docs"
+    }
+  }
+}
 ```
+:::
 
-## AI Access Support
+## See Also
 
-Supported endpoints and actions: `/llms.txt`, `/llms-full.txt`, `/ai/index.json`, `/ai/pages/<route>.md`, the `Copy page for AI` action, a local stdio MCP server (`npm run mcp`), and generated hosted-MCP discovery JSON under `/mcp/`. Raw internal docs (architecture, audit, generated API, and source folders) are intentionally **not** exported, and a stdio MCP process **cannot** run directly on static GitHub Pages hosting.
+- [Introduction](/manual/getting-started/introduction) — Overview of DataVo v0.4.
+- [Quickstart](/manual/getting-started/quickstart) — Get started in C# in 60 seconds.

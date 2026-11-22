@@ -1,51 +1,44 @@
-# Native AOT
+# Native AOT Deployment
 
 > Source route: /manual/client-interfaces/native-aot
 > Source file: manual/client-interfaces/native-aot.md
 
-DataVo locks Native AOT compatibility across `DataVo.Core` and `DataVo.Data`; this has held since the 0.2 packages and is checked on every change by `scripts/check-aot-baseline.sh`. Both assemblies enable .NET trim and AOT analyzers and treat `IL2026` and `IL3050` diagnostics as build errors.
+`DataVo.Core`, `DataVo.Data`, and `DataVo.Generators` are engineered for `.NET 10` Native AOT. Trim and AOT analyzers are enabled across the core and ADO.NET assemblies with `IL2026` and `IL3050` treated as build errors and verified on every change.
 
-For dynamic SQL, DataVo parses the runtime SQL string without reflection-based type discovery.
-
-```csharp
-using var db = new DataVoContext(new DataVoConfig
-{
-    StorageMode = StorageMode.InMemory
-});
-
-db.Execute("SELECT Id, Name FROM Users WHERE Id = 1");
+```xml
+<PropertyGroup>
+  <TargetFramework>net10.0</TargetFramework>
+  <PublishAot>true</PublishAot>
+  <InvariantGlobalization>true</InvariantGlobalization>
+</PropertyGroup>
 ```
-
-For queries called often enough that parse and mapping overhead matters, prefer source-generated queries (`DataVo.Generators`). The generator turns a supported SQL pattern into generated C# code that avoids repeated parse and mapper setup while remaining completely trim- and AOT-safe.
-
-```csharp
-using DataVo.Core;
-using DataVo.Core.CompiledQueries;
-
-public sealed record PlayerRow(int Id, string Name, int Level);
-
-public static partial class PlayerQueries
-{
-    [DataVoQuery("SELECT Id, Name, Level FROM Players WHERE Id = @id")]
-    public static partial PlayerRow? GetPlayer(DataVoContext db, int id);
-}
-```
-
-AOT-targeted applications can publish directly with `PublishAot=true`:
 
 ```bash
-dotnet publish -c Release -r osx-arm64 /p:PublishAot=true
+dotnet publish -c Release -r osx-arm64
 ```
 
-EF Core has its own upstream AOT and trimming constraints. Treat DataVo's `DataVo.EntityFrameworkCore` bridge separately from `DataVo.Core` and `DataVo.Data` when publishing Native AOT binaries.
+## Package AOT Compatibility
 
-```csharp
-var options = new DbContextOptionsBuilder<AppDbContext>()
-    .UseInMemoryDatabase("datavo-ef-host")
-    .UseDataVo(dataVo => dataVo.UseInMemoryStorage().WithDataSource("EfDemo"))
-    .Options;
-```
+| Package / Feature | Native AOT Status | Notes |
+| --- | --- | --- |
+| `DataVo.Core` | **Verified** | Runtime SQL parser/executor, LSM/InMemory storage, `StreamQuery`, `StreamRef`, `Subscribe`, and `SubscribeZeroAlloc` use zero reflection. |
+| `DataVo.Data` | **Verified** | `DataVoConnection`, `DataVoCommand`, `DataVoDataReader`, and `DataVoTransaction` are trim- and AOT-clean. |
+| `DataVo.Generators` | **Verified** | `[DataVoTable]`, `[DataVoQuery]`, compiled LINQ interceptors, and `.SubscribeInto()` emit static C# at build time. |
+| `DataVo.EntityFrameworkCore` | **Excluded** | Depends on EF Core's runtime infrastructure and is not covered by the Native AOT guarantee. |
 
-## Native AOT Support Summary
+## Writing AOT-Safe DataVo Code
 
-`DataVo.Core` and `DataVo.Data` are locked and passing under Native AOT (`PublishAot=true`), including the C#-native embedded core, ADO.NET provider (`DataVoConnection`, `DataVoCommand`, `DataVoDataReader`), source-generated query paths (`[DataVoQuery]`), and zero-allocation `RowRef` readers. `DataVo.EntityFrameworkCore` depends on EF Core's runtime infrastructure and is **not** covered by the Native AOT guarantee.
+- **Use `DataVo.Generators` for typed queries:** Prefer `[DataVoTable]` compiled LINQ and `[DataVoQuery]` over reflection-based mappers.
+- **Avoid reflection-based micro-ORMs unless AOT-enabled:** `DataVo.Data` itself is AOT-clean, but third-party libraries layered on top (such as unconfigured Dapper reflection paths) govern their own AOT compatibility.
+- **Use zero-allocation streaming on hot paths:** `StreamRef()` and `SubscribeZeroAlloc()` operate on `ReadOnlySpan<byte>` and `RowRef` structs with zero reflection and zero managed heap allocations.
+- **Keep `DataVoContext.Insert<T>` types preserved:** `Insert<T>` carries `[DynamicallyAccessedMembers]` annotations so the trimmer preserves public properties and parameterless constructors, or use source-generated `db.Insert(player)` for zero-reflection writes.
+
+## Verification
+
+The repository validates AOT cleanliness with `scripts/check-aot-baseline.sh`, which publishes an AOT smoke application exercising `DataVo.Core`, `DataVo.Data`, and `DataVo.Generators` under `PublishAot=true`.
+
+## See Also
+
+- [Roslyn Source Generators](/manual/client-interfaces/source-generators) — Compile-time helpers and `[DataVoQuery]`
+- [Compiled LINQ & Spatial Queries](/manual/client-interfaces/compiled-linq) — Zero-reflection LINQ interceptors
+- [Zero-Allocation Rows](/manual/internals/zero-allocation-rows) — `RowRef` and `StreamRef` internals

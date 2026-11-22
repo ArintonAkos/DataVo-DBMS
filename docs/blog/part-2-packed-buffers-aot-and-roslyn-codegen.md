@@ -283,7 +283,7 @@ using var blueTop5 = ctx.Subscribe(
     ("team", "Blue"), ("k", 5));
 ```
 
-Before attaching any capture hook, `BindSingleReactiveStatement` validates that the template holds a single `SELECT`, rejects unsupported constructs like `DISTINCT` aggregates, clones an isolated AST bound to each subscription's parameters, and passes it straight to `ReactiveRegistry` with zero SQL re-parsing (see [Live Reactive Views (Z-set IVM)](/manual/client-interfaces/reactive-views)).
+Before attaching any capture hook, `BindSingleReactiveStatement` validates that the template holds a single `SELECT`, rejects unsupported constructs like `DISTINCT` aggregates, clones an isolated AST bound to each subscription's parameters, and passes it straight to `ReactiveRegistry` with zero SQL re-parsing (see [Live Reactive Views (Z-set IVM)](/manual/fundamentals/reactive-views)).
 
 Preparing SQL once removes parse overhead, yet raw SQL still leaves schema discovery and typed object mapping to runtime—unless we move both into the C# compiler itself.
 

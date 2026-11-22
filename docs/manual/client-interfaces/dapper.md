@@ -1,75 +1,81 @@
+---
+title: Dapper
+description: Using Dapper over DataVoConnection for parameterized SQL, POCO mapping, and transactions.
+---
+
 # Dapper
 
-Dapper works with DataVo through the standard ADO.NET provider. DataVo does not ship a Dapper-specific package or extension, and it does not need one: `DataVoConnection` is a `DbConnection`, and Dapper's extension methods operate on `IDbConnection`.
+Dapper works out of the box with DataVo via `DataVo.Data`. Because `DataVoConnection` implements `DbConnection`, Dapper's `IDbConnection` extension methods require no DataVo-specific adapter package.
+
+```csharp
+using Dapper;
+using DataVo.Data;
+
+using var conn = new DataVoConnection("StorageMode=InMemory;DataSource=game");
+conn.Open();
+
+conn.Execute("CREATE TABLE players (id INT PRIMARY KEY, name VARCHAR(80), score INT)");
+conn.Execute(
+    "INSERT INTO players (id, name, score) VALUES (@Id, @Name, @Score)",
+    new { Id = 1, Name = "Ada", Score = 1200 });
+
+List<Player> top = conn
+    .Query<Player>("SELECT id, name, score FROM players WHERE score >= @min", new { min = 500 })
+    .ToList();
+
+int total = conn.ExecuteScalar<int>("SELECT COUNT(*) FROM players");
+```
+
+Install both packages:
 
 ```bash
 dotnet add package DataVo.Data --prerelease
 dotnet add package Dapper
 ```
 
-## Example
+## Transactions & Parameterized Queries
+
+Pass an `IDbTransaction` from `conn.BeginTransaction()` directly to Dapper's `Execute` and `Query` calls. Named parameters (`@Id`, `@min`) bind through `DataVoCommand`'s prepared-statement pipeline.
 
 ```csharp
-using Dapper;
-using DataVo.Data;
+using var tx = conn.BeginTransaction();
 
-using var connection = new DataVoConnection("StorageMode=InMemory;DataSource=App");
-connection.Open();
+conn.Execute(
+    "UPDATE players SET score = score + @bonus WHERE id = @id",
+    new { bonus = 250, id = 1 },
+    tx);
 
-connection.Execute("CREATE TABLE Players (Id INT PRIMARY KEY, Name VARCHAR(40), Level INT)");
-
-connection.Execute(
-    "INSERT INTO Players (Id, Name, Level) VALUES (@Id, @Name, @Level)",
-    new { Id = 1, Name = "Ada", Level = 12 });
-connection.Execute(
-    "INSERT INTO Players (Id, Name, Level) VALUES (@Id, @Name, @Level)",
-    new { Id = 2, Name = "Linus", Level = 3 });
-
-List<Player> strong = connection
-    .Query<Player>("SELECT Id, Name, Level FROM Players WHERE Level >= @min", new { min = 5 })
-    .ToList();
-
-Player? linus = connection.QuerySingleOrDefault<Player>(
-    "SELECT Id, Name, Level FROM Players WHERE Id = @id", new { id = 2 });
-
-int total = connection.ExecuteScalar<int>("SELECT COUNT(*) FROM Players");
-
-public sealed class Player
-{
-    public int Id { get; set; }
-    public string Name { get; set; } = "";
-    public int Level { get; set; }
-}
+tx.Commit(); // or tx.Rollback()
 ```
 
-## Verified usage
+### Verified Dapper Surface
 
-The following calls have been run against `DataVoConnection` with Dapper 2.1.35 and behave as they do on other ADO.NET providers:
+Tested against `DataVoConnection` with Dapper `2.1.35`:
 
-| Dapper call | Result |
+| Dapper Call | Behavior |
 | --- | --- |
-| `Execute` with anonymous-object parameters | Rows-affected count is correct. |
-| `Query<T>` and `QuerySingleOrDefault<T>` | Rows map to POCOs by column name. |
+| `Execute` with anonymous-object parameters | Returns exact rows-affected count. |
+| `Query<T>` / `QuerySingleOrDefault<T>` | Maps columns to POCO properties by name. |
 | `ExecuteScalar<T>` | Returns the first column of the first row. |
-| `QueryAsync<T>` | Works; it completes synchronously because the engine is in-process (see [ADO.NET Provider](/manual/client-interfaces/ado-net#behavior-to-know-about)). |
-| `Execute` with an `IDbTransaction` | `Rollback()` discards the changes. |
+| `QueryAsync<T>` | Completes synchronously (in-process engine). |
+| `Execute` with `IDbTransaction` | Full `Commit()` / `Rollback()` participation. |
 
-Anything outside that list, such as multi-mapping, `QueryMultiple` and list parameter expansion, goes through the same ADO.NET surface but is not part of the verified set. Test those against your own schema before depending on them.
+Features outside this verified set (such as multi-mapping, `QueryMultiple`, or list parameter expansion) pass through standard ADO.NET; validate them against your schema before relying on them.
 
-## Dapper or compiled LINQ?
+## Dapper vs. Compiled LINQ
 
-| | Dapper | [Compiled LINQ](/manual/client-interfaces/source-generators) |
+| Aspect | Dapper | [Compiled LINQ](/manual/client-interfaces/compiled-linq) |
 | --- | --- | --- |
-| Query language | Plain SQL strings | C# lambdas checked at compile time |
-| Mapping | Reflection-based, per Dapper | Source-generated, no reflection |
-| Allocation | One object per row, plus Dapper's own | Aggregates allocate nothing once warm |
-| Native AOT | Governed by Dapper's own AOT support | Yes |
-| Fits | Existing SQL, ad-hoc queries, joins | Hot-path lookups, filtered counts and aggregates |
+| Query style | Raw SQL strings | Compile-time-checked C# lambdas |
+| Row mapping | Reflection-based (per Dapper) | Source-generated, zero reflection |
+| Heap allocations | Per-row POCO + Dapper overhead | **0 B** warm aggregates & buffered views |
+| Native AOT | Governed by Dapper AOT support | Full Native AOT support |
+| Best fit | Joins, ad-hoc SQL, existing Dapper code | Hot-path lookups, filtered aggregates, game loops |
 
-The two coexist on one database: use Dapper for flexibility and compiled LINQ for the handful of queries that dominate your profile.
+Both interfaces can share the same underlying database: use Dapper for flexible SQL and compiled LINQ for hot paths.
 
-## Related
+## See Also
 
-- [ADO.NET Provider (DataVo.Data)](/manual/client-interfaces/ado-net)
-- [ADO.NET & Dapper tutorial](/manual/tutorial/ado-net-and-dapper)
-- [Choosing an Interface](/manual/getting-started/choosing-an-interface)
+- [ADO.NET Provider (DataVo.Data)](/manual/client-interfaces/ado-net) — Connection strings, savepoints, and reader behavior
+- [Compiled LINQ & Spatial Queries](/manual/client-interfaces/compiled-linq) — Zero-reflection compile-time queries
+- [Choosing an Interface](/manual/getting-started/choosing-an-interface) — Compare all DataVo client APIs

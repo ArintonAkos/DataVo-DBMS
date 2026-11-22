@@ -3,89 +3,86 @@
 > Source route: /manual/getting-started/choosing-an-interface
 > Source file: manual/getting-started/choosing-an-interface.md
 
-DataVo has five ways to talk to the same engine. They differ in ergonomics and in how much work happens per call, not in what the database can store. You can mix them in one application.
+DataVo exposes five ways to query the same embedded engine. They differ in ergonomics and per-call allocation overhead — not in storage modes, durability, or index support — and you can freely mix them in the same process.
 
-## Decision table
+## Decision Matrix
 
-| Interface | Package | Best for | Per-call cost | Native AOT |
+| Interface | Packages | Best For | Per-Call Overhead | Native AOT |
 | --- | --- | --- | --- | --- |
-| [Compiled LINQ](/manual/client-interfaces/source-generators) | `DataVo.Core` + `DataVo.Generators` | Hot paths: point lookups, filtered counts and aggregates. No EF Core dependency. | Lowest. Predicates are compiled at build time; aggregates allocate nothing once warm. | Yes |
-| [Embedded API](/manual/client-interfaces/datavo-context-api) (`DataVoContext`) | `DataVo.Core` | Application code that wants SQL, DDL, vector search and full control. | Parses SQL per call unless prepared. Rows come back as dictionaries. | Yes |
-| [ADO.NET provider](/manual/client-interfaces/ado-net) | `DataVo.Data` | Code or libraries that already speak `DbConnection`. | Same engine as the embedded API, behind the standard ADO.NET types. | Yes |
-| [Dapper](/manual/client-interfaces/dapper) | `DataVo.Data` + `Dapper` | Micro-ORM mapping with plain SQL. | ADO.NET cost plus Dapper's mapping. | Per Dapper's own support |
-| [Entity Framework Core](/manual/client-interfaces/entity-framework) | `DataVo.EntityFrameworkCore` | Existing EF models and `DbContext` workflows. | Highest. EF infrastructure sits on top of the engine. | Not claimed |
+| [Compiled LINQ](/manual/client-interfaces/compiled-linq) | `DataVo.Core` + `DataVo.Generators` | Hot paths: point lookups, filtered scans, aggregates, projections | Lowest — reads stored bytes directly; zero-alloc aggregates | Yes |
+| [`DataVoContext`](/manual/client-interfaces/datavo-context-api) | `DataVo.Core` | Ad-hoc SQL, DDL, prepared statements, vector search, reactive views | Low with `db.Prepare(...)`; materializes dictionaries on general path | Yes |
+| [ADO.NET](/manual/client-interfaces/ado-net) | `DataVo.Data` | Libraries expecting `DbConnection`, `DbCommand`, `DbDataReader` | Same engine behind standard `System.Data.Common` wrappers | Yes |
+| [Dapper](/manual/client-interfaces/dapper) | `DataVo.Data` + `Dapper` | Plain SQL mapped to POCOs with familiar micro-ORM APIs | ADO.NET overhead plus Dapper row mapping | Per Dapper |
+| [EF Core Bridge](/manual/client-interfaces/entity-framework) | `DataVo.EntityFrameworkCore` | Existing EF Core `DbContext` models (experimental preview) | Highest — EF Core infrastructure sits above DataVo | No |
 
-A short rule of thumb:
+**Rule of thumb:** start with `DataVoContext` for DDL and general SQL, move hot-path reads and aggregates to **Compiled LINQ**, use **ADO.NET / Dapper** when integrating existing SQL codebases, and use the **EF Core bridge** only when you already depend on EF Core.
 
-- Start with the **embedded API** to learn the engine and for anything that is not performance critical.
-- Move the few queries that run constantly to **compiled LINQ**.
-- Use **ADO.NET or Dapper** when you are adapting existing code or want a familiar abstraction.
-- Use **EF Core** when the rest of your application is already modelled in EF. If you want LINQ without EF (for example under Native AOT), use compiled LINQ: `DataVo.Generators` has no EF dependency.
-
-## How they fit together
+## How Every Interface Connects
 
 ```mermaid
 flowchart TD
-  App["Your application"]
-  App --> LINQ["Compiled LINQ<br/>(DataVo.Generators)"]
-  App --> Ctx["DataVoContext<br/>(DataVo.Core)"]
-  App --> Ado["ADO.NET provider<br/>(DataVo.Data)"]
-  App --> EF["EF Core integration<br/>(DataVo.EntityFrameworkCore)"]
+  App["Your .NET 10 App"]
+  App --> LINQ["Compiled LINQ (DataVo.Generators)"]
+  App --> Ctx["DataVoContext (DataVo.Core)"]
+  App --> Ado["ADO.NET (DataVo.Data)"]
+  App --> EF["EF Core Bridge (DataVo.EntityFrameworkCore)"]
   Dapper["Dapper"] --> Ado
-  LINQ --> Core["DataVo.Core engine"]
+  LINQ --> Core["DataVo.Core Engine"]
   Ctx --> Core
   Ado --> Core
   EF --> Core
-  Core --> Storage["In-Memory | LSM-Tree | Disk (legacy)"]
+  Core --> Storage["InMemory | LSM | Disk (legacy)"]
 ```
 
-Every route ends in the same parser, planner and storage engines, so storage modes, durability settings and vector indexes behave identically whichever interface you use.
+## The Same Query, Five Ways
 
-## The same question, five ways
+Counting players with `Score >= 1000` in the `players` table:
 
-"How many players are level 10 or higher?" The table is `players (Id INT PRIMARY KEY, Level INT)`.
-
-**Embedded API**
+**1. `DataVoContext` (SQL)**
 
 ```csharp
-var result = db.Execute("SELECT COUNT(*) AS Total FROM players WHERE Level >= 10")[0];
-object total = result.Data[0]["Total"];
+var result = db.Execute("SELECT COUNT(*) AS Total FROM players WHERE Score >= 1000")[0];
+object? total = result.Data[0]["Total"];
 ```
 
-**ADO.NET**
+**2. Compiled LINQ (`DataVo.Generators`)**
+
+```csharp
+int total = db.Table<Player>().Where(1000, static (p, min) => p.Score >= min).Count();
+```
+
+**3. ADO.NET (`DataVo.Data`)**
 
 ```csharp
 using var cmd = connection.CreateCommand();
-cmd.CommandText = "SELECT COUNT(*) FROM players WHERE Level >= @min";
-cmd.Parameters.AddWithValue("@min", 10);
+cmd.CommandText = "SELECT COUNT(*) FROM players WHERE Score >= @min";
+cmd.Parameters.AddWithValue("@min", 1000);
 object? total = cmd.ExecuteScalar();
 ```
 
-**Dapper**
+**4. Dapper**
 
 ```csharp
 int total = connection.ExecuteScalar<int>(
-    "SELECT COUNT(*) FROM players WHERE Level >= @min", new { min = 10 });
+    "SELECT COUNT(*) FROM players WHERE Score >= @min",
+    new { min = 1000 });
 ```
 
-**Entity Framework Core**
+**5. Entity Framework Core Bridge**
 
 ```csharp
-List<Player> matches = context.QueryFromDataVo<Player>(query =>
-    query.Where(static p => p.Level >= 10));
+List<Player> matches = efContext.QueryFromDataVo<Player>(q =>
+    q.Where(static p => p.Score >= 1000));
 int total = matches.Count;
 ```
 
-**Compiled LINQ**
+::: info DataVo Extension
+Compiled LINQ reads the `Score` cell directly from packed row buffers without allocating `Player` instances. See [Compiled Scan Kernels](/manual/internals/compiled-scan-kernels) for how the generated code works.
+:::
 
-```csharp
-int total = db.Table<Player>().Where(10, static (p, min) => p.Level >= min).Count();
-```
+## See Also
 
-The compiled form reads the `Level` cell straight from the stored bytes and builds no `Player` objects. That is the mechanism behind the zero-allocation aggregates described in [Compiled Scan Kernels](/manual/internals/compiled-scan-kernels).
-
-## Related
-
-- [Installation & Packages](/manual/getting-started/installation)
-- [ADO.NET & Dapper tutorial](/manual/tutorial/ado-net-and-dapper)
-- [Benchmark Results](/manual/performance/benchmarks), to see what each approach costs in practice.
+- [DataVoContext API](/manual/client-interfaces/datavo-context-api) — Primary SQL, prepared statement, and batch write API.
+- [Roslyn Source Generators](/manual/client-interfaces/source-generators) — `[DataVoTable]`, `[DataVoQuery]`, and build-time codegen.
+- [Compiled LINQ](/manual/client-interfaces/compiled-linq) — Supported LINQ operators and interceptor setup.
+- [Benchmarks](/manual/performance/benchmarks) — Measured latency and allocation cost across interfaces.

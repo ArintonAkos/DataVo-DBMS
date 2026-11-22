@@ -3,7 +3,7 @@
     <button class="copy-ai__button" type="button" @click="copyPage">
       {{ buttonText }}
     </button>
-    <a class="copy-ai__link" :href="page.aiPath" target="_blank" rel="noopener">
+    <a class="copy-ai__link" :href="withBase(page.aiPath)" target="_blank" rel="noopener">
       Open Markdown
     </a>
   </div>
@@ -11,7 +11,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
-import { useRoute } from "vitepress";
+import { useRoute, withBase } from "vitepress";
 
 interface AiPage {
   title: string;
@@ -25,7 +25,9 @@ const pages = ref<AiPage[]>([]);
 const state = ref<"idle" | "copied" | "failed">("idle");
 
 const currentRoute = computed(() => normalizeRoute(route.path));
-const page = computed(() => pages.value.find((candidate) => normalizeRoute(candidate.route) === currentRoute.value));
+const page = computed(() =>
+  pages.value.find((candidate) => normalizeRoute(withBase(candidate.route)) === currentRoute.value),
+);
 const buttonText = computed(() => {
   if (state.value === "copied") {
     return "Copied";
@@ -40,7 +42,7 @@ const buttonText = computed(() => {
 
 onMounted(async () => {
   try {
-    const response = await fetch("/ai/index.json");
+    const response = await fetch(withBase("/ai/index.json"));
     if (!response.ok) {
       return;
     }
@@ -58,9 +60,10 @@ async function copyPage(): Promise<void> {
   }
 
   try {
-    const response = await fetch(page.value.aiPath);
+    const url = withBase(page.value.aiPath);
+    const response = await fetch(url);
     if (!response.ok) {
-      throw new Error(`Unable to fetch ${page.value.aiPath}`);
+      throw new Error(`Unable to fetch ${url}`);
     }
 
     const markdown = await response.text();

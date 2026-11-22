@@ -1,8 +1,11 @@
-# Connecting to DataVo
+---
+title: DataVoContext API
+description: Direct embedded C# API for SQL execution, prepared statements, typed/batch writes, snapshots, authentication, and change capture.
+---
 
-DataVo is embedded in your .NET process. There is no server to start, no socket to open, and no connection pool to configure for the core API. You create a `DataVoContext`, choose a storage mode, and execute SQL directly against the engine.
+# DataVoContext API
 
-The fastest way to prove the engine is working is to use in-memory storage. This keeps the example self-contained and avoids creating files while you learn the API.
+`DataVoContext` is DataVo's primary embedded C# entry point. It owns the in-process storage engine, default session, and configuration with no server, socket, or connection pool to manage.
 
 ```csharp
 using DataVo.Core;
@@ -14,188 +17,107 @@ using var db = new DataVoContext(new DataVoConfig
     StorageMode = StorageMode.InMemory
 });
 
-db.Execute("CREATE DATABASE App");
-db.Execute("USE App");
+db.Execute("CREATE DATABASE game; USE game;");
+db.Execute("CREATE TABLE players (id INT PRIMARY KEY, name VARCHAR(80), score INT)");
+db.Execute("INSERT INTO players (id, name, score) VALUES (1, 'Ada', 1200)");
+
+QueryResult result = db.Execute("SELECT id, name, score FROM players WHERE id = 1")[0];
+Console.WriteLine($"{result.Data[0]["name"]}: {result.Data[0]["score"]}");
 ```
 
-Once a database is selected, `Execute` accepts DataVo SQL. The method returns a `List<QueryResult>` because a SQL string can contain more than one statement. Each `QueryResult` contains fields, row dictionaries, messages, and an `IsError` flag.
+## Executing SQL & Sessions
+
+`Execute(string sql)` accepts one or more semicolon-separated SQL statements and returns a `List<QueryResult>`. Each `QueryResult` exposes `Fields`, `Data` (row dictionaries), `Messages`, `IsError`, and `ErrorCode`.
+
+Transactions and `USE <database>` bindings are scoped to a session. Pass an explicit `Guid sessionId` to `Execute` when you need independent transaction scopes on the same context:
 
 ```csharp
-db.Execute("""
-CREATE TABLE Users (
-  Id INT PRIMARY KEY,
-  Name VARCHAR(80),
-  IsActive BIT
-);
-""");
-
-db.Execute("INSERT INTO Users (Id, Name, IsActive) VALUES (1, 'Ada', true)");
-
-List<QueryResult> results = db.Execute("""
-SELECT Id, Name, IsActive
-FROM Users
-WHERE IsActive = true;
-""");
-
-QueryResult result = results[0];
-
-foreach (var row in result.Data)
-{
-    Console.WriteLine($"{row["Id"]}: {row["Name"]}");
-}
+Guid workerSession = Guid.NewGuid();
+db.Execute("USE game", workerSession);
+db.Execute("BEGIN TRANSACTION", workerSession);
+db.Execute("UPDATE players SET score = 1500 WHERE id = 1", workerSession);
+db.Execute("COMMIT", workerSession);
 ```
 
-For persisted local data, switch the same code to disk or LSM storage. Disk mode is the simpler file-backed mode. LSM mode is the high-throughput storage engine used in the headline benchmark results.
+`DataVoContext` has no `BeginTransaction()` C# method; manage transactions with SQL (`BEGIN`, `COMMIT`, `ROLLBACK`, `SAVEPOINT`). See [Transactions & MVCC](/manual/fundamentals/transactions-and-mvcc).
+
+## Prepared Statements
+
+Use `db.Prepare(sql)` to parse and plan a parameterized SQL statement once and execute it repeatedly. Placeholders support `@param`, `$param`, and `:param` prefixes.
 
 ```csharp
-using var db = new DataVoContext(new DataVoConfig
-{
-    StorageMode = StorageMode.Lsm,
-    DiskStoragePath = "./datavo_lsm_data",
-    LsmStrictFsync = true
-});
+DataVoPreparedStatement findPlayer = db.Prepare(
+    "SELECT id, name, score FROM players WHERE score >= @min");
 
-db.Execute("CREATE DATABASE App");
-db.Execute("USE App");
+QueryResult rows = findPlayer.Execute(new DataVoQueryParameter("min", 1000));
 ```
 
-`LsmStrictFsync = true` is the conservative durability setting. It waits for the LSM write-ahead log to reach stable storage before acknowledging writes. Use relaxed LSM only for caches, rebuildable data, or benchmark runs where recent-write loss is acceptable.
+For hot loops that read results immediately without retaining `QueryResult` across calls, `ExecuteBorrowed(...)` reuses pooled internal result buffers to reduce allocations.
 
-## Lazy SQL Streaming (`StreamQuery`) and Live Views (`Subscribe`)
+## Typed, Bulk, and Atomic Batch Writes
 
-For large scans that should stream incrementally rather than buffering every row in memory, `DataVoContext.StreamQuery(sql, ...)` yields `DataVoRow` objects lazily over 1,024-row pages via `yield return` (short-circuiting cleanly on `LIMIT` or `break`). For continuous query updates without polling, `DataVoContext.Subscribe(sql, onChanged)` and zero-allocation `SubscribeZeroAlloc(sql, onChanged)` maintain Z-set deltas as data commits and drain on caller demand via `DispatchPendingNotifications()`.
+When ingesting many rows or writing from strongly-typed models, bypass SQL parsing with direct write methods:
 
-See [Streaming Queries](/manual/client-interfaces/streaming-queries) and [Live Reactive Views (Z-set IVM)](/manual/client-interfaces/reactive-views) for API signatures, examples, and supported query shapes.
-
-## Zero-Copy Table Streaming (`StreamRef` and `RowRef`)
-
-For performance-critical loops (such as 60/120 FPS game simulation loops, real-time physics, or high-throughput batch pipelines), allocating C# heap objects per row creates GC pressure. DataVo provides `StreamRef()` on both `DataVoTable<T>` and `DataVoContext`:
+| Method | Best For | Notes |
+| --- | --- | --- |
+| `Insert<T>(table, entity)` | Single POCO insert | Maps public properties to catalog columns (cached per schema version). |
+| `BulkInsert(table, rows)` | Dictionary batches | All-or-nothing insert of `IEnumerable<IReadOnlyDictionary<string, object?>>`. |
+| `InsertTyped` / `InsertTypedBatch` | Zero-boxing pipelines | Accepts `ReactiveRowSchema` and `ReadOnlySpan<CellValue>`. |
+| `ApplyBatch(DataVoWriteBatch)` | Multi-table atomic mutations | Combines `Upsert`, `Update`, and `Delete` in one commit (`InMemory` and `Lsm` only). |
 
 ```csharp
-// Using a typed table
-foreach (RowRef row in db.Table<Player>().StreamRef())
-{
-    int id = row.GetInt32(0);
-    float health = row.GetFloat(1);
-    ReadOnlySpan<char> name = row.GetStringSpan(2);
-    // Zero bytes allocated on the managed heap!
-}
-
-// Or dynamically by table name
-RowRefStream stream = db.StreamRef("Players");
-int healthCol = stream.GetOrdinal("Health");
-foreach (RowRef row in stream)
-{
-    float health = row.GetFloat(healthCol);
-}
+var batch = new DataVoWriteBatch();
+batch.Upsert(playersLayout, 1, "Ada", 1500);
+batch.Delete(playersLayout, 2, null, null);
+DataVoBatchResult stats = db.ApplyBatch(batch);
 ```
 
-### Key Invariants of `RowRef`:
-- **Zero Allocations:** On LSM and InMemory storage engines, a full table pass allocates 0 bytes on the managed heap (`GC.GetAllocatedBytesForCurrentThread() == 0`).
-- **Direct Span Access:** Decodes primitive and string values directly in-place from storage memory spans (`ReadOnlySpan<byte>`).
-- **Typed Accessors:** `GetInt32`, `GetInt64`, `GetFloat`, `GetDouble`, `GetBoolean`, `GetGuid`, `GetStringSpan`, `GetStringUtf8`, `GetVector3`, `GetVectorBytes`, `IsNull`, and `ColumnCount`.
-- **Bounded Page Concurrency:** Reads rows in 1,024-row bounded pages, holding locks only during page block copies so concurrent writers and transactions are never stalled by reader loops.
-- **Lifetime Safety:** `RowRef` is a `ref struct` scoped strictly to each loop iteration. To retain data across iterations, copy the values out of the span.
+## Snapshots, Auth & Change Capture
 
-## Using Entity Framework Core
+- **Snapshots:** Capture and restore point-in-time engine state for the current session with `DataVoSnapshot snap = db.CreateSnapshot()` and `db.RestoreSnapshot(snap)` — useful for deterministic test resets or branching simulation state.
+- **Session Auth:** When `EnableAuthorization = true`, switch the active principal per session with `db.Login(username, password)` and `db.Logout()`. See [Admin & Security SQL](/manual/sql/statements/admin-and-security).
+- **Change Capture:** `db.Changes` exposes the engine's `ChangeCapture` stream, which feeds reactive subscriptions and custom CDC consumers.
 
-DataVo also includes an Entity Framework Core integration bridge (`DataVo.EntityFrameworkCore`). It is a preview bridge rather than a standalone EF provider: it attaches DataVo storage to an EF context while a host EF provider supplies EF's infrastructure services.
+For lazy streaming (`StreamQuery`), zero-allocation scanning (`StreamRef`), and live reactive views (`Subscribe`, `SubscribeZeroAlloc`), see [Streaming Queries](/manual/fundamentals/streaming-queries) and [Reactive Views](/manual/fundamentals/reactive-views).
 
-The example below uses EF Core's in-memory provider as that host provider, then registers DataVo with `UseDataVo`. The context derives from `DataVoDbContext`, which adds DataVo-specific loading helpers and query validation.
+::: details API Reference
 
 ```csharp
-using DataVo.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore;
+// SQL & Prepared Statements
+public List<QueryResult> Execute(string query);
+public List<QueryResult> Execute(string query, Guid sessionId);
+public DataVoPreparedStatement Prepare(string sql);
+public DataVoPreparedStatement Prepare(string sql, Guid sessionId);
 
-public sealed class User
-{
-    public int Id { get; set; }
-    public string Name { get; set; } = "";
-    public bool IsActive { get; set; }
-}
+// Prepared Statement Execution (DataVoPreparedStatement)
+public QueryResult Execute(params DataVoQueryParameter[] parameters);
+public QueryResult Execute(ReadOnlySpan<DataVoQueryParameter> parameters, Guid sessionId);
+public QueryResult ExecuteBorrowed(params DataVoQueryParameter[] parameters);
+public QueryResult ExecuteBorrowed(ReadOnlySpan<DataVoQueryParameter> parameters, Guid sessionId);
 
-public sealed class AppDbContext : DataVoDbContext
-{
-    public AppDbContext(DbContextOptions<AppDbContext> options)
-        : base(options)
-    {
-    }
+// Typed & Batch Writes
+public RowKey Insert<T>(string tableName, T entity);
+public IReadOnlyList<RowKey> BulkInsert(string tableName, IEnumerable<IReadOnlyDictionary<string, object?>> rows);
+public RowKey InsertTyped(string tableName, ReactiveRowSchema columns, ReadOnlySpan<CellValue> row);
+public IReadOnlyList<RowKey> InsertTypedBatch(string tableName, ReactiveRowSchema columns, IReadOnlyList<CellValue[]> rows);
+public DataVoBatchResult ApplyBatch(DataVoWriteBatch batch);
+public DataVoBatchResult ApplyBatch(DataVoWriteBatch batch, Guid sessionId);
 
-    public DbSet<User> Users => Set<User>();
-
-    protected override void OnModelCreating(ModelBuilder modelBuilder)
-    {
-        modelBuilder.Entity<User>(entity =>
-        {
-            entity.ToTable("Users");
-            entity.HasKey(static user => user.Id);
-            entity.Property(static user => user.Name).HasMaxLength(80);
-            entity.Property(static user => user.IsActive);
-        });
-    }
-}
-
+// Snapshots, Auth & CDC
+public DataVoSnapshot CreateSnapshot();
+public void RestoreSnapshot(DataVoSnapshot snapshot);
+public bool Login(string username, string password);
+public bool Login(string username, string password, Guid sessionId);
+public void Logout();
+public void Logout(Guid sessionId);
+public ChangeCapture Changes { get; }
 ```
 
-Register the context using normal EF Core options, then add `UseDataVo`.
+:::
 
-```csharp
-var options = new DbContextOptionsBuilder<AppDbContext>()
-    .UseInMemoryDatabase("datavo-ef-host")
-    .UseDataVo(dataVo => dataVo
-        .UseInMemoryStorage()
-        .WithDataSource("App"))
-    .Options;
-```
+## See Also
 
-You can then write through EF and query with ordinary LINQ for supported LINQ operators.
-
-```csharp
-using var ctx = new AppDbContext(options);
-
-ctx.Database.EnsureCreated();
-
-ctx.Users.Add(new User
-{
-    Id = 1,
-    Name = "Ada",
-    IsActive = true
-});
-
-ctx.SaveChanges();
-
-List<User> activeUsers = ctx.Users
-    .Where(static user => user.IsActive)
-    .OrderBy(static user => user.Name)
-    .ToList();
-
-foreach (User user in activeUsers)
-{
-    Console.WriteLine(user.Name);
-}
-```
-
-If data was written by another context session or directly through `DataVoContext`, call `LoadFromDataVo` before running EF LINQ so EF's change tracker mirrors the current DataVo tables.
-
-```csharp
-using var reader = new AppDbContext(options);
-
-reader.LoadFromDataVo();
-
-List<User> activeUsers = reader.Users
-    .Where(static user => user.IsActive)
-    .ToList();
-```
-
-For DataVo-native query evaluation, use `QueryFromDataVo`. This API validates the LINQ expression and either executes the supported subset or reports a clear unsupported-pattern error.
-
-```csharp
-List<User> firstTenActiveUsers = reader.QueryFromDataVo<User>(query => query
-    .Where(static user => user.IsActive)
-    .OrderBy(static user => user.Id)
-    .Take(10));
-```
-
-## Entity Framework Core Support
-
-The EF bridge supports basic `DbSet` querying (after data is written in the current context or loaded with `LoadFromDataVo`), basic inserts (`Add` plus `SaveChanges`), `QueryFromDataVo` for bounded `Where`, `OrderBy`, `Skip`, `Take`, and `Select` projections over mapped scalar properties, and vector LINQ shims (`CosineDistance`, `L2Distance`). Native EF-provider identity is planned. Migrations, shadow properties, complex joins, and broad `GroupBy` translation are **not** supported — unsupported grouped operators report unsupported-pattern errors.
+- [Streaming Queries](/manual/fundamentals/streaming-queries) — Lazy `StreamQuery` and zero-allocation `StreamRef` scans
+- [Reactive Views](/manual/fundamentals/reactive-views) — Z-set incremental view maintenance via `Subscribe` and `SubscribeZeroAlloc`
+- [Source Generators](/manual/client-interfaces/source-generators) — Compile-time table helpers and `[DataVoQuery]` methods
+- [Configuration Reference](/manual/reference/configuration) — All `DataVoConfig` storage, LSM, and security options

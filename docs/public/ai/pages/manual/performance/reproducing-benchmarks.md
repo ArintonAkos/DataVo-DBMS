@@ -3,210 +3,113 @@
 > Source route: /manual/performance/reproducing-benchmarks
 > Source file: manual/performance/reproducing-benchmarks.md
 
-Run benchmarks from the repository root so relative paths, artifacts, and native extension configuration resolve the same way as the checked-in benchmark host expects.
-
-Start with a single scenario and markdown output.
+Every chart and table in the performance documentation can be reproduced from the repository root using Release builds on .NET 10. Run scenarios **serially** on an idle machine—parallel runs contend on CPU and storage flushes and invalidate latency tails.
 
 ```bash
-dotnet run -c Release --project demos/Research.Benchmark/src/Research.Benchmark.Host -- --scenario flat-crud --format markdown
+# 1. Capture environment metadata first
+git rev-parse HEAD && dotnet --info && uname -a
+
+# 2. Build the research benchmark host once
+dotnet build demos/Research.Benchmark/src/Research.Benchmark.Host -c Release
+DLL=demos/Research.Benchmark/src/Research.Benchmark.Host/bin/Release/net10.0/Research.Benchmark.Host.dll
 ```
 
-The disk CRUD workload compares DataVo LSM strict mode, DataVo LSM relaxed mode, and SQLite WAL modes under point-update pressure.
+## 1. SQL Matrix & Hybrid Vector (`DataVo vs SQLite`)
+
+Reproduces the 28-query 1,000,000-row SQL comparison and 5 filtered nearest-neighbour shapes in [DataVo vs SQLite](/manual/performance/datavo-vs-sqlite).
 
 ```bash
-dotnet run -c Release --project demos/Research.Benchmark/src/Research.Benchmark.Host -- --scenario disk-crud-wal --records 20000 --format markdown
+# 28 relational SQL shapes over 1,000,000 orders (~2 min, ~1.2 GB peak RAM)
+dotnet "$DLL" --scenario sql-matrix > sql-matrix.md 2> sql-matrix.log
+
+# Filtered vector search (50k × 384d and 20k × 1,536d; requires SQLITE_VEC_PATH)
+SQLITE_VEC_PATH=$PWD/vec0.dylib dotnet "$DLL" --scenario hybrid-vector > hybrid-vector.md
+SQLITE_VEC_PATH=$PWD/vec0.dylib dotnet "$DLL" --scenario hybrid-vector --vectors 20000 --dimensions 1536 > hybrid-vector-1536.md
 ```
 
-The vector workload inserts 10,000 vectors, uses 1536 dimensions, and runs 100 top-10 queries. This is the run behind the allocation story on the benchmark page.
+Useful filters: `--records 100000` (fast 1-minute smoke), `--queries J5,C8` (specific shapes), `--engine datavo,datavo-mem,sqlite,duckdb` (or `datavo-flat,datavo-hnsw,sqlite`).
 
+::: details Installing `sqlite-vec` v0.1.9 (`SQLITE_VEC_PATH`)
+**macOS arm64:**
 ```bash
-dotnet run -c Release --project demos/Research.Benchmark/src/Research.Benchmark.Host -- --scenario vector-search --vectors 10000 --dimensions 1536 --queries 100 --topk 10 --format markdown
+curl -sL -o /tmp/svec.tgz https://github.com/asg017/sqlite-vec/releases/download/v0.1.9/sqlite-vec-0.1.9-loadable-macos-aarch64.tar.gz
+tar xzf /tmp/svec.tgz -C /tmp && export SQLITE_VEC_PATH=/tmp/vec0.dylib
 ```
 
-SQLite vector search requires the `sqlite-vec` loadable `vec0` extension. The GitHub Actions benchmark workflow downloads the pinned `v0.1.9` loadable release for Linux x64 and Windows x64, verifies SHA256, exports `SQLITE_VEC_PATH`, and uploads the extension artifact with the run. For local runs, set `SQLITE_VEC_PATH` yourself before launching the vector scenario.
-
-macOS arm64:
-
+**Linux x64:**
 ```bash
-curl -sL -o /tmp/svec.tgz \
-  https://github.com/asg017/sqlite-vec/releases/download/v0.1.9/sqlite-vec-0.1.9-loadable-macos-aarch64.tar.gz
-tar xzf /tmp/svec.tgz -C /tmp
-export SQLITE_VEC_PATH=/tmp/vec0.dylib
+curl -sL -o /tmp/svec.tgz https://github.com/asg017/sqlite-vec/releases/download/v0.1.9/sqlite-vec-0.1.9-loadable-linux-x86_64.tar.gz
+tar xzf /tmp/svec.tgz -C /tmp && export SQLITE_VEC_PATH=/tmp/vec0.so
 ```
 
-Linux x64:
-
-```bash
-curl -sL -o /tmp/svec.tgz \
-  https://github.com/asg017/sqlite-vec/releases/download/v0.1.9/sqlite-vec-0.1.9-loadable-linux-x86_64.tar.gz
-tar xzf /tmp/svec.tgz -C /tmp
-export SQLITE_VEC_PATH=/tmp/vec0.so
-```
-
-Windows x64, PowerShell:
-
+**Windows x64 (PowerShell):**
 ```powershell
-curl.exe -L -o $env:TEMP\svec.tgz `
-  https://github.com/asg017/sqlite-vec/releases/download/v0.1.9/sqlite-vec-0.1.9-loadable-windows-x86_64.tar.gz
+curl.exe -L -o $env:TEMP\svec.tgz https://github.com/asg017/sqlite-vec/releases/download/v0.1.9/sqlite-vec-0.1.9-loadable-windows-x86_64.tar.gz
 tar -xzf $env:TEMP\svec.tgz -C $env:TEMP
 $env:SQLITE_VEC_PATH = "$env:TEMP\vec0.dll"
 ```
+:::
 
-The thread-scaling workload is the one to run when you want to inspect the LSM Relaxed result. Use the
-relaxed engine filter for that number; the default `all` matrix also runs strict production durability, which
-can be much slower on Windows because it includes fsync-heavy update work.
+## 2. BenchmarkDotNet Microbenchmarks (Part I)
 
-```bash
-dotnet run -c Release --project demos/Research.Benchmark/src/Research.Benchmark.Host -- --scenario thread-scaling --engine datavo-lsm-relaxed --format markdown
-```
-
-The YCSB-style mixed workload preloads records and mixes reads with updates so write-tail latency can be compared.
-
-```bash
-dotnet run -c Release --project demos/Research.Benchmark/src/Research.Benchmark.Host -- --scenario ycsb-mixed --records 100000 --format markdown
-```
-
-The space and recovery workload measures insert time, on-disk size, recovery time, and managed allocation.
-
-```bash
-dotnet run -c Release --project demos/Research.Benchmark/src/Research.Benchmark.Host -- --scenario space-and-recovery --records 1000000 --format markdown
-```
-
-The two incremental-view scenarios are named `simple-exposure` (profile A, one table) and `complex-vip` (profile B, a three-table join). The remaining scenarios from the results page are `deep-document`, `concurrent-ops` and `sql-workload`.
-
-```bash
-dotnet run -c Release --project demos/Research.Benchmark/src/Research.Benchmark.Host -- --scenario simple-exposure --format markdown
-dotnet run -c Release --project demos/Research.Benchmark/src/Research.Benchmark.Host -- --scenario complex-vip --format markdown
-dotnet run -c Release --project demos/Research.Benchmark/src/Research.Benchmark.Host -- --scenario deep-document --format markdown
-dotnet run -c Release --project demos/Research.Benchmark/src/Research.Benchmark.Host -- --scenario concurrent-ops --format markdown
-dotnet run -c Release --project demos/Research.Benchmark/src/Research.Benchmark.Host -- --scenario sql-workload --format markdown
-```
-
-Run scenarios one at a time. Running them in parallel changes every result, and the strict-durability ones also compete for the same drive. The `disk-crud-wal` scenario takes about three minutes because two of its engines flush the drive 20,000 times.
-
-## BenchmarkDotNet suite
-
-The microbenchmarks in `benchmarks/DataVo.Benchmarks` compare DataVo with SQLite and DuckDB on identical data. A full run takes about 15 minutes. Close other programs first.
+Runs the statistical microbenchmark suite (`benchmarks/DataVo.Benchmarks`, ~15 minutes) comparing DataVo, SQLite, and DuckDB on identical data. Outputs Markdown, CSV, and HTML reports to `BenchmarkDotNet.Artifacts/results/`.
 
 ```bash
 dotnet run -c Release --project benchmarks/DataVo.Benchmarks -- --filter '*'
 ```
 
-Results are written to `BenchmarkDotNet.Artifacts/results/` as Markdown, CSV and HTML. The benchmark project's README lists what each class measures and how each engine is configured.
+## 3. Systems Workloads (Part II)
 
-## HNSW recall and latency against Flat
+| Scenario | Command | Notes |
+| --- | --- | --- |
+| **Flat CRUD** | `dotnet "$DLL" --scenario flat-crud --format markdown` | 50k inserts + 50k in-memory lookups |
+| **Disk CRUD WAL** | `dotnet "$DLL" --scenario disk-crud-wal --records 20000 --format markdown` | ~3 min (20k strict `fsync` commits) |
+| **Thread Scaling** | `dotnet "$DLL" --scenario thread-scaling --engine datavo-lsm-relaxed --format markdown` | Use `--engine all` to include strict mode |
+| **YCSB Mixed 80/20** | `dotnet "$DLL" --scenario ycsb-mixed --records 100000 --format markdown` | Multi-threaded read/write tail latency |
+| **Space & Recovery** | `dotnet "$DLL" --scenario space-and-recovery --records 1000000 --format markdown` | 1M rows, disk size & warm reopen |
+| **Vector Search** | `dotnet "$DLL" --scenario vector-search --vectors 10000 --dimensions 1536 --queries 100 --topk 10 --format markdown` | Requires `SQLITE_VEC_PATH` |
+| **HNSW vs. Flat Recall** | `dotnet run -c Release --project demos/Research.Benchmark/tools/VectorRecall` | Held-out recall@10 (~1 min) |
+| **Reactive IVM** | `dotnet "$DLL" --scenario simple-exposure --format markdown` and `--scenario complex-vip` | Single-table & 3-table Z-set IVM |
+| **Other Workloads** | `--scenario deep-document`, `--scenario concurrent-ops`, `--scenario sql-workload` | App-shaped & 1M-row SQL workloads |
 
-The vector scenario reports query latency but not recall, and its query vectors are members of the data set. `demos/Research.Benchmark/tools/VectorRecall` builds Flat and HNSW indexes at 1,000, 10,000 and 50,000 vectors, on uniform and on clustered data, and measures latency and recall@10 with held-out queries. It takes about a minute.
+Always keep durability settings explicit when comparing strict vs. relaxed LSM:
 
-```bash
-dotnet run -c Release --project demos/Research.Benchmark/tools/VectorRecall
+```csharp
+var strict  = new DataVoConfig { StorageMode = StorageMode.Lsm, DiskStoragePath = "./bench_strict",  LsmStrictFsync = true };
+var relaxed = new DataVoConfig { StorageMode = StorageMode.Lsm, DiskStoragePath = "./bench_relaxed", LsmStrictFsync = false };
 ```
 
-## Regenerating the charts
+## 4. Arena Live Views, Unity IL2CPP & Charts
 
-The charts on the results page are generated from the raw files in `docs/public/benchmarks/<run date>/`. Copy new scenario output into a new dated folder, set `RUN` in the script, and run it. It needs Python 3 with `matplotlib` and `numpy`.
-
+::: details Arena Live Views Matrix (Desktop .NET & Unity macOS IL2CPP)
+**Desktop .NET lane (7 repetitions per profile):**
 ```bash
-python3 docs/scripts/generate-benchmark-plots.py
-python3 docs/scripts/generate-ivm-benchmark-plots.py   # also needs rsvg-convert
+dotnet "$DLL" --scenario arena-live-views --profile gameplay --engine all --repetitions 7 --output /private/tmp/datavo-arena-gameplay --format markdown
+dotnet "$DLL" --scenario arena-live-views --profile ivm-stress --engine all --repetitions 7 --output /private/tmp/datavo-arena-ivm-stress --format markdown
 ```
 
-The two incremental-view plots read their values from the script, not from the raw files. Update those values by hand when you rerun `simple-exposure` and `complex-vip`.
-
-## Unity IL2CPP smoke
-
-These need Unity 6000.5.4f1 with the macOS IL2CPP module installed. The smoke builds a macOS IL2CPP player, runs it, and checks that it reports a passing result. It is a correctness check and produces no timings.
-
+**Unity macOS IL2CPP lanes (requires Unity 6000.5.4f1 + `mac-il2cpp`):**
 ```bash
 bash scripts/check-unity-support-status.sh
 bash scripts/run-unity-macos-il2cpp-player-smoke.sh
-```
-
-## Arena Live Views cross-engine matrix
-
-The relational arena matrix measures three demanded live views after every write batch. It is separate from vector search: neither the Unity NPC-memory demo nor the desktop `vector-search` scenario belongs in this matrix. All raw JSON paths written by the commands below are part of the result.
-
-### Desktop .NET lane
-
-The desktop .NET table compares DataVo reactive, DataVo polling, SQLite, and DuckDB on .NET. DuckDB is desktop-only. Run the fixed profiles serially and choose output directories outside tracked source files:
-
-```bash
-dotnet run -c Release --project demos/Research.Benchmark/src/Research.Benchmark.Host -- \
-  --scenario arena-live-views --profile gameplay --engine all --repetitions 7 \
-  --output /private/tmp/datavo-arena-gameplay --format markdown
-
-dotnet run -c Release --project demos/Research.Benchmark/src/Research.Benchmark.Host -- \
-  --scenario arena-live-views --profile ivm-stress --engine all --repetitions 7 \
-  --output /private/tmp/datavo-arena-ivm-stress --format markdown
-```
-
-### Unity macOS IL2CPP lane
-
-The Unity table compares only DataVo reactive, DataVo polling, and macOS system SQLite in IL2CPP. The runner builds once, launches seven fresh Player processes for each engine/profile pair, preserves each raw JSON path, and gives every Player process a 120-second hard limit. A timeout, failed repetition, missing engine, or hash mismatch fails the command.
-
-```bash
 bash scripts/run-unity-macos-il2cpp-arena-cross-engine.sh
-```
-
-do not compare Unity IL2CPP values directly with desktop .NET values
-
-The commands are reproduction gates, not a claim that every invocation has already passed. Interpret a lane only from its completed artifacts: seven runs per engine/profile, the median total time, within-run percentiles, and identical canonical leaderboard, team-aggregate, and zone-inventory hashes for a profile.
-
-## Unity NPC Memory Arena
-
-On macOS with Unity 6000.5.4f1 and the matching `mac-il2cpp` module installed, run the Editor checks and the actual Medium-stripping IL2CPP Player proof from the repository root.
-
-```bash
 bash scripts/run-unity-arena-editor-tests.sh
 bash scripts/run-unity-macos-il2cpp-arena.sh
 ```
+*Do not compare Unity IL2CPP timings directly with desktop .NET timings; evaluate each lane independently with its canonical checksums.*
+:::
 
-The Player script builds once, runs deterministic reactive and polling modes separately, writes their JSON reports under Unity's persistent-data directory, and requires their final leaderboard and aggregate checksums to match. The result compares DataVo incremental maintained views against full-query polling with the same DataVo data and SQL. It is not a DataVo-versus-SQLite benchmark; interpret it with its recorded seed, tick count, and Unity backend.
-
-Record the environment with every run. At minimum, capture the commit SHA, OS, CPU, .NET SDK, storage device, native SQLite extension path, storage mode, and durability setting.
-
+::: details Regenerating Charts & CI Workflow Artifacts
+**Regenerate PNG charts** (requires Python 3, `matplotlib`, `numpy`; IVM plots also require `rsvg-convert`):
 ```bash
-git rev-parse HEAD
-dotnet --info
-uname -a
+python3 docs/scripts/generate-benchmark-plots.py
+python3 docs/scripts/generate-ivm-benchmark-plots.py
+python3 docs/scripts/generate-ci-benchmark-plots.py
 ```
 
-When comparing strict and relaxed LSM, keep the configuration difference visible in the report. The two modes answer different questions.
+**CI snapshot reproduction:** Trigger `.github/workflows/benchmark.yml` via `workflow_dispatch` on GitHub Actions to run the full BenchmarkDotNet + Research Matrix suites across Ubuntu x64, Windows x64, and macOS runners. Download artifacts with `gh run download <run-id>`.
+:::
 
-```csharp
-var strict = new DataVoConfig
-{
-    StorageMode = StorageMode.Lsm,
-    DiskStoragePath = "./bench_strict",
-    LsmStrictFsync = true
-};
-
-var relaxed = new DataVoConfig
-{
-    StorageMode = StorageMode.Lsm,
-    DiskStoragePath = "./bench_relaxed",
-    LsmStrictFsync = false
-};
-```
-
-## SQL capability matrix and hybrid vector queries
-
-The [DataVo vs SQLite](./datavo-vs-sqlite.md) page comes from two scenarios of the research host. `sql-matrix` loads 1,000,000 orders into DataVo (LSM and InMemory), SQLite and DuckDB, checks every query's answer against an oracle computed from the generator, then times it. `hybrid-vector` runs filtered top-10 queries on DataVo Flat, DataVo HNSW and SQLite + sqlite-vec and scores recall against the exact filtered top-10.
-
-```bash
-dotnet build demos/Research.Benchmark/src/Research.Benchmark.Host -c Release
-DLL=demos/Research.Benchmark/src/Research.Benchmark.Host/bin/Release/net10.0/Research.Benchmark.Host.dll
-dotnet "$DLL" --scenario sql-matrix > sql-matrix.md                       # about 2 minutes, 1.1 GB peak
-SQLITE_VEC_PATH=$PWD/vec0.dylib dotnet "$DLL" --scenario hybrid-vector > hybrid-vector.md
-SQLITE_VEC_PATH=$PWD/vec0.dylib dotnet "$DLL" --scenario hybrid-vector --vectors 20000 --dimensions 1536
-```
-
-`--records 100000` runs the matrix in about a minute. `--engine` takes a comma-separated subset (`datavo,datavo-mem,sqlite,duckdb`; `datavo-flat,datavo-hnsw,sqlite`). `--queries J5,C8` runs only the named matrix shapes. The raw output of the final v0.4 runs is under `docs/public/benchmarks/2026-11-16-v04-final/`; earlier runs are in sibling folders, including the first run against the unmodified engine in `2026-11-14/pre-fix/`. Run each scenario in its own process on an otherwise idle machine; the runs on that page started below a 1-minute load average of 2.5.
-
-## Reproducing the CI Snapshot
-
-The Linux and Windows measurements in the benchmark results come from the GitHub Actions workflow `.github/workflows/benchmark.yml`. The research-scenario matrix runs on Ubuntu and Windows hosted runners, and the BenchmarkDotNet suite on Ubuntu, Windows and macOS runners. It downloads the pinned `sqlite-vec v0.1.9` loadable extension for each OS, verifies its SHA256, exports `SQLITE_VEC_PATH`, runs the same scenario commands shown above, and uploads the results as workflow artifacts. To reproduce it, trigger that workflow from the repository's Actions tab (it supports manual `workflow_dispatch`), or run the same `dotnet run` commands on a local host with `SQLITE_VEC_PATH` pointing at the extension. The results in [Part III](./benchmarks.md#part-iii-platforms) come from [run 43189115522](https://github.com/ArintonAkos/DataVo-DBMS/actions/runs/43189115522); its logs and BenchmarkDotNet reports are checked in under `docs/public/benchmarks/2026-11-12/ci/`, and `docs/scripts/generate-ci-benchmark-plots.py` regenerates the cross-platform charts from them. Artifacts are named `benchmark-log-<label>` and `benchmarkdotnet-<runner>`; download them with `gh run download <run-id>`.
-
-## Reproduction Support
-
-Every table on the [results page](./benchmarks.md) comes from one of the commands above, and the raw output of the last run is checked in under `docs/public/benchmarks/2026-11-12/`. The Linux and Windows measurements were produced by the GitHub Actions workflow on the same day and are checked in under `ci/`. A long-term public CI performance gate is planned but not yet in place.
+## See Also
+- [Benchmark Results & Methodology](/manual/performance/benchmarks) — Full results, methodology, and cross-platform CI findings
+- [DataVo vs SQLite](/manual/performance/datavo-vs-sqlite) — 1M-row SQL matrix and hybrid vector decision guide

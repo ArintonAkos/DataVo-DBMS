@@ -1,128 +1,84 @@
-# ADO.NET Provider (DataVo.Data)
+---
+title: ADO.NET Provider (DataVo.Data)
+description: Standard System.Data.Common provider for embedded DataVo databases, transactions, prepared commands, and Dapper integration.
+---
 
-`DataVo.Data` is a standard ADO.NET provider. Its types derive from the `System.Data.Common` base classes (`DbConnection`, `DbCommand`, `DbDataReader`, `DbTransaction`, `DbParameter`), so any code or library written against those abstractions can use DataVo without DataVo-specific adapters. That includes micro-ORMs such as [Dapper](/manual/client-interfaces/dapper).
+# ADO.NET Provider (`DataVo.Data`)
 
-```bash
-dotnet add package DataVo.Data --prerelease
-```
-
-## Types
-
-| ADO.NET base class | DataVo type | Notes |
-| --- | --- | --- |
-| `DbConnection` | `DataVoConnection` | Opens the embedded engine in-process. There is no network connection. |
-| `DbCommand` | `DataVoCommand` | Text commands. Parameters use `@name` placeholders. |
-| `DbDataReader` | `DataVoDataReader` | Forward-only reader over the command's results. |
-| `DbTransaction` | `DataVoTransaction` | `Commit`, `Rollback` and savepoints. |
-| `DbParameter` | `DataVoParameter` | `AddWithValue` is available on `DataVoParameterCollection`. |
-| none | `DataVoConnectionStringBuilder` | Parses the [connection string](/manual/reference/configuration). |
-| `Exception` | `DataVoException` | Carries `ErrorCode`, `Line` and `Column`. |
-
-## Connect, create, insert, query
+`DataVo.Data` implements the standard `System.Data.Common` abstractions (`DbConnection`, `DbCommand`, `DbDataReader`, `DbTransaction`, `DbParameter`) over the in-process DataVo engine. Any library targeting `IDbConnection` — including [Dapper](/manual/client-interfaces/dapper) — works without custom adapters.
 
 ```csharp
 using DataVo.Data;
 
-using var connection = new DataVoConnection("StorageMode=Lsm;DataSource=./app-data");
-connection.Open();
+using var conn = new DataVoConnection("StorageMode=Lsm;DataSource=./game-data");
+conn.Open();
 
-using (var create = connection.CreateCommand())
-{
-    create.CommandText = "CREATE TABLE IF NOT EXISTS Players (Id INT PRIMARY KEY, Name VARCHAR(40), Level INT)";
-    create.ExecuteNonQuery();
-}
+using var cmd = conn.CreateCommand();
+cmd.CommandText = "CREATE TABLE IF NOT EXISTS players (id INT PRIMARY KEY, name VARCHAR(80), score INT)";
+cmd.ExecuteNonQuery();
 
-using (var insert = connection.CreateCommand())
-{
-    insert.CommandText = "INSERT INTO Players (Id, Name, Level) VALUES (@id, @name, @level)";
-    insert.Parameters.AddWithValue("@id", 1);
-    insert.Parameters.AddWithValue("@name", "Ada");
-    insert.Parameters.AddWithValue("@level", 12);
-    int affected = insert.ExecuteNonQuery(); // 1
-}
-
-using var query = connection.CreateCommand();
-query.CommandText = "SELECT Id, Name FROM Players WHERE Level >= @min";
-query.Parameters.AddWithValue("@min", 5);
-
-using var reader = query.ExecuteReader();
-while (reader.Read())
-{
-    Console.WriteLine($"{reader.GetInt32(0)}: {reader.GetString(1)}");
-}
+cmd.CommandText = "INSERT INTO players (id, name, score) VALUES (@id, @name, @score)";
+cmd.Parameters.AddWithValue("@id", 1);
+cmd.Parameters.AddWithValue("@name", "Ada");
+cmd.Parameters.AddWithValue("@score", 1200);
+cmd.ExecuteNonQuery();
 ```
 
-`Open()` initializes the storage engine, creates the database named by `DataSource` if it does not exist, and selects it. `Close()` rolls back any open transaction and releases the engine.
+## Connection Strings & Lifecycle
 
-## Transactions
+Use `DataVoConnectionStringBuilder` or a semicolon-delimited string with three supported keys:
 
-A transaction is bound to the connection's session. `BeginTransaction()` starts it, and statements run on the same connection join it.
+| Key | Default | Description |
+| --- | --- | --- |
+| `StorageMode` | `InMemory` | `InMemory`, `Lsm`, or `Disk` (legacy). |
+| `DataSource` | `"datavo"` | Database name (and storage directory path for `Lsm`/`Disk`). |
+| `WalEnabled` | `true` (`Disk`) | Enables WAL in legacy `Disk` mode. |
+
+When `conn.Open()` runs, it initializes the embedded engine, executes `CREATE DATABASE IF NOT EXISTS` for the `DataSource` database name, and selects it with `USE`. `Close()` rolls back any uncommitted transaction and releases the session.
+
+## Provider Types
+
+| `System.Data.Common` Base | DataVo Type | Notes |
+| --- | --- | --- |
+| `DbConnection` | `DataVoConnection` | In-process engine handle; no network socket or connection pool. |
+| `DbCommand` | `DataVoCommand` | Text commands with `@param` placeholders and `Prepare()`. |
+| `DbDataReader` | `DataVoDataReader` | Forward-only reader over materialized command results. |
+| `DbTransaction` | `DataVoTransaction` | Supports `Commit()`, `Rollback()`, and savepoints (`Save`, `Rollback(name)`, `Release`). |
+| `DbParameter` | `DataVoParameter` | Supports `Parameters.AddWithValue("@name", value)`. |
+| `DbConnectionStringBuilder` | `DataVoConnectionStringBuilder` | Strongly-typed builder for `StorageMode`, `DataSource`, and `WalEnabled`. |
+| `Exception` | `DataVoException` | Exposes `ErrorCode`, `Line`, and `Column`. |
+
+`DataVo.Data` does **not** ship a `DbProviderFactory`.
+
+## Transactions & Prepared Commands
 
 ```csharp
-using var transaction = connection.BeginTransaction();
+using var tx = conn.BeginTransaction();
 
-using var update = connection.CreateCommand();
-update.CommandText = "UPDATE Players SET Level = @level WHERE Id = @id";
-update.Parameters.AddWithValue("@level", 13);
+using var update = conn.CreateCommand();
+update.CommandText = "UPDATE players SET score = @score WHERE id = @id";
+update.Parameters.AddWithValue("@score", 1500);
 update.Parameters.AddWithValue("@id", 1);
+update.Prepare();
 update.ExecuteNonQuery();
 
-transaction.Save("afterUpdate");   // SAVEPOINT
-// ... more work ...
-transaction.Rollback("afterUpdate"); // ROLLBACK TO SAVEPOINT
-
-transaction.Commit();
+tx.Save("checkpoint1");
+tx.Rollback("checkpoint1");
+tx.Commit();
 ```
 
-Savepoints (`Save`, `Rollback(name)`, `Release`) are supported. For the isolation guarantees you can rely on, read [Transactions, ACID & MVCC](/manual/storage-engine/transactions-acid-mvcc). `DataVoTransaction.IsolationLevel` is reported for ADO.NET compatibility; the engine's documented contract is the source of truth, including its limits on predicate-level isolation.
+Calling `Prepare()` (or using parameterized commands) routes execution through DataVo's prepared-statement cache so repeated executions skip SQL parsing.
 
-## Prepared and parameterized commands
+## Behavior Notes
 
-A command with parameters, or one on which you call `Prepare()`, runs through the engine's prepared-statement pipeline, so repeated execution does not re-parse the SQL.
+- **Materialized reader:** `ExecuteReader()` executes the statement and walks materialized rows; for zero-allocation streaming, use `DataVoContext.StreamRef()` or compiled LINQ.
+- **Metadata before `Read()`:** `GetName` and `GetFieldType` are available before the first `Read()` call. Column types are inferred from the first non-null value (`object` if all values are null).
+- **Synchronous async wrappers:** `ExecuteReaderAsync` and other async methods complete synchronously on the calling thread because storage is in-process.
+- **Timeouts and cancellation:** `Cancel()` is a no-op and `CommandTimeout` does not abort running statements; lock waits are bounded by `LockAcquireTimeoutMs`.
+- **Single-process directory ownership:** Multiple `DataVoConnection` instances in the same process share one engine for a given directory; a second process opening the same directory fails with `DV7001_DATABASE_IN_USE`.
 
-```csharp
-using var lookup = connection.CreateCommand();
-lookup.CommandText = "SELECT Name FROM Players WHERE Id = @id";
-lookup.Parameters.AddWithValue("@id", 1);
-lookup.Prepare();
+## See Also
 
-for (int id = 1; id <= 100; id++)
-{
-    lookup.Parameters[0].Value = id;
-    object? name = lookup.ExecuteScalar();
-}
-```
-
-## Errors
-
-A failed statement throws `DataVoException`. Branch on `ErrorCode`, not on the message text. See [Error Handling](/manual/reference/error-handling).
-
-```csharp
-try
-{
-    insert.ExecuteNonQuery();
-}
-catch (DataVoException ex)
-{
-    Console.WriteLine($"{ex.ErrorCode} at line {ex.Line}, column {ex.Column}: {ex.Message}");
-}
-```
-
-## Behavior to know about
-
-- **The reader is forward-only over a materialized result.** `ExecuteReader()` runs the command and the reader walks the returned rows; it does not stream pages from storage. For zero-allocation streaming, use the typed table API, `RowRef` and compiled LINQ (see [Zero-Allocation Row Model](/manual/internals/zero-allocation-rows)).
-- **Metadata is available before `Read()`.** `GetFieldType` and `GetName` work before the first row, as ADO.NET consumers expect. Column types are taken from the first non-null value in the result, so a column that is null in every row reports `object`.
-- **Async methods run synchronously.** `ExecuteReaderAsync` and friends come from the `DbCommand` base class and complete on the calling thread; the engine is in-process.
-- **`Cancel()` is a no-op and `CommandTimeout` does not cancel a running statement.** Lock waits are bounded by `LockAcquireTimeoutMs`; see [Configuration](/manual/reference/configuration).
-- **One process owns a persisted database directory.** Connections in the same process that open the same directory share one engine and must use equivalent settings. A second process opening the directory gets `DatabaseInUseException`; see [LSM-Tree Engine](/manual/storage-engine/lsm-mode#opening-the-same-directory-twice).
-- **There is no connection pool and no server.** Opening a connection is opening the engine.
-
-## Native AOT
-
-`DataVo.Data` builds with the trim and AOT analyzers enabled and the IL warnings treated as errors, so the provider itself is AOT-clean. If you add a reflection-based mapper on top, that library's AOT support applies. See [Native AOT Deployment](/manual/client-interfaces/native-aot).
-
-## Related
-
-- [ADO.NET & Dapper tutorial](/manual/tutorial/ado-net-and-dapper)
-- [Dapper](/manual/client-interfaces/dapper)
-- [Configuration Reference](/manual/reference/configuration)
+- [Dapper](/manual/client-interfaces/dapper) — Using Dapper over `DataVoConnection`
+- [Error Handling](/manual/reference/error-handling) — `DataVoException` and `DV*` error codes
+- [Native AOT Deployment](/manual/client-interfaces/native-aot) — Trim and AOT compatibility for `DataVo.Data`

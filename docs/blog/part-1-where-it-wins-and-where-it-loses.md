@@ -194,7 +194,7 @@ Over 10,000 orders, 1,000 accounts, and 50 markets running **50,000 insert-and-r
 
 *Figure 6: Cumulative time to apply 50,000 updates to a 3-table JOIN + GROUP BY view on macOS, Linux, and Windows.*
 
-In C#, the subscription uses `SubscribeZeroAlloc` (or the owned `Subscribe` overload) and drains deltas on demand via `DispatchPendingNotifications()` (see [Live Reactive Views (Z-set IVM)](/manual/client-interfaces/reactive-views)):
+In C#, the subscription uses `SubscribeZeroAlloc` (or the owned `Subscribe` overload) and drains deltas on demand via `DispatchPendingNotifications()` (see [Live Reactive Views (Z-set IVM)](/manual/fundamentals/reactive-views)):
 
 ```csharp
 using var view = db.SubscribeZeroAlloc(
@@ -209,7 +209,7 @@ db.DispatchPendingNotifications(); // pull-drain deltas on the caller thread
 - **Linux x64 CI (20 Nov):** DataVo **599.9 ms** (p50 `10.9 µs`) vs DuckDB **112.9 s** (**188×**) vs SQLite **237.1 s** (**395×**).
 - **Windows x64 CI (20 Nov):** DataVo **545.5 ms** (p50 `9.6 µs`) vs DuckDB **135.5 s** (**248×**) vs SQLite **247.8 s** (**454×**).
 
-This speedup is specifically a property of incremental maintenance on multi-table views supported by the reactive planner (documented in full in [Live Reactive Views (Z-set IVM)](/manual/client-interfaces/reactive-views)). On a simple single-table aggregate without joins, where recomputation is already cheap, the gap over SQLite shrinks to roughly **1.1×**.
+This speedup is specifically a property of incremental maintenance on multi-table views supported by the reactive planner (documented in full in [Live Reactive Views (Z-set IVM)](/manual/fundamentals/reactive-views)). On a simple single-table aggregate without joins, where recomputation is already cheap, the gap over SQLite shrinks to roughly **1.1×**.
 
 ## Vector search with SQL filters
 

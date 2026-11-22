@@ -3,68 +3,51 @@
 > Source route: /manual/internals/compiled-scan-kernels
 > Source file: manual/internals/compiled-scan-kernels.md
 
-A typed table query such as `db.Table<Player>().Where(...).Count()` does not build an expression tree and does not interpret a predicate per row. The DataVo source generator reads the lambda while your project builds and replaces the call with generated code. For conditions over fixed-width columns, that generated code is a scan kernel that tests stored bytes in place.
-
-This page describes how that works, what shapes are compiled, and what happens when a shape is not.
-
-## Pipeline
-
-```mermaid
-flowchart LR
-  Src["C#: players.Where(min, static (p, m) => p.Level >= m).Count()"]
-  Src --> Analyzer["Roslyn incremental generator<br/>(DataVo.Generators)"]
-  Analyzer --> Emitter["Emitter"]
-  Emitter --> Intercept["Interceptor method<br/>[InterceptsLocation] at the call site"]
-  Intercept --> Kernel["Condition struct<br/>(fixed-offset byte and cell tests)"]
-  Kernel --> Scan["Storage engine row loop<br/>(In-Memory, LSM, Disk)"]
-```
-
-1. **Analyze.** The incremental generator finds `DataVoTable<T>` calls and parses each lambda. Only the pieces that can be expressed without running code are accepted: comparisons, boolean tests, null tests, `&&`, `||` and parentheses.
-2. **Emit.** For each call site it writes an interceptor in the `DataVo.Generated` namespace, marked with `[InterceptsLocation]`, so the compiler routes that exact call to generated code. The emitted code uses members within C# 9.
-3. **Compile the condition.** When the condition reads only unindexed `int`, `long`, `float`, `double`, `bool` or `Guid` columns, the generator also writes it as a struct. The storage scan calls that struct for each row, where the row is stored.
-4. **Run.** The scan is generic over the condition struct all the way into the storage engine's row loop, so no delegate is called per row.
-
-Nothing is reflected over or compiled at run time, which is why these calls are safe under Native AOT.
-
-## What the kernel does
-
-When every column up to the last one the query reads has a fixed width (`int`, `long`, `float`, `double`, `bool`, `Guid`, dates), values sit at the same byte offset in every row whose leading cells are all present. The condition is then compiled in a form that reads stored bytes at those offsets. Offsets are worked out once per scan, no row view is built, and there is no branch between the condition's tests.
-
-Each row is first checked against that layout by its leading null flags. A row that differs, such as one holding a NULL in a leading column, is tested the general way, so results are identical. In-memory tables are read the same way from their typed cells.
-
-Put fixed-width columns before text columns in a model to get this path. A condition on a column that follows a `string` still runs in the scan, through the general reader.
-
-## Aggregates
-
-| Call | Compiled scan | Notes |
-| --- | --- | --- |
-| `Count()`, `Any()` | Yes, for conditions on unindexed fixed-width columns | No model objects are built. |
-| `Sum(selector)` | Yes, when the selector is one non-nullable column of its own type | `int`, `long`, `float`, `double`. The total stays in the scan's own variables. Integer overflow throws `OverflowException`. |
-| `Min(selector)`, `Max(selector)` | Yes, when the selector is one `int`, `long`, `float`, `double`, `DataVoDate` or `DateOnly` column | Null values are skipped. `NaN` orders below every number. |
-
-Any other selector (`p => p.Gold * 2`, a cast, a text column) runs as written over the rows and allocates accordingly.
+When you write `db.Table<Player>().Where(static p => p.Score >= 100).Count()`, DataVo does not build an expression tree or invoke a delegate per row. Instead, the `DataVo.Generators` Roslyn source generator inspects the lambda at build time and emits a `[InterceptsLocation]` method with a value-type condition struct that tests stored row bytes directly inside the storage loop.
 
 ```csharp
-long gold = db.Table<Player>().Where(static p => p.IsActive).Sum(static p => p.Gold);
-long poorest = db.Table<Player>().Where(static p => p.IsActive).Min(static p => p.Gold);
+// Intercepted at compile time → 0 B allocated per query, Native AOT safe
+int topCount = db.Table<Player>()
+    .Where(100, static (p, min) => p.Score >= min)
+    .Count();
+
+int totalScore = db.Table<Player>()
+    .Where(100, static (p, min) => p.Score >= min)
+    .Sum(static p => p.Score);
 ```
 
-Inside a transaction the rows are streamed instead of read in place, so the result includes the transaction's own writes and the call allocates.
+## Build-Time Compilation Pipeline
 
-## What is measured
+1. **Analyze:** The incremental Roslyn generator locates `DataVoTable<T>` query chains and validates static lambdas containing comparisons, boolean checks, null tests, `&&`, `||`, and parentheses.
+2. **Emit interceptor:** For each qualifying call site, the generator emits an interceptor in the `DataVo.Generated` namespace marked with `[InterceptsLocation]`, routing that exact call to generated C# with zero runtime reflection.
+3. **Specialize the condition struct:** When the predicate references only unindexed fixed-width columns (`int`, `long`, `float`, `double`, `bool`, `Guid`, `DataVoDate`, `DateOnly`), the generator emits a `struct` implementing the engine's predicate interface.
+4. **Inline into the storage loop:** Because the storage scan is generic over the condition struct across `InMemory`, `Lsm`, and `Disk`, the JIT / Native AOT compiler inlines the predicate directly into the row loop—no virtual dispatch or delegate call per row.
 
-On the [Benchmark Results](/manual/performance/benchmarks) (200,000 rows, half of them matching, one local run), the compiled aggregates allocate 0 B per query, against 504 B per query for SQLite and 1,137 to 1,169 B for DuckDB through ADO.NET. On file-backed storage DataVo's aggregates run 2.3 to 2.6 times faster than SQLite's. DuckDB, a multi-threaded column store, is faster than DataVo on these aggregates. Read the [Benchmark Results](/manual/performance/benchmarks) for the full context, including which numbers vary.
+## Fixed-Offset Byte Evaluation
 
-In memory, rows inserted through the typed batch API are kept as packed typed records and rows inserted through SQL as stored bytes. The compiled kernels read both through the same fixed-layout row images, and a local measurement over 200,000 rows found no gap: about 2.3 ns per row for typed-batch rows and 2.9 ns for SQL-inserted rows on a `Count`. SQL statements over typed-batch rows used to decode every cell of each packed row and ran at about 56 ns per row, against about 35 ns for SQL-inserted rows; they now decode only the columns the statement reads, about 28 ns per row (one local run, not a BenchmarkDotNet measurement).
+When every column up to the last column referenced by the predicate has a fixed byte width, values sit at constant byte offsets in every row whose leading cells are non-null:
 
-## Not compiled
+- **Single offset pass:** Byte offsets are computed once per scan; the loop tests leading null flags and reads cells straight from raw row spans without constructing a row view.
+- **Automatic safe fallback:** Any row with a NULL in a leading column falls back to the general cell reader so results remain 100% identical.
+- **Model layout tip:** Place fixed-width columns (`int`, `long`, `float`, `double`, `bool`, `Guid`) **before** variable-width `string` or `VECTOR` columns in your `[DataVoTable]` class to maximize fixed-offset kernel hits.
 
-A call the generator cannot compile still returns the right rows. It reads the whole table and filters it with the lambda, and the build reports why (`DATAVOL001` to `DATAVOL003`; `DATAVOL004` and `DATAVOL005` cover sort keys, projections and `ExecuteUpdate`). Reasons include capturing a local variable, calling a method, doing arithmetic in the predicate or comparing two columns. A condition on the primary key or an indexed column keeps using the index instead.
+## Supported Compiled Aggregates
 
-The full table of supported lambda shapes and diagnostics is in [Compiled LINQ (Source Generators)](/manual/client-interfaces/source-generators#what-is-compiled).
+| Terminal Call | Compiled Kernel Support | Notes |
+| --- | --- | --- |
+| `Count()`, `Any()` | Yes (unindexed fixed-width predicates) | Zero model allocations. |
+| `Sum(selector)` | Yes (single non-nullable `int`, `long`, `float`, `double` column) | Accumulates in registers; integer overflow throws `OverflowException`. |
+| `Min(selector)`, `Max(selector)` | Yes (single `int`, `long`, `float`, `double`, `DataVoDate`, `DateOnly` column) | Skips `NULL`; `NaN` orders below all numbers. |
 
-## Related
+When target columns are also marked `[Columnar]`, the kernel upgrades automatically to SIMD columnar chunk evaluation—achieving **27.5–90.1 µs** over 200,000 rows with **0 B allocated** (see [Benchmark Results](/manual/performance/benchmarks)).
 
-- [Zero-Allocation Row Model](/manual/internals/zero-allocation-rows)
-- [Query Planner & Fast Paths](/manual/storage-engine/query-planner-fast-paths)
-- [Storage Modes](/manual/storage-engine/storage-modes)
+Inside an explicit transaction, queries stream through the MVCC snapshot path instead of reading raw storage in place, so transactional scans allocate.
+
+## Non-Compilable Shapes & Diagnostics
+
+Any lambda shape the generator cannot compile—such as capturing a local variable instead of passing a state argument, calling an arbitrary C# method, performing arithmetic inside the predicate, or comparing two columns—still executes correctly by streaming and filtering with the original lambda. The compiler emits diagnostic warnings (`DATAVOL001`–`DATAVOL005`) explaining why the call was not intercepted. Predicates on `[PrimaryKey]` or `[Indexed]` columns continue using their index fast paths.
+
+## See Also
+- [Compiled LINQ](/manual/client-interfaces/compiled-linq) — Full list of supported LINQ operators and `DATAVOL001`–`DATAVOL005` diagnostics
+- [Roslyn Source Generators](/manual/client-interfaces/source-generators) — Setting up `[DataVoTable]`, `[DataVoQuery]`, and `<InterceptorsNamespaces>`
+- [Zero-Allocation Row Model](/manual/internals/zero-allocation-rows) — Manual zero-GC table scans with `RowRef`

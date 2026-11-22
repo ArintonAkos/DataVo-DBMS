@@ -1,62 +1,35 @@
-# Benchmark Results
+# Benchmark Results & Methodology
 
 > Source route: /manual/performance/benchmarks
 > Source file: manual/performance/benchmarks.md
 
-This page reports measurements of DataVo 0.2.0-rc.3 against SQLite, DuckDB and LiteDB, taken on 12 November 2026 on one machine. It replaces the July 2026 (v0.1 alpha) page, whose numbers no longer describe the engine. The SQL text path has changed substantially since (v0.4); for SQL queries and filtered vector search, [DataVo vs SQLite](./datavo-vs-sqlite.md) has the current measurements, and where this page's [SQL over 1,000,000 rows](#sql-over-1-000-000-rows) section disagrees with it, that page is right. Several of them could not be reproduced, and one comparison it made was not valid. [What changed since July](#what-changed-since-july) lists these.
+This page summarizes DataVo's performance across **BenchmarkDotNet microbenchmarks**, **systems workloads** (durability, concurrency, reactive IVM, vector search, and 1M-row SQL), and **cross-platform CI runners** (macOS Apple Silicon, Linux x64, Windows x64), along with the methodology and caveats behind every number.
 
-Every number below comes from a file in [`docs/public/benchmarks/2026-11-12/`](https://github.com/ArintonAkos/DataVo-DBMS/tree/master/docs/public/benchmarks/2026-11-12). The charts are generated from those files by `docs/scripts/generate-benchmark-plots.py`.
+> **Looking for the latest v0.4 SQL & hybrid vector numbers?** See [DataVo vs SQLite: When Each Engine Wins](/manual/performance/datavo-vs-sqlite) for the 28-query 1M-row SQL matrix and 5 filtered vector shapes.
 
-## Summary
+## Executive Summary
 
-| Claim | Evidence | Condition |
-| --- | --- | --- |
-| DataVo answers a filtered `COUNT`/`SUM`/`MIN`/`MAX` over 200,000 in-memory rows 9 to 10 times faster than SQLite on the Apple M4 Pro, allocating nothing. On the x64 GitHub Actions runners the factor is 3.5 to 4.7. | [Part I](#filtered-aggregates), [Part III](#benchmarkdotnet-on-three-platforms) | Compiled LINQ query against SQLite through ADO.NET. |
-| With a columnar index on the columns the query reads, DataVo answers the same in-memory aggregates 2.6 to 5.1 times faster than DuckDB held to one thread, allocating nothing. | [Part I](#with-a-columnar-index) | `Level`, `Gold` and `Ratio` marked `[Columnar]`; Apple M4 Pro only. |
-| Without that index, DuckDB held to one thread is 1.2 to 2.8 times faster than DataVo in memory, and 3 to 8 times faster on file-backed row scans. With a columnar index, DataVo outperforms DuckDB on both in-memory and LSM storage (up to 8.9× faster). | [Part I](#filtered-aggregates), [Part I](#with-a-columnar-index) | Column store against row store and columnar index. |
-| A primary-key lookup takes 52.1 ns (`49.3 ns` median, 56 B allocated) in DataVo's compact in-memory engine and 236 ns (144 B) on its LSM engine, versus 736 ns and 1,609 ns on SQLite (608 B) and 65–75 µs on DuckDB. | [Part I](#point-lookup-by-primary-key) | 100,000 rows, shuffled keys. |
-| With a device flush per commit, DataVo and SQLite cost the same on the Mac (4.0 ms per durable update) and on the Windows runner (2.4 and 2.5 ms). | [Part II](#durability-what-an-fsync-costs), [Part III](#research-scenarios-on-linux-and-windows) | Both flush the drive's cache on every commit. |
-| On the Linux runner, where a flush is cheap (about 0.1 ms), SQLite's durable update is 2.3 times faster than DataVo's (0.097 ms against 0.223 ms median). I have not profiled why. | [Part III](#durable-updates-and-thread-scaling) | GitHub-hosted Ubuntu runner, one run. |
-| Without that flush, DataVo (Relaxed) is 1.4 times faster than SQLite (WAL, normal) on serial updates and 1.95 times faster on a 12-thread mixed workload. | [Part II](#durability-what-an-fsync-costs) | Neither is power-loss durable. |
-| When a query is kept up to date incrementally, DataVo is 179 times faster than DuckDB and 658 times faster than SQLite on a three-table join. On a single-table aggregate it is 1.1 times faster than SQLite. | [Part II](#streamed-risk-views-incremental-maintenance) | 50,000 insert-then-read iterations. |
-| On 12 November, DataVo's SQL text path was about 2.6 times faster than SQLite on `GROUP BY` and on a join at 1,000,000 rows, and slower on `COUNT` with a filter, `ORDER BY ... LIMIT` and range scans. Range scans have since become a seek (1.5–1.8 times faster than SQLite); the other two still favour SQLite. | [Part II](#sql-over-1-000-000-rows), [DataVo vs SQLite](./datavo-vs-sqlite.md) | LSM engine, prepared statements. |
-| A 28-query SQL matrix over 1,000,000 orders (final v0.4 run, 17 November) maps where each engine wins: DataVo on key ranges (1.5–1.8×), index lookups (2.4×), `GROUP BY` with up to 1,000 groups (2.8–3.0×), inner and `LEFT` joins on integer keys (2.3–9.7×), columnar aggregates (5–14×) and filtered vector search; SQLite on `GROUP BY` over an indexed high-cardinality key (2.4×), unindexed `ORDER BY ... LIMIT` (1.4×), full scans with `OR`, `LIKE` or unindexed equality (1.1–1.3×), and the `LEFT JOIN` anti-join (1.2×). The first run found five queries where DataVo returned a wrong answer; all are fixed. | [DataVo vs SQLite: When Each Engine Wins](./datavo-vs-sqlite.md) | LSM Relaxed vs SQLite WAL `NORMAL`, prepared statements, every answer checked against an oracle. |
-| On uniform random 1536-dimension vectors, exact Flat search is the right choice at 10,000 vectors: HNSW is no faster per query and finds 64% of the true neighbours. On clustered vectors HNSW is 8 times faster at 96% recall. | [Part II](#vector-search) | Both measured. |
+| Workload | DataVo Result | Comparison | Notes |
+| --- | --- | --- | --- |
+| **PK point lookup (100k rows)** | **52.1 ns** (InMemory, 56 B) · **236 ns** (LSM, 144 B) | SQLite: 736 ns / 1,609 ns (608 B) · DuckDB 1t: 65–75 µs | M4 Pro, compiled LINQ (`FlatRowStore` compact layout) |
+| **Filtered aggregates (200k rows, `[Columnar]`)** | **27.5–90.1 µs** (0 B alloc, InMemory & LSM) | SQLite: 3,915–6,051 µs · DuckDB 1t: 141–740 µs | 2.6–8.9× faster than 1-thread DuckDB; 14–71× faster than row scan |
+| **Filtered aggregates (200k rows, row scan)** | **386–526 µs** (InMemory, 0 B) · **2.0–2.3 ms** (LSM) | SQLite: 3.7–5.9 ms · DuckDB 1t: 137–716 µs | 8.8–9.8× faster than SQLite on M4 Pro; 3.5–4.7× on x64 CI |
+| **Reactive IVM (3-table join, 50k updates)** | **191.7 ms** (3.1 µs P50) | DuckDB: 34.3 s (179×) · SQLite: 126.1 s (658×) | Incremental Z-set updates vs. full-query polling |
+| **Durable commits (`fsync` per update)** | **4.04 ms** P50 (Mac) · **2.42 ms** (Win) · **0.223 ms** (Linux) | SQLite `full+fullfsync`: 4.04 ms (Mac) · 2.51 ms (Win) · 0.097 ms (Linux) | Hardware flush dominates on Mac/Win; SQLite leads 2.3× on fast-flush Linux VM |
+| **Relaxed YCSB 80/20 (12 threads)** | **510,695 ops/s** (0.66 ms write P99) | SQLite WAL `NORMAL`: 261,618 ops/s (3.77 ms write P99) | 1.95× throughput, 5.7× lower write tail; neither mode is power-loss durable |
+| **Disk footprint (1M rows)** | **27.7 MB** (LSM) | SQLite: 29.1 MB · LiteDB: 154.5 MB | 5% smaller than SQLite; warm reopen in 1.5–4.3 ms |
 
-## Test environment
+## Part I: BenchmarkDotNet Microbenchmarks
 
-| | |
-| --- | --- |
-| Machine | Apple M4 Pro, 12 cores, 48 GiB, local APFS volume |
-| OS | macOS 26.3 (Darwin 25.3.0), arm64 |
-| Runtime | .NET SDK 10.0.103, runtime 10.0.3, Arm64 RyuJIT |
-| Code | Commit `7c0a931`. The engine is identical to `2d0dcb9`; the only difference is a type alias in the benchmark runners. |
-| Comparison engines | `Microsoft.Data.Sqlite` 10.0.0, `DuckDB.NET.Data.Full` 1.5.3, LiteDB (as pinned by the benchmark host), `sqlite-vec` 0.1.9 |
-| Conditions | Language-server processes from an IDE were running in the background. No CPU pinning. One run per scenario unless a table says otherwise. |
-
-These are single-machine measurements without confidence intervals, except in Part I where BenchmarkDotNet provides them. Parts I and II describe this machine. [Part III](#part-iii-platforms) repeats the suite on GitHub-hosted Linux, Windows and macOS runners and shows which results carry over. A difference of under about 20% between two engines in Part II should not be treated as established. The [methodology page](./methodology.md) lists what each benchmark controls and what it does not.
-
-## Part I: The BenchmarkDotNet specification
-
-`benchmarks/DataVo.Benchmarks` runs the same `players` table and the same questions through DataVo, SQLite and DuckDB. Each benchmark checks that all engines return the same answer before timing begins. The suite takes about 15 minutes.
-
-```bash
-dotnet run -c Release --project benchmarks/DataVo.Benchmarks -- --filter '*'
-```
-
-**Configuration.** "Memory" means DataVo `InMemory`, SQLite `:memory:` and DuckDB `:memory:`. "File" means DataVo's LSM engine with default settings, SQLite in WAL mode with `synchronous=NORMAL`, and a DuckDB database file. None of the file configurations flushes on every commit. SQLite and DuckDB are called through ADO.NET, and that cost is part of their numbers, as the cost of DataVo's own API is part of DataVo's.
-
-DuckDB appears twice. `DuckDB` uses its default of one thread per core. `DuckDB 1 thread` is a separate database opened with `SET threads = 1`, which is how DataVo and SQLite run: one thread per query. To compare engines on equal terms, use the `DuckDB 1 thread` column.
-
-### Filtered aggregates
-
-This benchmark was run twice. The first table is DataVo as a row store, with no index on the columns read. The second, under [With a columnar index](#with-a-columnar-index), is the same benchmark after `Level`, `Gold` and `Ratio` were marked `[Columnar]`.
-
-200,000 rows, half of them matching `WHERE Level >= @min`. DataVo runs a compiled LINQ query (`Where(...).Count()`, `.Sum()`, `.Min()`, `.Max()`). SQLite and DuckDB run a statement prepared once and read it with `ExecuteScalar`. Mean time per query in microseconds. DataVo allocates 0 bytes per query, SQLite 504 bytes, DuckDB about 1,150 bytes.
+Measured with `benchmarks/DataVo.Benchmarks` (Apple M4 Pro, .NET 10, 99.9% CI half-width ≤ 3% for DataVo/SQLite). Every benchmark verifies identical query answers across all engines before timing.
 
 ![Filtered aggregates over 200,000 rows](/benchmarks/bdn-filtered-aggregates.png)
 
-| Query | Storage | DataVo, row scan | SQLite | DuckDB, 1 thread | DuckDB |
+![Point lookup and bulk insert](/benchmarks/bdn-lookup-and-insert.png)
+
+::: details Full Part I Tables (Row Scan, Columnar Index, Out-of-Core SSTable, Point Lookup, Bulk Load)
+#### Filtered Aggregates — Row Scan (200,000 rows, mean µs, 0 B alloc for DataVo)
+| Query | Storage | DataVo (row scan) | SQLite | DuckDB (1 thread) | DuckDB (default) |
 | --- | --- | ---: | ---: | ---: | ---: |
 | `COUNT(*)` | Memory | 386 | 3,695 | 137 | 203 |
 | `SUM(Gold)` | Memory | 526 | 4,817 | 204 | 226 |
@@ -67,234 +40,126 @@ This benchmark was run twice. The first table is DataVo as a row store, with no 
 | `MIN(Gold)` | File | 2,136 | 5,377 | 360 | 346 |
 | `MAX(Ratio)` | File | 2,267 | 5,656 | 716 | 564 |
 
-The half-width of the 99.9% confidence interval is at most 3% of the mean for every DataVo and SQLite row, and at most 6% for DuckDB (its default-thread `MAX` in memory). The full tables, with error and standard deviation, are in the `bdn/` folder of the raw results.
-
-**Reading the result.**
-
-- In memory DataVo is 8.8 to 9.8 times faster than SQLite. On file-backed storage it is 2.3 to 2.8 times faster. These ratios are for the M4 Pro. On the x64 GitHub Actions runners the in-memory ratio is 3.5 to 4.7; see [BenchmarkDotNet on three platforms](#benchmarkdotnet-on-three-platforms).
-- Held to one thread, DuckDB is 2.8, 2.6, 2.6 and 1.2 times faster than DataVo on `COUNT`, `SUM`, `MIN` and `MAX` in memory, and 8.1, 5.7, 5.9 and 3.2 times faster on files.
-- DuckDB's extra threads do not help at this size. In memory its default mode is the same as or up to 48% slower than one thread on `COUNT`, `SUM` and `MIN` (I did not investigate why), and on files it ranges from 21% faster to 10% slower.
-
-**Why DuckDB wins these.** DuckDB stores each column contiguously and processes it in vectors of 2,048 values. A query that needs `Level` and `Gold` reads only those two columns, and its inner loop runs over a dense array of one type. DataVo is a row store. Its in-memory engine keeps a packed image of each row, written the first time a compiled scan touches the table, and the scan reads rows in order without chasing objects. That removes the object-graph cost: DataVo's in-memory `COUNT` takes about 1.9 ns per row, where the previous revision of this page reported 1.3 to 4.0 ms for the same four queries, which is 6 to 20 ns per row. But each row's image still holds columns the query does not need, so the scan reads more bytes per row than a column store does. The 1.2 times gap on `MAX(Ratio)` is smaller than the others. The benchmark does not establish why; I have not profiled DuckDB's floating-point maximum.
-
-On file-backed storage DataVo takes 4 to 5 times its in-memory time. The extra cost is iterating rows out of the LSM, not evaluating the query. DuckDB's file-backed times are 1.3 to 1.8 times its in-memory times.
-
-This is a benchmark that plays to column stores. A workload that reads whole rows, or fetches one row at a time, reverses the ordering, as the next two benchmarks show.
-
-#### With a columnar index
-
-DataVo can keep chosen columns a second time as dense arrays of one type, beside the rows. The benchmark's model was changed to ask for that on the three columns these queries read:
-
-```csharp
-[Columnar] public int Level { get; set; }
-[Columnar] public long Gold { get; set; }
-[Columnar] public double Ratio { get; set; }
-```
-
-Nothing else changed: the same queries, the same rows, the same machine, SQLite and DuckDB as before. The index is opt-in. It is not something DataVo does by default, and DuckDB is columnar without being asked. The numbers below are a second run of the whole benchmark, so the SQLite and DuckDB columns differ slightly from the table above. Mean time per query in microseconds.
-
-| Query | Storage | DataVo, columnar index | SQLite | DuckDB, 1 thread | DuckDB |
+#### With a Columnar Index (`[Columnar]` on `Level`, `Gold`, `Ratio`, mean µs, 0 B alloc) {#with-a-columnar-index}
+| Query | Storage | DataVo (`[Columnar]`) | SQLite | DuckDB (1 thread) | DuckDB (default) |
 | --- | --- | ---: | ---: | ---: | ---: |
-| `COUNT(*)` | Memory | 27.5 | 3,915 | 141 | 188 |
-| `SUM(Gold)` | Memory | 77.8 | 4,777 | 204 | 228 |
-| `MIN(Gold)` | Memory | 73.0 | 4,598 | 200 | 258 |
-| `MAX(Ratio)` | Memory | 89.5 | 4,996 | 421 | 417 |
-| `COUNT(*)` | File | 27.5 | 4,730 | 246 | 294 |
-| `SUM(Gold)` | File | 78.2 | 5,574 | 365 | 331 |
-| `MIN(Gold)` | File | 73.4 | 5,393 | 362 | 358 |
-| `MAX(Ratio)` | File | 90.1 | 6,051 | 740 | 554 |
+| `COUNT(*)` | Memory | **27.5** | 3,915 | 141 | 188 |
+| `SUM(Gold)` | Memory | **77.8** | 4,777 | 204 | 228 |
+| `MIN(Gold)` | Memory | **73.0** | 4,598 | 200 | 258 |
+| `MAX(Ratio)` | Memory | **89.5** | 4,996 | 421 | 417 |
+| `COUNT(*)` | File | **27.5** | 4,730 | 246 | 294 |
+| `SUM(Gold)` | File | **78.2** | 5,574 | 365 | 331 |
+| `MIN(Gold)` | File | **73.4** | 5,393 | 362 | 358 |
+| `MAX(Ratio)` | File | **90.1** | 6,051 | 740 | 554 |
 
-DataVo allocates 0 bytes per query in every row of this table, SQLite 504 bytes and DuckDB about 1,150 bytes. The half-width of the 99.9% confidence interval is at most 2% of the mean for the DataVo rows. The full tables are in the `bdn-columnar/` folder of the raw results.
-
-**Reading the result.**
-
-- On both in-memory and LSM file-backed storage, DataVo with the columnar index is 2.6 to 8.9 times faster than DuckDB held to one thread (and up to 10.7 times faster than default DuckDB on `COUNT`), allocating 0 bytes.
-- Against its own row scan in the first table, DataVo is 14 to 71 times faster.
-- On the LSM engine the 200,000 rows of this benchmark fit in one MemTable and are never flushed, so these file-backed rows read the columns from the part of the index held in memory. Rows that have been flushed are read from the columnar segments of their SSTables instead; that is measured separately in [Columnar scans from SSTable files](#columnar-scans-from-sstable-files).
-- This was measured on the Apple M4 Pro only, where the vector code runs as 128-bit NEON. The 256-bit and 512-bit forms are tested for correctness on every machine but have not been timed. The three-platform results in [Part III](#benchmarkdotnet-on-three-platforms) are the row scan.
-
-**What it costs.** The index is a copy: 20 bytes per row for these three columns, about 4 MB for 200,000 rows, by the column widths (not measured). Every insert and delete also writes the index. I have not isolated that cost. The bulk load in this run took 42 ms with a standard deviation of 12 ms in memory, which is inside the noise of the load figures below, so the benchmark neither shows a slowdown nor rules one out. The point lookup did not slow down in that run: 335 ns in memory and 239 ns on a file (in-memory lookups were subsequently reduced to 52.1 ns after the compact row layout work below).
-
-**How it works.** The index stores each column in chunks of 4,096 values, aligned to 64 bytes. A query's condition is run a chunk at a time: comparing `Level` with the bound value over a run of `int`s produces one bit per row, and the aggregate then reads only the `Gold` or `Ratio` values whose bit is set. No row is located or decoded, and the columns the query does not name are never touched. Comparisons, integer sums, minimums and maximums use vector instructions. A floating-point `SUM` is added one value at a time in row order, so it gives the same bits as the row scan. An integer `SUM` still throws `OverflowException` when it leaves the range of `long`. Readers take no lock; a query inside a transaction reads rows instead, so it sees the transaction's own writes.
-
-The chart above shows the row scan.
-
-### Columnar scans from SSTable files
-
-Since v0.4 the LSM engine writes the indexed columns into every SSTable it flushes or compacts (format version 8), along with per-chunk `min`/`max` and `NULL`/`NaN` zone maps, and keeps in memory only the columns of rows that are not flushed yet. A columnar query skips non-matching chunks via their zone maps and reads surviving flushed rows a chunk of 4,096 at a time straight from the memory-mapped files, so opening a table builds no index and the memory used does not grow with the table.
-
-`OutOfCoreAggregateBenchmarks` runs the four aggregates above over 1,000,000 rows on the LSM engine twice: with the rows not flushed (columns in memory) and after closing and reopening the database (every row in an SSTable, nothing of the table's columns in the managed heap). Apple M4 Pro, mean time per query in microseconds, 0 bytes allocated per query in every row.
-
-| Query | Columns in memory | Columns in SSTable files |
+#### Out-of-Core Columnar Scans from SSTable Files (1,000,000 rows, LSM, mean µs, 0 B alloc)
+| Query | Columns in Memory | Columns in SSTable Files (mmap) |
 | --- | ---: | ---: |
 | `COUNT(*)` | 135.8 | 135.7 |
 | `SUM(Gold)` | 388.9 | 388.2 |
 | `MIN(Gold)` | 361.8 | 362.6 |
 | `MAX(Ratio)` | 453.9 | 460.8 |
 
-Opening the database, answering `SUM(Gold)` over the million rows from the files and getting the result takes 13.7 ms (186 KB allocated), with the files in the operating system's cache. The point lookup on the LSM engine measured 223 ns (144 B) in the same run, unchanged by the new file format.
-
-**What this does not show.** The rows were inserted in key order and never updated, so no chunk needed a row masked out. A table with many updates or deletes since its last flush pays extra per query to find which rows of the files those replace; that cost has not been measured here. The files were in the page cache; a first read from a cold disk is not measured either.
-
-### Point lookup by primary key
-
-100,000 rows, keys looked up in shuffled order, each result read into a `Player`. DataVo runs a compiled LINQ query (`FirstOrDefault(id, static (p, k) => p.Id == k)`).
-
-![Point lookup and bulk insert](/benchmarks/bdn-lookup-and-insert.png)
-
-| Storage | DataVo | SQLite | DuckDB, 1 thread | DuckDB | DataVo alloc | SQLite alloc | DuckDB alloc |
+#### Point Lookup by Primary Key (100,000 rows, shuffled keys)
+| Storage | DataVo | SQLite | DuckDB (1t) | DuckDB | DataVo alloc | SQLite alloc | DuckDB alloc |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| Memory | 52.1 ns | 735.6 ns | 65,945 ns | 75,158 ns | 56 B | 608 B | 2,144 B |
-| File | 236.0 ns | 1,609.4 ns | 64,877 ns | 72,314 ns | 144 B | 608 B | 2,144 B |
+| Memory | **52.1 ns** | 735.6 ns | 65,945 ns | 75,158 ns | **56 B** | 608 B | 2,144 B |
+| File | **236.0 ns** | 1,609.4 ns | 64,877 ns | 72,314 ns | **144 B** | 608 B | 2,144 B |
 
-*Point lookup table measured on 13 November 2026 (`ce818d4`, after the v0.3 compact in-memory row layout) on the same Apple M4 Pro machine (DataVo in-memory median `49.3 ns`, error `±2.3 ns`). The chart above and the Bulk Insert section below reflect the earlier 12 November run.*
-
-In memory DataVo is 14.1 times faster than SQLite (`1,267×` faster than single-threaded DuckDB) and allocates 10.9 times less managed memory (`56 B` vs `608 B`, where the `56 B` is the returned `Player` instance itself). On a file DataVo is 6.8 times faster than SQLite and about 275–306 times faster than DuckDB.
-
-**Why DataVo is fast on the lookup path.** Three architectural properties explain the performance:
-
-- *No SQL parsing or planning.* The source generator emits a static query plan (`PackedKeyReader<T>` for integer primary-key in-memory lookups, or cached prepared handles for other shapes).
-- *No dictionary, scratch array, or boxing.* On compact in-memory tables, the source generator emits a direct `DataVoPackedRow` reader that decodes fields straight from the packed record bytes and reference slot into the target `Player` without allocating dictionaries or temporary `CellValue[]` buffers.
-- *No lock on point reads.* LSM point reads go through a concurrent map of latest rows whose buffers are immutable once published. In-memory lookups probe the concurrent primary-key map and pack-store record without taking a table lock, re-checking row liveness after materializing reference fields so concurrent deletes never surface torn rows.
-
-**What changed with the compact in-memory row layout.** An earlier revision of this page reported 405 ns (and before that 566 ns) for the in-memory point lookup and noted that it trailed the LSM file engine (`241 ns`). At the time, typed in-memory tables kept a `StoredRow` and `CellValue[]` array per row (~`640 B/row` retained for an unindexed row store with shared strings), and LINQ point lookups still routed through prepared-statement dispatch and a `Dictionary<string, object?>` (`~386.5 ns` on the pre-Option-C baseline). Storing fixed-width columns contiguously in `FlatRowStore` reduced row-store retained memory **13×** (`640.3 B/row` → `49.2 B/row` with shared strings; `145.3 B/row` with unique strings; `231.6 B/row` total including the primary-key index and unique strings), and pairing it with direct packed-record materialization dropped in-memory point lookup mean latency from `386.5 ns` to `52.1 ns` (`4.5×` faster than the LSM file engine).
-
-SQLite's 1,609 ns (file) and 736 ns (memory) reflect the cost of B-tree descent plus the ADO.NET call, which allocates 608 bytes per lookup. DuckDB's roughly 65–75 µs is a fixed per-statement vectorization and pipeline setup cost: DuckDB executes statements through its vectorized chunk pipeline, which is optimized for multi-row analytical throughput rather than microsecond point lookups.
-
-### Loading 100,000 rows
-
-Into an empty table, with the rows built inside the measurement: DataVo's `InsertTypedBatch`, a prepared SQLite `INSERT` inside one transaction, and DuckDB's appender. Ten timed invocations per engine, so these are noisy; the standard deviation is shown.
-
-| Storage | DataVo | SQLite | DuckDB, 1 thread | DuckDB | DataVo alloc | SQLite alloc | DuckDB alloc |
+#### Loading 100,000 Rows (10 timed runs ± SD)
+| Storage | DataVo | SQLite | DuckDB (1t) | DuckDB | DataVo alloc | SQLite alloc | DuckDB alloc |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | Memory | 35.0 ± 6.8 ms | 82.2 ± 37.2 ms | 28.7 ± 5.6 ms | 38.5 ± 4.9 ms | 55 MB | 94 MB | 19 MB |
 | File | 133.4 ± 35.4 ms | 76.8 ± 26.5 ms | 31.1 ± 5.9 ms | 29.0 ± 5.8 ms | 62 MB | 94 MB | 19 MB |
+:::
 
-Plus-or-minus values are standard deviations of ten invocations. In memory DataVo and DuckDB are within each other's noise, and both have a lower mean than SQLite, whose spread is wide. On a file DuckDB is 2.6 to 4.6 times faster than the two row stores. DataVo's file-backed load took 84 ms in an earlier run of this suite on the same day and 133 ms in this one. With a standard deviation of 35 ms the ordering of DataVo and SQLite on files is not established, and I do not claim one. DuckDB allocates the least, presumably because its appender copies rows into native memory.
+## Part II: Systems Workloads
 
-## Part II: Real-world systems workloads
+Application-shaped scenarios from `demos/Research.Benchmark` (single run per scenario; treat differences under ~20% as not established).
 
-These scenarios come from `demos/Research.Benchmark`. They are closer to application workloads than Part I and have less statistical control: one run each, with latency percentiles computed over the run. Each scenario states which engines run which API. DataVo scenarios use typed APIs and prepared compiled queries after the schema is created, except where noted, so the SQL shown documents the logical workload and not necessarily the call that ran.
+### Streamed Risk Views (Incremental View Maintenance)
 
-### Streamed risk views: incremental maintenance
-
-A betting-risk dashboard needs an aggregate that is correct after every incoming order. Each iteration inserts one order and then reads the dashboard result. DataVo subscribes to the exact SQL once and reads the incrementally maintained view. SQLite and DuckDB re-run the full indexed query after every insert, with no trigger and no hand-maintained summary table.
-
-This is a statement about two designs, not only two speeds. DataVo's read returns state that was updated as part of the insert. The polling engines recompute it. It also applies only to the query shapes DataVo can maintain incrementally. Anything else falls back to normal execution.
-
-**Profile A, simple exposure.** `SELECT ... SUM(Stake) ... WHERE IsOpen = true GROUP BY MarketId, RunnerId` over a single table. 10,000 baseline orders, then 50,000 iterations.
-
-| Engine | Total (ms) | P50 | P99 | GC allocated |
-| --- | ---: | ---: | ---: | ---: |
-| DataVo | 526.9 | 6.4 µs | 21.3 µs | 364.6 MB |
-| SQLite | 574.1 | 8.9 µs | 24.6 µs | 200.7 MB |
-| DuckDB | 52,954.0 | 983 µs | 3,311 µs | 208.3 MB |
-
-I repeated this scenario three more times for DataVo and SQLite. DataVo took 507 to 527 ms in all four runs and SQLite 574 to 753 ms.
-
-![Streamed risk, simple exposure](/benchmarks/ivm-simple-exposure-total-time.png)
-
-On this profile DataVo is 1.1 to 1.4 times faster than SQLite, which is a small margin. It also allocates 1.8 times as much managed memory, about 7.3 KB per iteration, so it is not an allocation win here. SQLite's indexed recompute stays under 15 µs per iteration at this scale; I did not examine its query plan. DuckDB's 983 µs median looks like a per-query fixed cost, consistent with its roughly 75 µs point lookups in Part I plus scheduling a parallel query, but I did not profile it.
-
-July's version of this page reported SQLite at 2,820 ms, five times slower than today's figure. The SQLite runner has not changed since, and I cannot reproduce the July number. I do not know whether the cause was different hardware or a loaded machine, so I have not used it.
-
-**Profile B, complex VIP exposure.** `SELECT m.Category, SUM(o.Stake) FROM Orders o JOIN Accounts a ... JOIN Markets m ... WHERE a.IsVip = true GROUP BY m.Category`. 10,000 baseline orders, 1,000 accounts, 50 markets, then 50,000 iterations.
-
-| Engine | Total (ms) | P50 | P99 | GC allocated |
-| --- | ---: | ---: | ---: | ---: |
-| DataVo | 191.7 | 3.1 µs | 4.0 µs | 106.6 MB |
-| DuckDB | 34,339.1 | 660 µs | 974 µs | 131.3 MB |
-| SQLite | 126,064.4 | 2,527 µs | 4,375 µs | 115.6 MB |
+Inserting 50,000 orders one-by-one and reading a live dashboard after each insert. DataVo maintains the view incrementally via Z-sets; SQLite and DuckDB re-run indexed queries.
 
 ![Streamed risk, complex VIP exposure](/benchmarks/ivm-complex-vip-total-time.png)
 
-DataVo is 179 times faster than DuckDB and 658 times faster than SQLite. The gap is large because of what each engine does per iteration. The polling engines join the whole `Orders` table against two dimension tables and aggregate it, and `Orders` grows from 10,000 to 60,000 rows during the run, so their per-iteration cost grows with the table. DataVo applies only the new order: it looks up the order's account and market, and if the account is VIP it adds the stake to that category's total. That work does not depend on how many orders already exist. SQLite's 2.5 ms median is the cost of a three-table join over tens of thousands of rows. DuckDB's parallel execution handles the same join in 0.66 ms, but it pays its fixed per-query overhead on top.
+![Streamed risk, simple exposure](/benchmarks/ivm-simple-exposure-total-time.png)
 
-### Durability: what an fsync costs
+- **Complex VIP 3-table join:** DataVo finishes in **191.7 ms** (3.1 µs P50), **179×** faster than DuckDB (`34.3 s`) and **658×** faster than SQLite (`126.1 s`), because incremental work is O(1) per order rather than O(N) re-joining.
+- **Simple single-table exposure:** DataVo (`526.9 ms`, 6.4 µs P50) and SQLite (`574.1 ms`, 8.9 µs P50) are closely matched (1.1–1.4× across 4 runs), while DuckDB pays per-query setup overhead (`52.95 s`).
 
-`disk-crud-wal` inserts 20,000 records and then runs 20,000 point updates, committing each update separately.
+### Durability, Concurrency & Space
 
-| Engine | Total (ms) | P50 | P99 | GC allocated |
+![Disk CRUD total time](/benchmarks/disk-crud-wal-time.png)
+
+![Thread scaling](/benchmarks/thread-scaling-throughput.png)
+
+![YCSB write P99](/benchmarks/ycsb-write-p99.png)
+
+- **Strict durability (`fsync` per commit):** DataVo LSM Production (`84.6 s`, `4.04 ms` P50) and SQLite `WAL + full + fullfsync` (`84.9 s`, `4.04 ms` P50) tie on Apple Silicon because both wait on the same SSD cache flush. Group commit scales Production throughput **3.7×** from 1 to 32 threads.
+- **Relaxed durability (OS buffer):** DataVo Relaxed beats SQLite WAL `NORMAL` by **1.4×** on serial updates (`113 ms` vs `155 ms`) and **1.95×** on 12-thread YCSB 80/20 (`510.7k` vs `261.6k ops/s`, with **5.7×** lower write P99).
+
+### Vector Search (10,000 × 1,536d)
+
+![Vector search total time](/benchmarks/vector-search-total-time.png)
+
+![HNSW versus Flat](/benchmarks/vector-hnsw-vs-flat.png)
+
+- On **uniform random** 1,536d vectors at 10k scale, exact **Flat** search (`298.7 ms` total, `1.96 ms` P50) beats both `sqlite-vec` (`472.8 ms`) and HNSW (`1,634 ms` total, 63.5% recall) because uniform high-dimensional distances concentrate.
+- On **clustered** embeddings (realistic workloads), HNSW is **8×** faster per query at 10k vectors (`0.25 ms`, 95.9% recall) and **15×** faster at 50k (`0.68 ms`, 90.2% recall). Since v0.4, `enable_diversity_heuristic` is enabled by default, raising clustered Recall@10 to 100% on the hybrid benchmark dataset.
+
+::: details Full Part II Raw Tables (IVM, Disk CRUD, Thread Scaling, YCSB, Space, Vector Recall, Flat/Doc/Concurrent)
+#### Streamed Risk Views (50,000 insert + read iterations)
+| Profile | Engine | Total (ms) | P50 | P99 | GC Allocated |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Simple Exposure | DataVo | 526.9 | 6.4 µs | 21.3 µs | 364.6 MB |
+| Simple Exposure | SQLite | 574.1 | 8.9 µs | 24.6 µs | 200.7 MB |
+| Simple Exposure | DuckDB | 52,954.0 | 983 µs | 3,311 µs | 208.3 MB |
+| Complex VIP Join | DataVo | **191.7** | **3.1 µs** | **4.0 µs** | 106.6 MB |
+| Complex VIP Join | DuckDB | 34,339.1 | 660 µs | 974 µs | 131.3 MB |
+| Complex VIP Join | SQLite | 126,064.4 | 2,527 µs | 4,375 µs | 115.6 MB |
+
+#### Disk CRUD WAL (20,000 inserts + 20,000 committed updates)
+| Engine | Total (ms) | P50 | P99 | GC Allocated |
 | --- | ---: | ---: | ---: | ---: |
 | DataVo (LSM Production) | 84,616 | 4.04 ms | 6.13 ms | 30.8 MB |
 | SQLite (WAL, full, `fullfsync`) | 84,857 | 4.04 ms | 6.08 ms | 22.3 MB |
 | DataVo (LSM Relaxed) | 113 | 4.5 µs | 7.5 µs | 22.9 MB |
 | SQLite (WAL, normal) | 155 | 5.4 µs | 9.2 µs | 23.2 MB |
 
-![Disk CRUD total time](/benchmarks/disk-crud-wal-time.png)
-
-The two durable engines are indistinguishable: about 4.2 ms per update including the insert phase, and a median of 4.04 ms for the update alone. That is the cost of making one commit reach stable storage on this SSD, and neither engine can avoid it. The 750-fold gap between durable and non-durable DataVo is the price of that guarantee, not an inefficiency. The SQLite run sets `PRAGMA fullfsync=1`, so both engines ask the drive to flush its cache.
-
-Without the flush, DataVo (Relaxed) and SQLite (WAL, normal) differ by 1.4 times in DataVo's favour on this serial workload, and the median and P99 latencies are within 1.2 times of each other. Relaxed mode acknowledges a write after it reaches the operating system's buffer. A power loss or kernel crash can lose the most recent writes. Use it for caches, rebuildable data and research, not as a substitute for the durable mode.
-
-**Group commit.** When several threads commit at the same time they can share one flush. `thread-scaling` runs 100,000 reads and 10,000 updates at 1 to 32 threads:
-
-![Thread scaling](/benchmarks/thread-scaling-throughput.png)
-
+#### Thread Scaling (ops/s, 100k reads + 10k updates)
 | Threads | DataVo Production | DataVo Relaxed | SQLite (WAL, normal) | LiteDB |
 | ---: | ---: | ---: | ---: | ---: |
 | 1 | 2,686 | 1,333,227 | 335,281 | 49,027 |
-| 2 | 2,962 | 1,276,043 | 559,224 | 68,793 |
 | 4 | 5,506 | 1,101,274 | 589,921 | 68,873 |
 | 8 | 8,777 | 1,025,118 | 577,691 | 67,864 |
-| 16 | 9,550 | 1,028,862 | 569,653 | 65,402 |
 | 32 | 9,840 | 1,011,191 | 555,357 | 66,020 |
 
-Operations per second. Durable DataVo scales 3.7 times from one to 32 threads, which is consistent with concurrent writers sharing each flush (I did not count flushes). Relaxed DataVo does not scale: throughput falls 24% from one thread to 32. The whole run takes 83 to 109 ms, so thread start-up is a visible share of it. I have not profiled where the lost throughput goes. The machine has 12 cores, so 16 and 32 threads are oversubscribed. SQLite benefits from concurrent readers in WAL mode and reaches its peak at four threads. SQLite's durable (`full`) mode is not in this table, so the durable DataVo row has no like-for-like comparison here.
-
-**YCSB mixed.** 100,000 preloaded records, then 80,000 reads and 20,000 updates across 12 threads.
-
-![YCSB write P99](/benchmarks/ycsb-write-p99.png)
-
-| Engine | Total (ms) | Ops/s | Read P99 | Write P99 | GC allocated |
+#### YCSB Mixed 80/20 (12 threads, 100k ops)
+| Engine | Total (ms) | Ops/s | Read P99 | Write P99 | GC Allocated |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | DataVo (LSM Relaxed) | 195.8 | 510,695 | 0.9 µs | 0.66 ms | 34.7 MB |
 | SQLite (WAL, normal) | 382.2 | 261,618 | 8.2 µs | 3.77 ms | 57.2 MB |
 | LiteDB | 2,640.1 | 37,877 | 2.59 ms | 2.79 ms | 4,315.1 MB |
 | DataVo (LSM Production) | 23,118.6 | 4,326 | 25.7 µs | 27.83 ms | 37.2 MB |
 
-DataVo Relaxed has 1.95 times SQLite's throughput, 5.7 times lower write P99 and 9.3 times lower read P99. The read result follows from the lock-free LSM read path described above: readers do not queue behind writers. The write P99 of the durable row, 27.8 ms, is what 20,000 flushes cost when 12 threads queue for them. Compare Production only with other durable engines.
-
-### Space and cold open
-
-1,000,000 records of `(Id INT PRIMARY KEY, Name VARCHAR(40), Value INT, Score FLOAT)`, inserted in one batch, closed cleanly and reopened.
-
-| Engine | Insert (ms) | Disk (MB) | Reopen (ms) | First read after reopen (ms) | GC allocated |
+#### Space & Warm Reopen (1,000,000 records)
+| Engine | Insert (ms) | Disk (MB) | Reopen (ms) | First Read (ms) | GC Allocated |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | DataVo (LSM Production) | 731.8 | 27.7 | 4.3 | 3.6 | 400.7 MB |
 | DataVo (LSM Relaxed) | 473.2 | 27.7 | 1.5 | 0.0 | 332.9 MB |
 | SQLite (WAL, normal) | 712.5 | 29.1 | 0.36 | 1.2 | 633.4 MB |
 | LiteDB | 2,987.1 | 154.5 | 0.61 | 9.4 | 15,107.2 MB |
 
-DataVo's file is 5% smaller than SQLite's and 5.6 times smaller than LiteDB's. A million rows insert in 473 to 732 ms. The 258 ms difference between Production and Relaxed is consistent with Production flushing the log before acknowledging the batch. I did not count flushes, but a per-row flush would take minutes, so it is at most a few per batch.
-
-**What the reopen figure does and does not mean.** This is a clean-close reopen inside the same process, immediately after the files were written, so the operating system's page cache is warm. It is not a measurement of recovery after a crash, and it is not a cold-cache boot. It shows that opening an LSM database does not read the data: DataVo maps its SSTables and loads their indexes, which takes 1.5 to 4.3 ms for a million rows. SQLite opens a file faster, in 0.36 ms, because it reads only the header and a few pages. The time to the first answer is 7.9 ms for DataVo Production, 1.5 ms for DataVo Relaxed and 1.6 ms for SQLite. Crash recovery, meaning replaying a write-ahead log after a hard stop, is covered by the crash-injection tests in `DataVo.Tests`, not by this benchmark.
-
-### Vector search
-
-10,000 vectors of 1,536 dimensions (uniform random components in [-1, 1], normalised), then 100 top-10 queries. The query vectors are existing vectors from the set, so each query's nearest neighbour is itself. Insert, index build and queries are all inside the total time. The SQLite row uses `sqlite-vec` 0.1.9; it is an exact brute-force scan.
-
-![Vector search total time](/benchmarks/vector-search-total-time.png)
-
-| Engine | Total (ms) | Query P50 | Query P99 | GC allocated |
+#### Vector Search (10k × 1,536d, 100 top-10 queries) & Held-Out Recall
+| Engine | Total (ms) | Query P50 | Query P99 | GC Allocated |
 | --- | ---: | ---: | ---: | ---: |
 | DataVo-Flat | 298.7 | 1.96 ms | 2.41 ms | 61.7 MB |
 | SQLite (`sqlite-vec`) | 472.8 | 2.37 ms | 2.43 ms | 63.4 MB |
 | DataVo (HNSW) | 1,634.0 | 1.77 ms | 2.25 ms | 62.8 MB |
-| DataVo (HNSW, diversity heuristic) | 6,682.1 | 1.78 ms | 1.93 ms | 61.7 MB |
 | LiteDB | 76,706.5 | 747.4 ms | 778.0 ms | 208,914.6 MB |
 
-**What the GC column does and does not say.** The 61.4 MB that every DataVo and SQLite row shares is the vector data itself: 10,000 vectors of 6,144 bytes. This is one copy of the input made during insert. It is not a measure of search overhead. DataVo-Flat allocated 10.3 MB in the July run and allocates 61.7 MB now. I measured the commit before today's row-image change and got the same 62 MB, so that change is not the cause, and I did not bisect further. The July figure is not reproducible on the current engine, and the previous page's "10.3 MB" claim is withdrawn. LiteDB's 208,915 MB is 3,400 times the size of the input, which is consistent with deserialising every stored document, with its 1,536 floats, on every query. I did not profile it.
-
-**Why Flat is the right choice at 10,000 uniform random vectors.** Three measurements support this, and the first two are in the table above.
-
-1. *Build cost.* Flat builds nothing. Total time is 5.5 times lower than HNSW's.
-2. *Query cost.* On this data HNSW queries are not meaningfully faster: 1.77 ms median against 1.96 ms. A Flat query costs about 196 ns per 1,536-dimension distance times 10,000 vectors. The HNSW query takes about as long, which means it evaluates distances for most of the graph. I inferred this from timing and did not count the evaluations.
-3. *Quality.* Flat is exact. The table above does not show HNSW's recall, so I measured it separately with held-out queries, where a query's own vector is not in the set (`vector-recall-experiment.txt`, reproducible with `demos/Research.Benchmark/tools/VectorRecall`):
-
-![HNSW versus Flat](/benchmarks/vector-hnsw-vs-flat.png)
-
-| N | Data | Flat query | HNSW query | HNSW recall@10 | HNSW build | Flat build |
+| N | Distribution | Flat Query | HNSW Query | HNSW Recall@10 | HNSW Build | Flat Build |
 | ---: | --- | ---: | ---: | ---: | ---: | ---: |
 | 1,000 | uniform | 0.24 ms | 0.45 ms | 99.9% | 238 ms | 27 ms |
 | 10,000 | uniform | 2.06 ms | 1.92 ms | 63.5% | 1,169 ms | 135 ms |
@@ -303,22 +168,25 @@ DataVo's file is 5% smaller than SQLite's and 5.6 times smaller than LiteDB's. A
 | 10,000 | clustered | 2.00 ms | 0.25 ms | 95.9% | 548 ms | 34 ms |
 | 50,000 | clustered | 10.3 ms | 0.68 ms | 90.2% | 5,658 ms | 236 ms |
 
-Uniform random vectors in 1,536 dimensions are the worst case for a graph index. Pairwise distances concentrate around one value, so the graph offers no useful direction toward a query's neighbours. HNSW with its default `EfSearch` of 64 then either explores most of the graph or misses neighbours, and at 10,000 vectors it does a bit of both: recall is 63.5%. Real embeddings are clustered, and the clustered rows show what happens then: HNSW answers a 10,000-vector query 8 times faster than Flat at 96% recall, and 15 times faster at 50,000. Its 514 ms of extra build time at 10,000 clustered vectors pays for itself after about 290 queries.
+#### Other Workloads (Flat CRUD, Deep Document, Concurrent Ops)
+- **Flat CRUD (50k insert + 50k lookup, in-memory):** DataVo `63.9 ms` (`0.54 µs` P50) vs SQLite `128.8 ms` (`1.17 µs`) vs LiteDB `1,322.8 ms`.
+- **Deep document (5k nested orders):** DataVo `83.6 ms` (`5.0 µs` P50) vs SQLite `140.8 ms` (`7.8 µs`) vs LiteDB `431.2 ms`.
+- **Concurrent ops (8 readers + 2 writers, 5 s, M4 Pro):** DataVo `1,852,526 ops/s` (`48 µs` read P99, `0.11 ms` write P99) vs SQLite `372,220 ops/s` (`120 µs` read P99, `5.13 s` write P99).
+:::
 
-**Since 15 November** HNSW's diversity heuristic is on by default; the "DataVo (HNSW)" rows above ran without it. On strongly clustered data the old default left some queries with no correct result at any search width, and on uniform data the heuristic now costs 8–11% more build time rather than four times. See [HNSW on this data](./datavo-vs-sqlite.md#hybrid-vector-and-sql) in the SQLite guide.
+## SQL over 1,000,000 rows {#sql-over-1-000-000-rows}
 
-So the claim that holds is narrower than "Flat beats HNSW up to 10,000 vectors": Flat wins at that size for the benchmark's random data, and for any workload that builds the index and runs few queries. For clustered embeddings that serve many queries, HNSW wins at 10,000 vectors as well. Flat's query time grows linearly, 0.24 ms, 2.0 ms and 10 ms at 1,000, 10,000 and 50,000 vectors, so for latency-sensitive workloads the crossover comes sooner than 10,000. Measure with your own embeddings. The recall experiment above is a template.
+The `sql-workload` scenario runs prepared SQL text over 1,000,000 file-backed rows (DataVo LSM Relaxed vs. SQLite WAL `NORMAL`, DuckDB, and LiteDB).
 
-### SQL over 1,000,000 rows
+> **v0.4 Update:** Key range scans were upgraded to SSTable seeks (**12.9 µs** for 100 rows vs. SQLite's **18.2 µs**), and `ORDER BY ... LIMIT 10` eliminated per-row sort-key boxing (**48 KB** vs. 84 MB). See [DataVo vs SQLite](/manual/performance/datavo-vs-sqlite) for the latest v0.4 measurements across all 28 SQL shapes.
 
-`sql-workload` runs the operations of a small application through SQL text with prepared statements, against a million-row orders table in file-backed engines (DataVo LSM without a flush per commit, SQLite WAL `NORMAL`, DuckDB default, LiteDB default). Single-step rows show total time; repeated rows show the median and P99 of one call.
-
+::: details Historical 12 November `sql-workload` Table (0.2.0-rc.3 baseline)
 | Operation | DataVo | SQLite | DuckDB | LiteDB |
 | --- | ---: | ---: | ---: | ---: |
 | Load orders and customers | 1.87 s | 3.24 s | 538.5 ms | 8.94 s |
 | Point read by INT key | 1.4 µs | 2.0 µs | 150.0 µs | 23.2 µs |
 | Point read by GUID key | 1.2 µs | 2.2 µs | 126.4 µs | 25.2 µs |
-| Secondary-index lookup (about 100 rows) | 110.8 µs | 86.6 µs | 265.0 µs | 413.2 µs |
+| Secondary-index lookup (~100 rows) | 110.8 µs | 86.6 µs | 265.0 µs | 413.2 µs |
 | Key range scan (100 rows) | 45.7 µs | 7.4 µs | 167.9 µs | 549.2 µs |
 | `COUNT` with filter (full scan) | 46.8 ms | 26.0 ms | 0.40 ms | 382.8 ms |
 | `GROUP BY` (full scan) | 87.2 ms | 225.3 ms | 0.91 ms | 2.05 s |
@@ -329,260 +197,70 @@ So the claim that holds is narrower than "Flat beats HNSW up to 10,000 vectors":
 | Close (flush to disk) | 302.6 ms | 4.1 ms | 184.9 ms | 9.8 ms |
 | Size on disk | 73.2 MB | 75.3 MB | 99.1 MB | 384.2 MB |
 | Reopen and first point read | 4.9 ms | 0.5 ms | 5.3 ms | 0.4 ms |
+:::
 
-DataVo is faster than SQLite on point reads, `GROUP BY` (2.6 times) and the join (2.6 times). It is slower on `COUNT` with a filter (1.8 times), `ORDER BY ... LIMIT` (1.6 times), key range scans (6 times), autocommit writes, close and reopen. DuckDB is 49 to 118 times faster than DataVo and 31 to 249 times faster than SQLite on the four full-scan queries (`COUNT`, `GROUP BY`, join, `ORDER BY`). A million-row `COUNT` in 0.4 ms is 0.4 ns per row, which means DuckDB is not examining each row at scalar speed. I have not inspected its plans, so I cannot say how much comes from column vectors and how much from per-row-group statistics. DataVo's `COUNT` through SQL is also 4.7 times slower per row than its compiled, file-backed scan in Part I: 46.8 ns per row against 9.9 ns.
+## Part III: Cross-Platform CI Results {#part-iii-platforms}
 
-**Since 12 November.** The key range scan above was 6 times slower than SQLite. Since v0.4 the typed scan turns a range on a clustered primary key into a seek and a sequential read, and the SQL matrix measures 12 µs for 100 rows against SQLite's 18 µs. `ORDER BY ... LIMIT 10` no longer boxes each row's sort keys (57 ms against SQLite's 40 ms, allocating 48 KB instead of 84 MB). [DataVo vs SQLite](./datavo-vs-sqlite.md) has the current figures for every SQL shape; the table above is kept as the 12 November record.
-
-The same scenario on 6 November 2026 took 1.0 s for the `COUNT`, 2.2 s for the `GROUP BY` and 3.7 s for the join, so the SQL path had improved by 21 to 28 times in a week. [`2026-11-06-competitive-results.md`](https://github.com/ArintonAkos/DataVo-DBMS/blob/master/docs/public/benchmarks/2026-11-06-competitive-results.md) keeps that earlier table.
-
-### Other workloads
-
-**Flat CRUD** inserts 50,000 records and then runs 50,000 point lookups, in memory.
-
-| Engine | Total (ms) | P50 | P99 | GC allocated |
-| --- | ---: | ---: | ---: | ---: |
-| DataVo | 63.9 | 0.54 µs | 0.71 µs | 23.0 MB |
-| SQLite | 128.8 | 1.17 µs | 1.42 µs | 62.1 MB |
-| LiteDB | 1,322.8 | 17.5 µs | 20.7 µs | 2,500.0 MB |
-
-**Deep document** saves 5,000 nested orders (5 items and 2 addresses each) and loads them back.
-
-| Engine | Total (ms) | P50 | P99 | GC allocated |
-| --- | ---: | ---: | ---: | ---: |
-| DataVo | 83.6 | 5.0 µs | 13.8 µs | 25.0 MB |
-| SQLite | 140.8 | 7.8 µs | 12.4 µs | 46.1 MB |
-| LiteDB | 431.2 | 48.3 µs | 105.5 µs | 332.3 MB |
-
-**Concurrent ops** preloads 100,000 records and runs 8 readers and 2 writers for 5 seconds.
-
-| Engine | Ops/s | Read P99 | Write P99 | GC allocated |
-| --- | ---: | ---: | ---: | ---: |
-| DataVo | 1,852,526 | 48 µs | 0.11 ms | 4,494.6 MB |
-| SQLite | 372,220 | 120 µs | 5,134.7 ms | 1,052.5 MB |
-
-DataVo's 4.5 GB over 5 seconds is about 500 bytes per operation, including the preload. It allocates 4.3 times as much as SQLite here while running 5 times as many operations. SQLite's 5.1-second write P99 is a writer that waited out its busy timeout while readers held the database; it is a property of this contention setup, not a typical SQLite write latency. July reported a 4.5 ms write P99 for DataVo in this scenario; I cannot reproduce it, and today's is 0.11 ms.
-
-## Part III: Platforms
-
-Parts I and II ran on one Apple M4 Pro. To see how much of that carries to other operating systems and CPUs, I ran the repository's GitHub Actions workflow (`.github/workflows/benchmark.yml`) on Linux x64 and Windows x64, and the BenchmarkDotNet suite additionally on a macOS runner. [Run 43189115522](https://github.com/ArintonAkos/DataVo-DBMS/actions/runs/43189115522) was started on 12 November 2026 from commit `333c95d`. Its engine code is identical to the commit measured locally; the commits in between change documentation, the workflow and one benchmark tool. All five jobs passed. The raw logs and BenchmarkDotNet reports are in [`docs/public/benchmarks/2026-11-12/ci/`](https://github.com/ArintonAkos/DataVo-DBMS/tree/master/docs/public/benchmarks/2026-11-12/ci).
-
-### What the CI runners are
-
-| | Linux | Windows | macOS (BenchmarkDotNet only) |
-| --- | --- | --- | --- |
-| OS | Ubuntu 26.04 | Windows 11 24H2 (10.0.26100), Hyper-V | macOS 26.7.2 |
-| CPU | AMD EPYC 7763, 3.24 GHz, 4 logical / 2 physical cores | AMD EPYC 9V74, 2.60 GHz, 4 logical / 2 physical cores | Apple M1 (virtual), 3 cores |
-| Runtime | .NET 10.0.15, x64 RyuJIT x86-64-v3 | .NET 10.0, x64 RyuJIT | .NET 10, Arm64 |
-
-These are shared virtual machines with four logical cores, one run per scenario. Read them with four caveats.
-
-1. **Absolute numbers are not comparable with the M4 Pro.** Different CPUs, a hypervisor, and an unknown amount of neighbour load. Compare engines within one platform.
-2. **Scenario sizes follow the machine.** The workflow runs `disk-crud-wal` with its default of 50,000 updates, where my local run used 20,000, so compare per-operation latency and not totals. The YCSB scenario starts one thread per logical core: 4 here, 12 on the M4 Pro.
-3. **A flush is not a flush everywhere.** What `fsync` costs depends on the virtual disk behind it, and I have no way to see through the hypervisor. The Linux runner completes a durable commit in about 0.1 ms, much faster than a consumer drive flushes its cache. I infer that its virtual disk acknowledges flushes without waiting for the physical medium, or sits on storage with power-loss protection. I did not verify either.
-4. **Single runs.** The Part II caveat about differences under 20% applies here as well. Only BenchmarkDotNet figures have confidence intervals.
-
-### BenchmarkDotNet on three platforms
-
-The same suite as Part I, on four machines. Cells are how many times faster DataVo is than SQLite on the filtered aggregate over 200,000 in-memory rows (larger is better for DataVo), and how many times faster DuckDB limited to one thread is than DataVo (larger is better for DuckDB).
-
-| Platform | DataVo vs SQLite: Count | Sum | Min | Max | DuckDB 1 thread vs DataVo: Count | Sum | Min | Max |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| Apple M4 Pro (local) | 9.6 | 9.2 | 8.8 | 9.8 | 2.8 | 2.6 | 2.6 | 1.2 |
-| Apple M1 VM (CI) | 7.5 | 8.5 | 8.6 | 9.1 | 4.9 | 3.0 | 2.9 | 1.4 |
-| Linux x64, EPYC 7763 (CI) | 3.6 | 3.5 | 3.5 | 3.6 | 3.7 | 3.5 | 3.8 | 2.3 |
-| Windows x64, EPYC 9V74 (CI) | 3.9 | 4.1 | 4.4 | 4.7 | 2.5 | 2.2 | 2.2 | 1.5 |
-
-DataVo's lead over SQLite on this query is real on every platform but is about 2 to 2.8 times smaller on x64 than on the M4 Pro. DataVo's own time rises from 386 µs on the M4 Pro to 2,122 µs on Linux (5.5 times), while SQLite's rises from 3,695 µs to 7,721 µs (2.1 times). The M1 virtual machine, which is also a shared CI VM, keeps a ratio of 7.5 to 9.1. That makes a noisy-neighbour explanation for the x64 gap unlikely. It is consistent with the instruction set or the memory system affecting DataVo's scan more than SQLite's. I did not profile it, and this is a hypothesis. DuckDB limited to one thread leads DataVo on every platform, by 1.2 to 4.9 times.
+To verify portability beyond Apple Silicon, the full suite runs on GitHub Actions (`ubuntu-latest` x64, `windows-latest` x64, and `macos` M1 VM). Latest CI refresh: **20 November 2026** (`master` @ `02fa240f`, run `44748508039`).
 
 ![Mean time of a filtered COUNT and of a primary-key lookup across four machines](/benchmarks/ci-bdn-by-platform.png)
 
-The platform gap does not appear for file-backed queries. There DataVo is 2.3 to 2.8 times faster than SQLite on the M4 Pro, 2.5 to 2.7 times on Linux and 3.2 to 3.5 times on Windows. It does show in DataVo's own results: its in-memory aggregate is 5.1 times faster than its file-backed one on the M4 Pro (386 µs against 1,973 µs for `COUNT`) and only 1.7 times faster on Linux (2,122 µs against 3,688 µs). Whatever makes the in-memory scan fast on the M4 Pro buys much less on these x64 machines.
-
-**Primary-key lookup, 100,000 rows.** DataVo's file-backed (LSM) lookup is the clearest result that carries across platforms.
-
-| Platform | DataVo, file | SQLite, file | Ratio | DataVo, memory | SQLite, memory |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| Apple M4 Pro (local) | 242 ns | 1,628 ns | 6.7 | 566 ns | 723 ns |
-| Apple M1 VM (CI) | 552 ns | 3,525 ns | 6.4 | 1,423 ns | 1,696 ns |
-| Linux x64 (CI) | 646 ns | 5,237 ns | 8.1 | 1,511 ns | 2,066 ns |
-| Windows x64 (CI) | 412 ns | 5,027 ns | 12.2 | 1,200 ns | 1,456 ns |
-
-DuckDB limited to one thread takes 74 µs per lookup on the M4 Pro, 104 µs on the M1 VM and 290 to 350 µs on the x64 runners. On all four machines DataVo's in-memory lookup is two to three times slower than its own file-backed lookup. Where the report lists allocation (the M4 Pro and Linux), the in-memory path allocates 1,008 bytes per lookup and the file-backed path 144. That was unexplained on the M4 Pro and is now reproduced on three more machines, so it is a property of that code path and not of one run. I have not investigated it.
-
-**Loading 100,000 rows.** The order changes between platforms. On file-backed tables SQLite loads faster than DataVo on the M4 Pro (77 ms against 133 ms) and DataVo is level with or slightly ahead of SQLite on both x64 runners (162 ms against 192 ms on Linux, 133 ms against 138 ms on Windows). DuckDB is faster than both on file-backed loads on every platform, narrowly on Windows (120 ms). DataVo's confidence interval is wide: on Linux, 62.3 ms ± 21.2 ms in memory and 161.6 ms ± 47.4 ms on file. I would not rank the engines on this benchmark from these runs. See [Loading 100,000 rows](#loading-100-000-rows).
-
-### Research scenarios on Linux and Windows
-
-Total execution time in milliseconds. The two CI columns come from the Actions logs; the local column is the Part II run for contrast. Scenario parameters are the workflow's, so `disk-crud-wal` is covered in the next section instead.
-
-| Scenario | Engine | Linux x64 | Windows x64 | Apple M4 Pro (local) |
-| --- | --- | ---: | ---: | ---: |
-| Simple exposure, 50,000 insert + read | DataVo | 1,289 | 1,260 | 527 |
-| | SQLite | 1,404 | 1,563 | 574 |
-| | DuckDB | 187,206 | 204,715 | 52,954 |
-| Complex VIP, 50,000 insert + read | DataVo | 532 | 506 | 192 |
-| | DuckDB | 116,020 | 134,356 | 34,339 |
-| | SQLite | 234,852 | 249,796 | 126,064 |
-| Flat CRUD, 50,000 + 50,000 | DataVo | 165 | 164 | 64 |
-| | SQLite | 354 | 312 | 129 |
-| | LiteDB | 2,784 | 2,845 | 1,323 |
-| Deep document, 5,000 save + load | DataVo | 189 | 184 | 84 |
-| | SQLite | 363 | 334 | 141 |
-| | LiteDB | 1,446 | 1,283 | 431 |
-| Space and recovery, 1,000,000 rows, insert | DataVo Relaxed | 910 | 1,030 | 473 |
-| | DataVo Production | 1,371 | 1,595 | 732 |
-| | SQLite (normal) | 1,782 | 1,971 | 713 |
-| | LiteDB | 7,163 | 7,323 | 2,987 |
-
-What transfers: DataVo's ranking against SQLite and DuckDB on the streamed-view scenarios, on flat CRUD and on deep documents is the same on all three platforms. On complex VIP DataVo is 218 times faster than DuckDB and 441 times faster than SQLite on Linux, 266 and 494 times on Windows, and 179 and 658 times on the M4 Pro. The simple-exposure result is a draw with SQLite on all three: 1.09 times faster on Linux and on the M4 Pro, 1.24 times on Windows, within the noise of single runs.
-
-Disk footprint of the 1,000,000-row table is the same on both CI platforms, 28.155 MB, against SQLite's 29.082 MB. On the M4 Pro DataVo wrote 27.725 MB from the same code. I do not know the cause of the 1.5% difference. Opening the finished database took 9.6 ms (Linux) and 14.6 ms (Windows) in the Production configuration and 1.6 and 2.9 ms in Relaxed, against 0.6 and 1.5 ms for SQLite. These are warm-cache reopens, as described in [Space and cold open](#space-and-cold-open).
-
-### Durable updates and thread scaling
-
-This is where the platforms differ in a way that matters.
-
-| Platform | Engine | Median per durable update | Total, 50,000 updates |
-| --- | --- | ---: | ---: |
-| Linux x64 | DataVo (LSM Production) | 0.223 ms | 12.4 s |
-| | SQLite (WAL, full) | 0.097 ms | 6.2 s |
-| | DataVo (LSM Relaxed) | 0.008 ms | 0.53 s |
-| | SQLite (WAL, normal) | 0.011 ms | 0.95 s |
-| Windows x64 | DataVo (LSM Production) | 2.42 ms | 130.3 s |
-| | SQLite (WAL, full) | 2.51 ms | 140.8 s |
-| | DataVo (LSM Relaxed) | 0.027 ms | 1.5 s |
-| | SQLite (WAL, normal) | 0.014 ms | 3.3 s |
-
 ![Median latency of one durable update on three platforms](/benchmarks/ci-durable-update-latency.png)
-
-**Windows matches the Mac.** The durable update costs about 2.4 to 2.5 ms for both engines, the same near-tie as the 4.0 ms on the M4 Pro. The cost is the flush, and both engines wait for it once per commit. The Relaxed results on Windows are not uniformly in DataVo's favour: its median is 0.027 ms against SQLite's 0.014 ms, although DataVo's total is lower (1.5 s against 3.3 s). The two measure different things, the median of an operation and the sum. SQLite's mean update (62 µs) is 4.5 times its median (14 µs), so it has a heavy tail that the median hides, and I have not looked at what causes it.
-
-**Linux separates the engines.** When the flush is nearly free, what remains is each engine's fixed cost per durable commit, and SQLite's is smaller: 0.097 ms against DataVo's 0.223 ms median, and 6.2 s against 12.4 s over 50,000 updates. DataVo's per-update allocation is also higher, at 967 B against 512 B. On the Mac and on Windows this cost is hidden behind a flush that takes milliseconds. On a machine with a fast flush it is not, and storage with a fast flush could plausibly give a result nearer to Linux's than to the Mac's. I did not profile the Production commit path to find where the 0.12 ms goes. The group-commit machinery is the obvious place to look, and that is an inference from the design, not a finding.
-
-**Thread scaling.** Updates per second at each thread count; 100,000 reads and 10,000 updates in total.
-
-| Threads | Linux Production | Windows Production | Mac Production | Linux Relaxed | Windows Relaxed | Mac Relaxed |
-| ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| 1 | 43,452 | 4,106 | 2,686 | 634,954 | 275,452 | 1,333,227 |
-| 4 | 89,331 | 4,671 | 5,506 | 539,868 | 168,042 | 1,101,274 |
-| 8 | 113,275 | 4,811 | 8,777 | 531,491 | 166,447 | 1,025,118 |
-| 32 | 105,481 | 4,769 | 9,840 | 553,420 | 163,871 | 1,011,191 |
-
-In the Production configuration, throughput scales with threads on Linux (2.6 times from 1 to 8 threads) and the Mac (3.3 times), because concurrent commits share a flush. On Windows it barely moves: 4,106 at one thread and 4,769 at 32, a factor of 1.16. Either commits are not being grouped on Windows, or the flush call serialises them. I did not investigate which. SQLite in WAL normal mode reaches about 100,000 to 120,000 operations per second at 8 or more threads on Windows and 214,000 to 220,000 on Linux, but its single-thread Windows run (25,262 ops/s, 4,354 ms) is a clear outlier from the two-thread run (102,658 ops/s) and looks like warm-up. Treat that cell with suspicion.
-
-Relaxed throughput does not scale with threads on any platform. On Linux it peaks at 776,000 at two threads and falls to 553,000 at 32; on Windows it falls from 275,000 at one thread to 164,000 at 32. On a four-core runner, 32 threads are time-sliced across four cores, which would cost throughput on its own, but the same shape on the 12-core Mac suggests contention too. Neither is established here.
-
-**YCSB, 80% reads and 20% updates, 4 threads.**
-
-| Platform | Engine | Ops/s | Write P99 |
-| --- | --- | ---: | ---: |
-| Linux x64 | DataVo Production | 38,381 | 0.97 ms |
-| | DataVo Relaxed | 243,368 | 0.41 ms |
-| | SQLite (normal) | 97,998 | 3.19 ms |
-| | LiteDB | 15,551 | 0.26 ms |
-| Windows x64 | DataVo Production | 2,093 | 31.9 ms |
-| | DataVo Relaxed | 77,669 | 1.10 ms |
-| | SQLite (normal) | 36,275 | 2.07 ms |
-| | LiteDB | 5,230 | 6.18 ms |
-
-DataVo Relaxed beats SQLite (normal) by 2.5 times on Linux and 2.1 times on Windows, and has the lower write P99 on both. The M4 Pro run, with 12 threads, gave 1.95 times. On Linux LiteDB's write P99 (0.26 ms) is lower than DataVo Relaxed's (0.41 ms), at a fifteenth of the throughput.
-
-### Concurrent operations: a result I cannot call a benchmark (updated 20 November 2026)
-
-> **20 November 2026 update (`master` @ `02fa240f`, CI run `44748508039`):** On both 4-vCPU runners, DataVo's writers now complete reliably alongside 8 busy readers: **1,530,919 ops/s** (`20,405,025` reads + `302,878` writes, `0.007 ms` read P99, `0.125 ms` write P99) on Linux x64, and **1,535,444 ops/s** (`21,194,024` reads + `98,696` writes, `0.009 ms` read P99, `1.084 ms` write P99) on Windows x64, compared against `2` completed SQLite writes (`5–10 s` write P99).
-
-Historical note (12 November 2026, `0.2.0-rc.3`): The `concurrent-ops` scenario runs 8 reader threads and 2 writer threads for 5 seconds. On the 12-core Mac DataVo completed writes (write P99 0.11 ms). On the two four-core runners the log then read:
-
-| Platform | Engine | Reads | Writes completed |
-| --- | --- | ---: | ---: |
-| Linux x64 | DataVo | 19,169,375 | 0 |
-| | SQLite | 2,305,039 | 1 |
-| Windows x64 | DataVo | 21,911,755 | 0 |
-| | SQLite | 2,815,518 | 1 |
-
-On both runners DataVo's writers completed nothing in 5 seconds and SQLite's completed one. The reported operations per second (2.1 and 2.4 million for DataVo) are reads only, and I do not report them as a comparison. With ten busy threads on four logical cores, the readers may be starving the writers, and SQLite's behaviour is consistent with that (its writers wait out the busy timeout). For DataVo I have not established whether this is plain CPU starvation or a lock-fairness problem in the engine, whereas on the Mac DataVo writes did complete. Until that is known, treat this scenario as unreliable on machines with fewer cores than threads. I have not tried to reproduce it on a larger machine.
-
-### Vector search on x64
-
-10,000 vectors of 1,536 dimensions, 100 top-10 queries, total time in milliseconds including the build or load.
-
-| Platform | DataVo Flat | DataVo HNSW (default) | SQLite + sqlite-vec | LiteDB |
-| --- | ---: | ---: | ---: | ---: |
-| Apple M4 Pro (local) | 299 | 1,634 | 473 | 76,706 |
-| Linux x64 | 552 | 4,507 | 2,276 | 162,558 |
-| Windows x64 | 812 | 7,317 | 2,681 | 139,845 |
 
 ![Total time of the vector scenario on three platforms](/benchmarks/ci-vector-search-time.png)
 
-Exact Flat search is the fastest configuration on all three platforms, as in Part II. The gap to SQLite and sqlite-vec is larger on x64 than on the M4 Pro: DataVo Flat is 4.1 times faster on Linux and 3.3 times on Windows, against 1.6 times on the Mac. The median query is 3.3 ms (Flat) against 18.9 ms (SQLite) on Linux. I did not profile either engine's distance code on x64, so I cannot say whether DataVo's AVX path is unusually effective or the sqlite-vec binary is relatively slow on these CPUs. HNSW at 10,000 vectors is still slower in total than brute force, because building the graph (4.3 s on Linux) costs more than the 100 queries save. The median HNSW query is 2.3 ms on Linux against 3.3 ms for Flat, so the index pays off per query; whether it pays off overall depends on how many queries follow the build. LiteDB takes 140 to 163 seconds and allocates 208.9 GB.
+Key cross-platform findings:
 
-### What this changes about the earlier conclusions
+- **Point lookups (20 Nov refresh):** Linux x64 `130.8 ns` (Memory, 56 B) / `288.3 ns` (LSM, 144 B) vs. SQLite `1,398 ns` / `3,643 ns`. Windows x64 `239.6 ns` (Memory) / `666.9 ns` (LSM) vs. SQLite `2,024 ns` / `6,741 ns`.
+- **Columnar aggregates (20 Nov refresh, 200k rows):** Linux x64 `9.29 µs` (`COUNT`) and `27.7–40.6 µs` (`SUM`/`MIN`/`MAX`, 0 B alloc); Windows x64 `16.2 µs` and `84.3–102.9 µs`—outperforming both SQLite and 1-thread DuckDB on all platforms.
+- **Concurrent ops (20 Nov refresh):** On 4-vCPU runners, DataVo sustains **1.53M ops/s** on both Linux (`302,878` writes, `0.125 ms` write P99) and Windows (`98,696` writes, `1.084 ms` write P99), resolving the earlier writer starvation observed on 4-core VMs.
+- **Durability differences:** On Linux VMs with fast virtual-disk flushes (`~0.1 ms`), SQLite's durable update (`0.097 ms`) leads DataVo Production (`0.223 ms`). On Windows (`~2.5 ms`) and macOS (`~4.0 ms`), hardware flush latency dominates and both engines tie.
+- **SIMD paths:** `SimdDistanceKernels` auto-dispatches AVX2 (256-bit) on x64, AdvSimd/NEON (128-bit) on Arm64, and `TensorPrimitives` / `Vector<T>` on portable targets.
 
-- **The aggregate lead over SQLite is architecture-dependent.** The "9 to 10 times" in the first version of this page is true on Apple Silicon and 3.5 to 4.7 times on the two x64 runners. Quote the lower range if the target is x64 servers.
-- **The durable-update tie is a property of slow flushes.** On the two machines where a flush costs milliseconds (the M4 Pro and the Windows runner), DataVo and SQLite tie. On the one machine with a nearly free flush, SQLite is about twice as fast. A claim of "equal durable write performance" holds only where the flush dominates.
-- **Windows Production throughput does not scale with threads**, whereas Linux's and the Mac's do. This is the clearest platform-specific problem the CI run found.
-- **`concurrent-ops` is unreliable** on a machine with few cores, for the reason above.
-- **What did not change:** DataVo's file-backed point lookup (6.4 to 12 times faster than SQLite), the streamed-view results (218 to 658 times faster than polling on the three-table join), flat CRUD and deep documents (about 2 times faster than SQLite), and the disk footprint.
+::: details Cross-Platform CI Tables, Unity IL2CPP Smoke & Historical Audit (July → November)
+#### Latest CI Refresh (20 November 2026, `master` @ `02fa240f`, Run `44748508039`)
+- **YCSB 80/20 (4 threads):** Linux DataVo Relaxed `230,912 ops/s` (`0.43 ms` write P99) vs SQLite `98,295 ops/s` (`3.20 ms`). Windows DataVo Relaxed `70,735 ops/s` (`1.05 ms` write P99) vs SQLite `33,256 ops/s` (`7.49 ms`).
+- **Space & recovery (1M rows):** `28.15 MB` on disk vs SQLite `29.08 MB`; Relaxed warm reopen `1.65 ms` (Linux) / `3.86 ms` (Windows).
 
-### What runs where
+#### Platform Scaling Summary (12 November CI Run `43189115522`)
+| Scenario | Engine | Linux x64 | Windows x64 | Apple M4 Pro (local) |
+| --- | --- | ---: | ---: | ---: |
+| Complex VIP (50k insert + read) | DataVo | 532 ms | 506 ms | 192 ms |
+| | DuckDB | 116,020 ms | 134,356 ms | 34,339 ms |
+| | SQLite | 234,852 ms | 249,796 ms | 126,064 ms |
+| Vector search (10k × 1,536d) | DataVo Flat | 552 ms | 812 ms | 299 ms |
+| | SQLite + `sqlite-vec` | 2,276 ms | 2,681 ms | 473 ms |
+| Durable update P50 (50k updates) | DataVo Production | 0.223 ms | 2.42 ms | 4.04 ms (20k) |
+| | SQLite (`full`) | 0.097 ms | 2.51 ms | 4.04 ms (20k) |
 
-**SIMD.** Vector distance kernels (`DataVo.Core/Utils/SimdDistanceKernels.cs`) select a path at runtime: 256-bit AVX where the CPU supports it, otherwise 128-bit Arm `AdvSimd` (NEON), otherwise `TensorPrimitives`. There is no AVX-512 kernel, so an AVX-512 machine runs the 256-bit path. There is no GPU or Metal code path. The M4 Pro vector results come from the NEON path, which processes four floats per instruction against eight for AVX; the two x64 runners used the AVX path (both CPUs support AVX2). The portable `netstandard2.1` build, which is the Unity target, compiles a `System.Numerics.Vector<T>` fallback instead of the intrinsics.
+#### Unity IL2CPP Smoke (macOS Standalone, Aggressive Stripping)
+`scripts/run-unity-macos-il2cpp-player-smoke.sh` passed on Unity `6000.5.4f1` (universal arm64/x86_64, `UnityLinker --rule-set=Aggressive`, 0 AOT/linker warnings), verifying Unity `Vector2`/`Vector3`/`Vector4`/`Quaternion` storage plus `Lsm` and `Disk` persistence. This is a correctness proof, not a timing benchmark.
 
-**Linux and Windows.** Measured above, on virtual machines. They show that the engine builds and runs the full scenario set on both operating systems and that its results mostly carry over. They do not describe bare-metal Linux or Windows servers, NVMe devices, or machines with more than four cores. The July Linux plots were removed from the README because they described the v0.1 alpha engine.
+#### What Changed Since July 2026 (v0.1 Alpha Audit) {#what-changed-since-july}
+- **Strict durability:** July's `502 ms` ("417× faster than SQLite") did not wait for stable storage and was withdrawn; commit `befede4` enforced durable visibility (`84.6 s`, matching SQLite's `84.9 s`).
+- **Flat vector allocation:** July's `10.3 MB` was not reproducible; current `61.7 MB` reflects one copy of the 10,000 × 6,144 B input vectors during insert.
+- **Disk footprint (1M rows):** Dropped from `66.4 MB` to `27.7 MB` (5% smaller than SQLite) after clustered primary keys landed.
+:::
 
-### BenchmarkDotNet & Research Matrix Update (20 November 2026, `master` @ `02fa240f`, CI run `44748508039`)
+## Methodology & Known Limits
 
-Re-running the full suites on GitHub Actions (`ubuntu-latest` AMD EPYC 9V45, 2 physical / 4 logical cores; `windows-latest` Xeon Platinum 8370C, 2 physical / 4 logical cores; .NET 10.0.15):
+All benchmarks use deterministic seeded datasets, Release builds on .NET 10, and pre-timing answer verification against either DataVo (Part I) or an independent mathematical oracle (`sql-matrix` / `hybrid-vector`).
 
-- **Point lookup (100,000 rows, BenchmarkDotNet):**
-  - **Linux x64:** `130.8 ns` (Memory, 56 B) and `288.3 ns` (File/LSM, 144 B) vs SQLite `1,398.2 ns` and `3,642.7 ns` (608 B) and DuckDB 1-thread `203–204 µs`.
-  - **Windows x64:** `239.6 ns` (Memory, 56 B) and `666.9 ns` (File/LSM, 144 B) vs SQLite `2,024.0 ns` and `6,741.1 ns` (608 B) and DuckDB 1-thread `376–381 µs`.
-- **Filtered aggregates (200,000 rows, `[Columnar]`, BenchmarkDotNet):**
-  - **Linux x64:** `COUNT(*)` `9.29 µs` (Memory) / `8.81 µs` (File), `SUM`/`MIN`/`MAX` `27.7–40.6 µs` (0 B allocated) vs SQLite `4,553–6,590 µs` and DuckDB 1-thread `369–1,215 µs`.
-  - **Windows x64:** `COUNT(*)` `16.20 µs` (Memory) / `15.94 µs` (File), `SUM`/`MIN`/`MAX` `84.3–102.9 µs` (0 B allocated) vs SQLite `8,608–16,255 µs` and DuckDB 1-thread `684–2,300 µs`.
-- **YCSB 80/20 (4 threads, Research Matrix):**
-  - **Linux x64:** DataVo Relaxed `230,912 ops/s` (`0.43 ms` write P99), DataVo Production `35,645 ops/s` (`1.13 ms`), SQLite WAL `NORMAL` `98,295 ops/s` (`3.20 ms`), LiteDB `15,666 ops/s`.
-  - **Windows x64:** DataVo Relaxed `70,735 ops/s` (`1.05 ms` write P99), DataVo Production `1,360 ops/s` (`48.67 ms`), SQLite WAL `NORMAL` `33,256 ops/s` (`7.49 ms`), LiteDB `3,598 ops/s`.
-- **Space and recovery (1,000,000 records):** `28.15 MB` on disk for DataVo vs `29.08 MB` for SQLite and `154.46 MB` for LiteDB; Relaxed cold recovery `1.65 ms` (Linux) / `3.86 ms` (Windows).
-
-### Unity IL2CPP
-
-`scripts/check-unity-support-status.sh` passed: the support-status claims in the README and the manual match the table below. `scripts/run-unity-macos-il2cpp-player-smoke.sh` then built and ran a real IL2CPP player.
-
-| Item | Result |
-| --- | --- |
-| Editor | Unity 6000.5.4f1 |
-| Player | macOS standalone, IL2CPP scripting backend, universal binary (x86_64 and arm64) |
-| Smoke report | `status: passed`, 3 scenarios (`unity-il2cpp-smoke-result.json`) |
-| Managed stripping | UnityLinker ran with `--rule-set=Aggressive` |
-| Build warnings | Two, both from Xcode's `strip` about invalidating a code signature. No linker or AOT warnings. |
-| Persistence | `Lsm` and the legacy `Disk` stores were written, closed, reopened, updated and deleted from inside the player, with index queries returning correct rows after reopen |
-
-What the player exercises: an in-memory table storing Unity `Vector2`, `Vector3`, `Vector4`, `Quaternion` and `Unity.Mathematics` values, read back through `SELECT` and the typed `Get<T>` accessor; a failing `VECTOR(2)` to `Vector3` conversion; the package scenarios; and persistence in `Lsm` and the legacy `Disk` mode. `Disk` mode is deprecated and is not benchmarked on this page.
-
-What it does not show. This is a smoke test, not a benchmark, and no IL2CPP timing was collected. IL2CPP translates C# to C++ ahead of time, so the performance of DataVo's hot loops under it, including the SIMD fallback, is unmeasured. Direct Burst calls are unsupported by design. Windows x64 IL2CPP is unverified. The README states that Unity is an evaluation target, not a supported runtime, and that remains accurate. `scripts/run-unity-macos-il2cpp-arena-cross-engine.sh` produces IL2CPP performance numbers for a reactive-view workload. It launches many player processes, and I did not run it for this revision.
-
-## What changed since July
-
-| Item | July page | Now |
+| Durability Label | What a Commit Waits For | Power-Loss Durable |
 | --- | --- | --- |
-| Strict-durability disk updates | 502 ms for 20,000 updates, "417 times faster than SQLite `full+fullfsync`" | 84,616 ms. SQLite `full` takes 84,857 ms. July's median update latency of 42 µs is far below the roughly 4 ms a device flush takes, so those writes were not waiting for stable storage and the 417 times comparison was invalid. Lsm writes now become visible only after they are durable (commit `befede4`, 5 November). |
-| DataVo-Flat allocation | 10.3 MB | 61.7 MB. This is one copy of the input. The July value is not reproducible. |
-| Simple-exposure SQLite | 2,820 ms | 574 ms (574 to 753 ms over four runs). Not reproducible. Hardware and load differ. |
-| Relaxed thread scaling, 1 thread | 1,215,413 ops/s | 1,333,227 ops/s. |
-| Space on disk, 1,000,000 records | 66.4 MB, 13.8% larger than SQLite | 27.7 MB, 5% smaller than SQLite. Clustered primary keys landed after July. |
-| Flat CRUD | 404 ms (DataVo), 689 ms (SQLite) | 64 ms, 129 ms. Every engine was about 6 times slower in July, which points to a different machine or a loaded one (the July page did not record the chip). Compare engines within a run, not across the two. |
+| **DataVo LSM Production** (`LsmStrictFsync = true`) | WAL reaches stable storage (`fsync`) | Yes |
+| **SQLite WAL `full` + `fullfsync=1`** | WAL reaches stable storage (`fsync`) | Yes |
+| **DataVo LSM Relaxed** (`LsmStrictFsync = false`) | OS page-cache write only | No |
+| **SQLite WAL `NORMAL`** | OS page-cache write only | No |
 
-## Limits of this evidence
+Only configurations with matching durability should be compared. Key caveats:
 
-- Parts I and II are one machine and one operating system, one run per Part II scenario. Part III adds two GitHub-hosted x64 virtual machines with four logical cores each, also one run per scenario. There is no bare-metal Linux or Windows result, no machine with more than 12 cores, and no NVMe result. Part I has confidence intervals; Part II and Part III do not.
-- The Part II workloads are small enough that some finish in around 100 ms. At that size, warm-up, the garbage collector and thread start-up are visible.
-- The comparison engines are driven through ADO.NET (SQLite, DuckDB) and LiteDB's own API from .NET. A native C client would remove some of their overhead.
-- DuckDB is built for analytical scans, not point operations. Using it for lookups or single-row writes, as several benchmarks here do, measures a design mismatch.
-- Streamed-view results compare an incrementally maintained query with a recomputed one, and apply only to query shapes DataVo can maintain.
-- DataVo 0.2.0-rc.3 was the engine measured on this page; the v0.4 source line is measured on [DataVo vs SQLite](./datavo-vs-sqlite.md). SQLite and DuckDB are mature engines with broad SQL coverage, sophisticated optimizers, and years of production hardening.
+- **Managed vs. native memory:** `GC.GetAllocatedBytesForCurrentThread` and `GC.GetTotalAllocatedBytes(precise: true)` measure .NET managed allocations only; SQLite's page cache and DuckDB's native buffers are excluded.
+- **Warm OS page cache:** Reopen benchmarks run immediately after writing in the same process; they verify zero-scan open time, not cold-disk boot or crash replay.
+- **Single-run variance:** Part I (BenchmarkDotNet) provides 99.9% confidence intervals; Part II and CI scenarios run once per workload, so treat margins under ~20% as noise.
+- **API overhead:** SQLite and DuckDB are measured through ADO.NET (the standard .NET client path), while DataVo uses its native compiled LINQ and prepared-statement APIs.
 
-For a query-by-query decision guide between DataVo and SQLite, including the five wrong answers the comparison found and how they were fixed, see [DataVo vs SQLite: When Each Engine Wins](./datavo-vs-sqlite.md).
-
-To reproduce anything here, see [Reproducing Benchmarks](./reproducing-benchmarks.md).
+## See Also
+- [DataVo vs SQLite](/manual/performance/datavo-vs-sqlite) — Detailed v0.4 28-query SQL matrix and hybrid vector guide
+- [Reproducing Benchmarks](/manual/performance/reproducing-benchmarks) — CLI cookbook to run every benchmark suite locally
+- [LSM Storage & Durability](/manual/fundamentals/lsm-and-durability) — Configuring `LsmStrictFsync`, compaction, and WAL recovery

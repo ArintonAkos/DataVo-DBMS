@@ -1,10 +1,11 @@
+---
+title: Configuration Reference
+description: Complete DataVoConfig reference covering storage modes, LSM durability, I/O, query planner, vector search, and authorization.
+---
+
 # Configuration Reference
 
-`DataVoConfig` holds every setting. Most applications set three things: the storage mode, where persisted data lives, and the durability contract. Everything else has a default that is right unless you are investigating a specific behaviour.
-
-## Choosing storage and durability
-
-In-memory storage keeps the database inside the process; it disappears when the last context is disposed. Use it for tests, caches, and data you rebuild at startup.
+`DataVoConfig` configures every aspect of an embedded `DataVoContext`. Most applications only set `StorageMode`, `DiskStoragePath`, and `LsmStrictFsync`; every other property ships with production-ready defaults.
 
 ```csharp
 using DataVo.Core;
@@ -12,85 +13,77 @@ using DataVo.Core.StorageEngine.Config;
 
 using var db = new DataVoContext(new DataVoConfig
 {
-    StorageMode = StorageMode.InMemory
-});
-```
-
-For persisted data use the LSM engine. With `LsmStrictFsync = true`, the default, a commit is acknowledged only after its commit-log record has been flushed to stable storage, so it survives power loss. Each commit then costs one device flush, which is about 4 ms on the Apple M4 Pro measured on the [results page](/manual/performance/benchmarks#durability-what-an-fsync-costs) and far less on drives with power-loss protection.
-
-```csharp
-using var db = new DataVoContext(new DataVoConfig
-{
     StorageMode = StorageMode.Lsm,
-    DiskStoragePath = "./datavo_lsm_data",
+    DiskStoragePath = "./game_data",
     LsmStrictFsync = true
 });
 ```
 
-`LsmStrictFsync = false` (Relaxed) acknowledges once the record is in the operating system's file cache. A process crash loses nothing that was acknowledged; a power failure or kernel crash can lose the most recent commits. Use it for caches and rebuildable data, and when comparing with SQLite's `synchronous=NORMAL`, which makes the same trade.
+## Storage & Durability
 
-```csharp
-using var db = new DataVoContext(new DataVoConfig
-{
-    StorageMode = StorageMode.Lsm,
-    DiskStoragePath = "./datavo_lsm_cache",
-    LsmStrictFsync = false
-});
-```
-
-`StorageMode.Disk`, the earlier paged engine, is legacy. It still opens existing data, with `WalEnabled` (on by default) and `SyncDiskWrites` controlling its log and flushes, but it receives no new work. Do not choose it for new data.
-
-## Storage settings
-
-| Setting | Default | Meaning |
+| Property | Default | Description |
 | --- | --- | --- |
-| `StorageMode` | `InMemory` | `InMemory`, `Lsm`, `Disk` (legacy), `Wasm` (browser playground), or `Custom` with `CustomStorageEngine`. |
-| `DiskStoragePath` | none | The database directory for `Lsm` and `Disk`. One process may open it at a time (`datavo.lock`). |
-| `LsmStrictFsync` | `true` | Flush the commit log to stable storage before acknowledging a commit. |
-| `LsmReadMode` | `Auto` | `Auto` memory-maps SSTables where supported (64-bit, not the browser); `PositionalRead` uses file reads. Memory mapping avoids a copy and a system call per read, and lets a table exceed the managed heap. |
-| `ClusteredPrimaryKeys` | `true` | New LSM tables whose primary key is one `INT` or `GUID` column store rows under that key. Decided per table at `CREATE TABLE`. |
-| `LockAcquireTimeoutMs` | `30000` | How long a lock acquisition waits before failing; `-1` waits indefinitely. Shorten it in tests that expect contention. |
-| `EnableZeroAllocCompiledUpdate` | `true` | Lets narrow compiled single-row updates patch stored bytes in place. |
-| `WalEnabled`, `SyncDiskWrites`, `WalFilePath`, `WalCheckpointThreshold`, `WalCheckpointIntervalMs` | see source | Legacy `Disk` mode only. |
+| `StorageMode` | `StorageMode.InMemory` | Storage backend: `InMemory`, `Lsm`, `Disk` (legacy), `Wasm` (browser playground), or `Custom`. |
+| `DiskStoragePath` | `null` | Directory for persisted `Lsm` and `Disk` files. Guarded by a single-process `datavo.lock`. |
+| `CustomStorageEngine` | `null` | Custom `IStorageEngine` instance when `StorageMode = StorageMode.Custom`. |
+| `WasmStorageEngine` | `null` | Browser storage engine when `StorageMode = StorageMode.Wasm`. |
+| `LockAcquireTimeoutMs` | `30000` | Maximum milliseconds to wait for a lock before failing (`-1` waits indefinitely). |
+| `WalEnabled` | `true` (`Disk`), `false` (other) | Enables WAL in legacy `Disk` mode. |
+| `SyncDiskWrites` | `false` | Forces fsync on legacy `Disk` mode writes. |
+| `WalFilePath` | `"datavo.wal"` | Legacy `Disk` WAL file name or path. |
+| `WalCheckpointThreshold` | `1000` | Legacy `Disk` WAL entry threshold before checkpointing. |
+| `WalCheckpointIntervalMs` | `1000` | Background WAL checkpoint interval (ms) for `IoSchedulerMode.GroupCommit`. |
+| `TransactionIdStateFilePath` | `"datavo.txid"` | Persisted MVCC transaction ID watermark file. |
+| `CheckpointStateFilePath` | `"datavo.ckpt"` | Persisted binary WAL checkpoint LSN watermark file. |
 
-The LSM MemTable flush threshold (32 MB) is an internal constant, not a setting.
+## LSM & I/O
 
-## Vector search settings
-
-These control how a filtered nearest-neighbour query or a distance threshold in `WHERE` uses a vector index. The defaults were chosen on the hybrid-vector benchmark; change them only after measuring.
-
-| Setting | Default | Meaning |
+| Property | Default | Description |
 | --- | --- | --- |
-| `EnableVectorPredicateFastPath` | `true` | Use the vector index for `WHERE v <=> @q < threshold` and filtered `ORDER BY` distance queries. |
-| `VectorPredicateFastPathMinRows` | `128` | Below this table size a distance predicate is evaluated without the index. |
-| `VectorPredicateFastPathCandidateMultiplier` | `3` | Multiplier from the estimated number of qualifying rows to the number of candidates requested from the index. |
-| `VectorPredicateFastPathMaxTopKRatio` | `0.6` | When the candidate request would exceed this share of the table, the predicate is evaluated by plain filtering instead. |
-| `VectorPredicateFastPathMaxTopK` | `20000` | Absolute cap on candidates requested from the index. |
-| `VectorPredicateFastPathMaxExpansionPasses` | `2` | How many times a filtered search may enlarge its candidate request before it switches to a filter-first exact scan. |
-| `VectorPredicateFastPathExpansionFactor` | `2` | Growth of the candidate request per pass. |
-| `EnableHybridOrderByAdaptiveInitialTopK` | `true` | Size the first candidate request from the filter's estimated selectivity (about `LIMIT / selectivity`). |
+| `LsmStrictFsync` | `true` | `true` flushes the LSM commit log to stable storage before acknowledging writes; `false` (Relaxed) acknowledges in OS page cache. |
+| `LsmReadMode` | `LsmReadMode.Auto` | `Auto` memory-maps SSTables on 64-bit platforms; `PositionalRead` uses standard file reads. |
+| `ClusteredPrimaryKeys` | `true` | Stores new LSM tables with single-column `INT` or `GUID` primary keys clustered under that key. |
+| `IoSchedulerMode` | `IoSchedulerMode.Off` | Disk I/O scheduler mode (`Off`, pooled positioned I/O, or `GroupCommit`). |
+| `EnableZeroAllocCompiledUpdate` | `true` | Allows eligible fixed-width single-row compiled `UPDATE`s to byte-patch stored rows in place. |
 
-HNSW graph parameters (`m`, `ef_construction`, `ef_search`, the diversity heuristic) are set per index in SQL; see [Vector Search and Indexes](/manual/sql-language/vector-search-syntax).
+The LSM MemTable flush threshold (32 MB) is an internal engine constant rather than a `DataVoConfig` property.
 
-## Security settings
+## Execution & Planner
 
-| Setting | Default | Meaning |
+### Vector & Hybrid Query Routing
+
+| Property | Default | Description |
 | --- | --- | --- |
-| `EnableAuthorization` | `false` | Enforce users, roles and grants. |
-| `Username`, `Password` (or `PasswordHash` + `PasswordSalt`), `Role`, `Roles` | empty | The principal a context opens as. |
-| `AllowAnonymousSession`, `AnonymousRole` | `true`, `ReadOnly` | What an unauthenticated session may do when authorization is on. |
-| `AuthorizationUsers` | empty | Users to provision at open. |
+| `EnableVectorPredicateFastPath` | `true` | Uses the vector index for `WHERE v <=> @q < threshold` and filtered distance `ORDER BY`. |
+| `VectorPredicateFastPathMinRows` | `128` | Minimum table row count before invoking the vector index fast path. |
+| `VectorPredicateFastPathCandidateMultiplier` | `3` | Multiplier from estimated qualifying rows to initial index candidates. |
+| `VectorPredicateFastPathMaxTopKRatio` | `0.6` | Falls back to plain filtering when candidate requests exceed this share of the table. |
+| `VectorPredicateFastPathMaxTopK` | `20000` | Hard cap on candidates requested from the vector index. |
+| `VectorPredicateFastPathMaxExpansionPasses` | `2` | Maximum candidate-expansion retries before switching to a filter-first exact scan. |
+| `VectorPredicateFastPathExpansionFactor` | `2` | Candidate growth multiplier per expansion pass. |
+| `EnableHybridOrderByAdaptiveInitialTopK` | `true` | Sizes the initial candidate request from estimated filter selectivity (`LIMIT / selectivity`). |
 
-## Planner experiments
+HNSW graph parameters (`m`, `ef_construction`, `ef_search`) are configured per index in SQL. See [Vector Search](/manual/fundamentals/vector-search).
 
-The `Volcano*` settings (`EnableVolcanoExecution` and its spill, external-sort, aggregate-partitioning and join-feedback options) control an alternative operator pipeline used for planner experiments and spill tests. It is off by default and is not used by any benchmark in this manual. Leave it off unless you are testing the planner itself.
+### Experimental Volcano & Telemetry Switches
 
-```csharp
-using var db = new DataVoContext(new DataVoConfig
-{
-    StorageMode = StorageMode.InMemory,
-    EnableVolcanoExecution = false
-});
-```
+`EnableVolcanoExecution` (default `false`) and its `Volcano*` spill, external-sort, aggregate-partitioning, and join-feedback properties control an experimental operator pipeline used for planner testing; leave `EnableVolcanoExecution = false` in production.
 
-Telemetry switches (`EnableVectorPredicateFastPathTelemetry`, `EnableHybridRoutingTelemetryCounters`, `EnableHybridRoutingPerQueryTelemetry`, `HybridRoutingTelemetrySnapshotIntervalQueries`) record which route each vector query took; the benchmarks read them.
+Telemetry flags (`EnableVectorPredicateFastPathTelemetry`, `EnableHybridRoutingTelemetryCounters`, `EnableHybridRoutingPerQueryTelemetry`, `HybridRoutingTelemetrySnapshotIntervalQueries`) record hybrid vector routing diagnostics for benchmarks.
+
+## Security & Auth
+
+| Property | Default | Description |
+| --- | --- | --- |
+| `EnableAuthorization` | `false` | Enforces users, roles, and SQL `GRANT`/`REVOKE` checks. |
+| `Username`, `Password` | `""` | Credentials for the default session principal (or supply `PasswordHash` + `PasswordSalt`). |
+| `Role`, `Roles` | `ReadWrite`, `[]` | Built-in role and custom role names assigned to the session principal. |
+| `AllowAnonymousSession` | `true` | Permits unauthenticated sessions when `EnableAuthorization` is `true`. |
+| `AnonymousRole` | `DatabaseRole.ReadOnly` | Role granted to anonymous sessions. |
+| `AuthorizationUsers` | `[]` | List of `DataVoAuthUser` principals provisioned at startup. |
+
+## See Also
+
+- [Storage Modes](/manual/fundamentals/storage-modes) — Comparing `InMemory`, `Lsm`, and legacy `Disk`
+- [LSM & Durability](/manual/fundamentals/lsm-and-durability) — `LsmStrictFsync` trade-offs and recovery guarantees
+- [ADO.NET Provider](/manual/client-interfaces/ado-net) — Connection string keys (`StorageMode`, `DataSource`, `WalEnabled`)

@@ -1,91 +1,60 @@
-# Limits
+# Limits & Unsupported Features
 
 > Source route: /manual/reference/limits
 > Source file: manual/reference/limits.md
 
-DataVo is an embedded engine, so its architectural limits are part of the product contract. Keep the database owned by one application process, validate the exact schema and query shapes you need, and maintain seed or export workflows across prerelease upgrades.
+This page documents the explicit architectural boundaries and unsupported features of DataVo `v0.4` (`0.4.0-rc.1`) so you can evaluate fit without guessing from source code or roadmap notes.
 
-The intended deployment shape is in-process embedding.
+## Architectural & Storage Limits
 
-```csharp
-using var db = new DataVoContext(new DataVoConfig
-{
-    StorageMode = StorageMode.Lsm,
-    DiskStoragePath = "./app_data",
-    LsmStrictFsync = true
-});
-```
+| Boundary | Behavior in `v0.4` (`0.4.0-rc.1`) |
+| --- | --- |
+| **Process ownership** | Single-process write ownership enforced via `datavo.lock`. Multiple contexts/connections inside one process share one engine; a second process opening the same directory fails with `DV7001_DATABASE_IN_USE`. |
+| **Deployment model** | Embedded in-process only. No wire protocol server, replication daemon, or HA clustering (`DataVo.Server` for PostgreSQL-wire GUI clients like DBeaver/DataGrip is unscheduled). |
+| **Prerelease storage format** | On-disk structures may evolve before `1.0`. Maintain seed or export/import scripts across prerelease upgrades. |
+| **Vector dimensions** | Fixed per column at `CREATE TABLE` (`VECTOR(n)`). Inserted vectors must match the declared dimension. |
+| **LSM MemTable flush size** | Fixed internal constant of 32 MB (not a `DataVoConfig` setting). |
+| **Transaction isolation** | Snapshot isolation with first-committer-wins conflict detection. Full serializable isolation and predicate-range phantom prevention are **not** provided (write skew is possible). |
+| **HNSW vector recall** | HNSW is approximate; measure recall on your own embeddings or use `USING FLAT` / `exact: true` when exact nearest neighbors are required. |
 
-Do not point multiple independent processes at the same writable database directory. DataVo enforces single-process ownership with a `datavo.lock` file and does not support writers in more than one process. Contexts and connections inside one process that open the same directory share one engine.
+## Query-Shape Performance Limits
 
-```text
-Supported:
-  one application process
-  -> one DataVoContext lifecycle
-  -> one writable database directory
+Correctness does not depend on query shape, but allocation and latency do. Queries outside the compiled/typed fast paths execute on the general dictionary evaluator, which allocates a dictionary per row read (seconds and gigabytes on million-row tables):
 
-Not supported:
-  process A -> ./shared_data
-  process B -> ./shared_data
-```
+- `SELECT DISTINCT`
+- `RIGHT`, `FULL`, and `CROSS` joins
+- Joins on text (`VARCHAR`) or `GUID` keys
+- `OR` predicates spanning two joined tables
+- Computed expressions in the `SELECT` list
+- Window functions (`RANK()`) and common table expressions (CTEs)
+- Any SQL query executed inside an explicit `BEGIN ... COMMIT` transaction
 
-Do not treat prerelease storage files as a permanent long-term archival format without export/import scripts. Keep seed data or import scripts so you can rebuild if on-disk structures evolve before 1.0.
+See [Query Planner](/manual/internals/query-planner) for how to stay on zero-allocation fast paths.
 
-```sql
-CREATE TABLE SeedUsers (
-  Id INT PRIMARY KEY,
-  Name VARCHAR(80)
-);
+## SQL `DATE` Contract
 
-INSERT INTO SeedUsers (Id, Name) VALUES (1, 'Ada');
-INSERT INTO SeedUsers (Id, Name) VALUES (2, 'Grace');
-```
+DataVo provides a calendar `DATE` type (`YYYY-MM-DD`) and has **no** `DATETIME` or `TIMESTAMP` column type:
 
-External GUI tooling is also limited today. DBeaver, DataGrip, and pgAdmin expect a client/server wire protocol and catalog metadata. DataVo is embedded and speaks no wire protocol, so those tools cannot connect. A `DataVo.Server` bridge is planned but not scheduled.
+- Store timestamps or points in time as `BIGINT` (UTC ticks or Unix milliseconds).
+- In C# models and source-generated projections, SQL `DATE` maps to `DataVo.Core.DataVoDate` across all targets, and additionally supports `System.DateOnly` on `.NET 10`.
+- `System.DateTime` properties are not mapped to SQL `DATE`.
 
-```text
-Possible future shape (unscheduled):
-  DBeaver/DataGrip/pgAdmin
-  -> PostgreSQL wire protocol subset
-  -> DataVo.Server
-  -> DataVo storage
-```
+## Unsupported Features
 
-Vector dimensions are fixed at the column level. If a table declares `VECTOR(1536)`, application code must insert vectors with that dimension.
+| Category | Not Supported in `v0.4` (`0.4.0-rc.1`) |
+| --- | --- |
+| **PostgreSQL compatibility** | Not PostgreSQL-compatible. No PostgreSQL wire protocol, no `pg_class`/`pg_attribute` system catalogs, and no PostgreSQL role catalog. |
+| **SQL clauses & expressions** | No views (`CREATE VIEW`), `INTERSECT`, `EXCEPT`, `CASE WHEN`, `CAST`, `COALESCE`, `PRAGMA`, date/math SQL functions, or window functions other than `RANK()`. |
+| **Procedural SQL** | No stored procedures, functions, or triggers. |
+| **Text collation** | Ordinal comparison only; `LIKE` is case-sensitive. |
+| **Vector operators & functions** | No `<#>` inner-product operator; no core SQL `COSINE_DISTANCE()`/`L2_DISTANCE()` functions (only `<->` L2 and `<=>` Cosine operators; function shims exist only in EF Core preview). |
+| **EF Core bridge** | No EF migrations, shadow properties, complex LINQ joins, broad `GroupBy` translation, or Native AOT support. |
+| **ADO.NET** | No `DbProviderFactory`, no connection pooling, no async cancellation via `CommandTimeout`/`Cancel()`. |
+| **WebAssembly / npm** | `DataVo.Browser` is an experimental playground runtime for documentation only; no production npm package is published. |
 
-```sql
-CREATE TABLE Documents (
-  Id INT PRIMARY KEY,
-  Embedding VECTOR(1536)
-);
-```
+## See Also
 
-The LSM engine uses a 32 MB active MemTable flush threshold internally. That is an internal engine constant, not a public tuning knob.
-
-```text
-active MemTable grows
-  -> crosses 32 MB
-  -> generation freezes
-  -> new MemTable accepts writes
-  -> background flush writes SSTable
-```
-
-## Query-shape limits
-
-Correctness does not depend on query shape, but cost does. Shapes outside the typed paths run on the general evaluator, which builds a dictionary per row read; on a million-row table that is seconds and gigabytes of allocation per query. Those shapes are: `SELECT DISTINCT`, `RIGHT`/`FULL`/`CROSS` joins, joins on text or `GUID` keys, an `OR` across two joined tables, computed expressions in the select list, window functions, common table expressions, and any query inside an explicit transaction. See [Query Planner And Fast Paths](/manual/storage-engine/query-planner-fast-paths).
-
-On the LSM engine a full scan reads every row from memory-mapped SSTables, so with data in the page cache a 1,000,000-row filtered scan takes about 35–75 ms; a cold read from disk was not measured. HNSW is approximate: its recall depends on the data, and it should be measured on your own embeddings.
-
-## Limits Summary
-
-| Feature | Status | Notes |
-| --- | --- | --- |
-| Embedded in-process deployment | Supported | No standalone server is required for normal use. |
-| Fixed vector dimensions | Supported | Dimension is declared with `VECTOR(n)`. |
-| Internal 32 MB LSM MemTable flush threshold | Supported | Present in the engine but not exposed as a public tuning setting. |
-| Multi-process writes to one database directory | Not Supported | Guarded by `datavo.lock`; do not share one writable DataVo directory across independent processes. |
-| Long-term storage format compatibility guarantee | Planned | Prerelease files may require migration or rebuild across major storage upgrades. |
-| PostgreSQL-wire clients | Planned, unscheduled | DBeaver, DataGrip, and pgAdmin require a future `DataVo.Server` bridge. |
-| Cloud/server administration model | Not Supported | No server replication daemon, backup daemon, or HA cluster system. |
-| Transaction isolation | Supported (snapshot isolation) | Snapshots are ordered by commit; conflicting writers fail first-committer-wins. Serializable isolation is not offered: write skew is possible. See [Transactions](/manual/storage-engine/transactions-acid-mvcc). |
-| Columnar HTAP scan acceleration | Supported (`InMemory` & `Lsm`) | Synchronized `InMemory` column buffers and out-of-core format-v8 `Lsm` SSTable columnar segments with zone-map chunk pruning. |
+- [SQL Compatibility](/manual/sql/compatibility) — Full SQL dialect support matrix
+- [SQL Data Types](/manual/sql/data-types) — Supported column types and C# mappings
+- [Transactions & MVCC](/manual/fundamentals/transactions-and-mvcc) — Snapshot isolation contract and write-conflict behavior
+- [Query Planner](/manual/internals/query-planner) — Fast paths vs. general evaluator

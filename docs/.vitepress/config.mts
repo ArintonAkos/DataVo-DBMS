@@ -25,7 +25,7 @@ export default withMermaid(
     title: "DataVo",
     base: "/DataVo-DBMS/",
     description:
-      "C#-native embedded database documentation for DataVo v0.2.0-rc.3.",
+      "C#-native embedded database documentation for DataVo v0.4 (0.4.0-rc.1).",
     cleanUrls: true,
     head,
     srcExclude: [
@@ -53,112 +53,94 @@ export default withMermaid(
       },
       siteTitle: "DataVo",
       nav: [
-        { text: "Home", link: "/" },
-        { text: "Get Started", link: "/manual/getting-started/installation" },
-        { text: "Manual", link: "/manual/preface/what-is-datavo" },
-        { text: "Quickstart", link: "/manual/tutorial/quickstart" },
-        { text: "SQL", link: "/manual/sql-language/supported-sql" },
-        { text: "Benchmarks", link: "/manual/performance/benchmarks" },
+        { text: "Get Started", link: "/manual/getting-started/quickstart" },
+        { text: "Fundamentals", link: "/manual/fundamentals/storage-modes" },
+        { text: "Client APIs", link: "/manual/client-interfaces/datavo-context-api" },
+        { text: "SQL Reference", link: "/manual/sql/compatibility" },
         { text: "Blog", link: "/blog/" },
-        { text: "AI Access", link: "/manual/reference/ai-access" },
       ],
       sidebar: {
         "/manual/": [
-        {
-          text: "Preface",
-          collapsed: false,
-          items: [
-            { text: "What Is DataVo?", link: "/manual/preface/what-is-datavo" },
-            { text: "Project Status & Scope", link: "/manual/preface/project-status" },
-            { text: "Release Scope & Boundaries", link: "/manual/preface/alpha-scope" },
-            { text: "Roadmap", link: "/manual/preface/roadmap" },
-          ],
-        },
-        {
-          text: "Getting Started",
-          collapsed: false,
-          items: [
-            { text: "Installation & Packages", link: "/manual/getting-started/installation" },
-            { text: "Choosing an Interface", link: "/manual/getting-started/choosing-an-interface" },
-          ],
-        },
-        {
-          text: "Tutorial",
-          collapsed: true,
-          items: [
-            { text: "Quickstart", link: "/manual/tutorial/quickstart" },
-            { text: "Using DataVoContext", link: "/manual/tutorial/datavo-context" },
-            { text: "ADO.NET & Dapper", link: "/manual/tutorial/ado-net-and-dapper" },
-            { text: "Entity Framework Example", link: "/manual/tutorial/entity-framework-example" },
-            { text: "Vector Search Example", link: "/manual/tutorial/vector-search-example" },
-          ],
-        },
-        {
-          text: "SQL Language",
-          collapsed: true,
-          items: [
-            { text: "Supported SQL", link: "/manual/sql-language/supported-sql" },
-            { text: "CREATE TABLE", link: "/manual/sql-language/create-table" },
-            { text: "Data Manipulation", link: "/manual/sql-language/data-manipulation" },
-            { text: "Queries", link: "/manual/sql-language/queries" },
-            { text: "Vector Search and Indexes", link: "/manual/sql-language/vector-search-syntax" },
-            { text: "SQL Compatibility Matrix", link: "/manual/sql-language/sql-compatibility" },
-          ],
-        },
-        {
-          text: "Storage Engine",
-          collapsed: true,
-          items: [
-            { text: "Storage Modes", link: "/manual/storage-engine/storage-modes" },
-            { text: "LSM Mode", link: "/manual/storage-engine/lsm-mode" },
-            { text: "WAL And Durability", link: "/manual/storage-engine/wal-and-durability" },
-            { text: "Transactions and MVCC", link: "/manual/storage-engine/transactions-acid-mvcc" },
-            { text: "Query Planner And Fast Paths", link: "/manual/storage-engine/query-planner-fast-paths" },
-          ],
-        },
-        {
-          text: "Client Interfaces",
-          collapsed: true,
-          items: [
-            { text: "Connecting to DataVo", link: "/manual/client-interfaces/datavo-context-api" },
-            { text: "ADO.NET Provider", link: "/manual/client-interfaces/ado-net" },
-            { text: "Dapper Support", link: "/manual/client-interfaces/dapper" },
-            { text: "Entity Framework Support", link: "/manual/client-interfaces/entity-framework" },
-            { text: "Roslyn Source Generators", link: "/manual/client-interfaces/source-generators" },
-            { text: "Streaming Queries", link: "/manual/client-interfaces/streaming-queries" },
-            { text: "Live Reactive Views (Z-set IVM)", link: "/manual/client-interfaces/reactive-views" },
-            { text: "Native AOT", link: "/manual/client-interfaces/native-aot" },
-          ],
-        },
-        {
-          text: "Internals",
-          collapsed: true,
-          items: [
-            { text: "Zero-Allocation Rows", link: "/manual/internals/zero-allocation-rows" },
-            { text: "Compiled Scan Kernels", link: "/manual/internals/compiled-scan-kernels" },
-          ],
-        },
-        {
-          text: "Performance",
-          collapsed: true,
-          items: [
-            { text: "Benchmark Results", link: "/manual/performance/benchmarks" },
-            { text: "DataVo vs SQLite: When Each Wins", link: "/manual/performance/datavo-vs-sqlite" },
-            { text: "Benchmark Methodology", link: "/manual/performance/methodology" },
-            { text: "Reproducing Benchmarks", link: "/manual/performance/reproducing-benchmarks" },
-          ],
-        },
-        {
-          text: "Reference",
-          collapsed: true,
-          items: [
-            { text: "Configuration Reference", link: "/manual/reference/configuration" },
-            { text: "Limits", link: "/manual/reference/limits" },
-            { text: "Unsupported Features", link: "/manual/reference/unsupported-features" },
-            { text: "Error Handling", link: "/manual/reference/error-handling" },
-            { text: "AI Access And MCP", link: "/manual/reference/ai-access" },
-          ],
-        },
+          {
+            text: "Getting Started",
+            collapsed: false,
+            items: [
+              { text: "Introduction", link: "/manual/getting-started/introduction" },
+              { text: "Installation & Packages", link: "/manual/getting-started/installation" },
+              { text: "Quickstart", link: "/manual/getting-started/quickstart" },
+              { text: "Choosing an Interface", link: "/manual/getting-started/choosing-an-interface" },
+              { text: "Status & Roadmap", link: "/manual/getting-started/roadmap" },
+            ],
+          },
+          {
+            text: "Fundamentals",
+            collapsed: false,
+            items: [
+              { text: "Storage Modes", link: "/manual/fundamentals/storage-modes" },
+              { text: "LSM & Durability", link: "/manual/fundamentals/lsm-and-durability" },
+              { text: "Transactions & MVCC", link: "/manual/fundamentals/transactions-and-mvcc" },
+              { text: "Vector Search", link: "/manual/fundamentals/vector-search" },
+              { text: "Streaming Queries", link: "/manual/fundamentals/streaming-queries" },
+              { text: "Live Reactive Views (Z-Set IVM)", link: "/manual/fundamentals/reactive-views" },
+              { text: "DataVo-Sync", link: "/manual/fundamentals/datavo-sync" },
+            ],
+          },
+          {
+            text: "Client Interfaces",
+            collapsed: true,
+            items: [
+              { text: "DataVoContext API", link: "/manual/client-interfaces/datavo-context-api" },
+              { text: "Roslyn Source Generators", link: "/manual/client-interfaces/source-generators" },
+              { text: "Compiled LINQ", link: "/manual/client-interfaces/compiled-linq" },
+              { text: "Native AOT", link: "/manual/client-interfaces/native-aot" },
+              { text: "ADO.NET Provider", link: "/manual/client-interfaces/ado-net" },
+              { text: "Dapper", link: "/manual/client-interfaces/dapper" },
+              { text: "Entity Framework Core", link: "/manual/client-interfaces/entity-framework" },
+            ],
+          },
+          {
+            text: "SQL Reference",
+            collapsed: true,
+            items: [
+              { text: "SQL Compatibility", link: "/manual/sql/compatibility" },
+              { text: "Data Types", link: "/manual/sql/data-types" },
+              {
+                text: "Statements",
+                collapsed: false,
+                items: [
+                  { text: "SELECT", link: "/manual/sql/statements/select" },
+                  { text: "DML (INSERT, UPDATE, DELETE)", link: "/manual/sql/statements/dml" },
+                  { text: "DDL (CREATE, ALTER, DROP)", link: "/manual/sql/statements/ddl" },
+                  { text: "Indexes", link: "/manual/sql/statements/indexes" },
+                  { text: "Transactions & Savepoints", link: "/manual/sql/statements/transactions" },
+                  { text: "Admin & Security", link: "/manual/sql/statements/admin-and-security" },
+                ],
+              },
+              { text: "Built-in Functions", link: "/manual/sql/functions" },
+            ],
+          },
+          {
+            text: "Internals & Performance",
+            collapsed: true,
+            items: [
+              { text: "Query Planner & Fast Paths", link: "/manual/internals/query-planner" },
+              { text: "Zero-Allocation Rows", link: "/manual/internals/zero-allocation-rows" },
+              { text: "Compiled Scan Kernels", link: "/manual/internals/compiled-scan-kernels" },
+              { text: "DataVo vs SQLite", link: "/manual/performance/datavo-vs-sqlite" },
+              { text: "Benchmarks", link: "/manual/performance/benchmarks" },
+              { text: "Reproducing Benchmarks", link: "/manual/performance/reproducing-benchmarks" },
+            ],
+          },
+          {
+            text: "Reference",
+            collapsed: true,
+            items: [
+              { text: "Configuration", link: "/manual/reference/configuration" },
+              { text: "Error Handling", link: "/manual/reference/error-handling" },
+              { text: "Limits & Unsupported Features", link: "/manual/reference/limits" },
+              { text: "AI Access & MCP", link: "/manual/reference/ai-access" },
+            ],
+          },
         ],
         "/blog/": [
           {

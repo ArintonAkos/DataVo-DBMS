@@ -1,82 +1,72 @@
+---
+title: Zero-Allocation Row Model
+description: Stream table rows without managed heap allocations using RowRef, a stack-only readonly ref struct over stored byte spans.
+---
+
 # Zero-Allocation Row Model
 
-DataVo can read rows without creating managed objects for them. The mechanism is `RowRef`, a `readonly ref struct` that points at a row's stored bytes, and `RowRefStream`, which feeds `RowRef` values to a `foreach` loop one page at a time. Once a thread has streamed a table of a given shape, a full pass allocates zero bytes on the managed heap.
-
-This page explains what that means, how to use it, and where it stops applying.
-
-## The idea
-
-A conventional database API materializes each row: a dictionary, an object array or a POCO per row. With 200,000 rows that is 200,000 allocations, and the garbage collector pays for them later.
-
-`RowRef` skips that step. It wraps a `ReadOnlySpan<byte>` over the stored row and decodes a cell only when you ask for it.
-
-```mermaid
-flowchart LR
-  Storage["Stored row bytes<br/>(page buffer)"] -->|"byte span view"| RowRef["RowRef<br/>(ref struct, stack only)"]
-  RowRef -->|"GetInt32(col)"| Cell1["int"]
-  RowRef -->|"GetFloat(col)"| Cell2["float"]
-  RowRef -->|"GetStringSpan(col)"| Cell3["char span view"]
-```
-
-Because `RowRef` is a `ref struct`, the compiler guarantees it lives on the stack. It cannot be boxed, stored in a field of a class, captured by a lambda or used across an `await`. That restriction is what makes it safe to point at memory that the engine reuses for the next page.
-
-## Use it
+DataVo can scan entire tables without allocating a single managed object per row. `RowRef` is a `readonly ref struct` that wraps a `ReadOnlySpan<byte>` over a row's stored bytes, and `RowRefStream` yields `RowRef` values to a `foreach` loop in 1,024-row pages. Once a thread has warmed up on a table's layout, a full scan allocates **0 bytes** on the managed heap.
 
 ```csharp
 using DataVo.Core;
 
 RowRefStream players = db.Table<Player>().StreamRef();
 
-// Look column positions up once, before the loop: this call allocates.
-int health = players.GetOrdinal("Health");
+// Resolve column ordinals once before the loop (ordinal lookup allocates once)
+int scoreCol = players.GetOrdinal("Score");
 
-float total = 0;
+long totalScore = 0;
 foreach (RowRef row in players)
 {
-    if (!row.IsNull(health))
+    if (!row.IsNull(scoreCol))
     {
-        total += row.GetFloat(health);
+        totalScore += row.GetInt32(scoreCol);
     }
 }
 ```
 
-The same stream is available without a model type: `db.StreamRef("Players")`.
+The same zero-allocation stream is available without a model type via `db.StreamRef("players")`.
 
-## Rules for `RowRef`
+## How `RowRef` Works
 
-- **A row is valid only inside the iteration that produced it.** The stream reuses its memory for the next page. Copy any value you need to keep.
-- **Spans follow the same rule.** `GetStringSpan` and `GetStringUtf8` return views into the row; copy the text out (for example `new string(span)`) if you need it after the loop body.
-- **Accessors require the column's own type**, with lossless widening (`INT` through `GetInt64`, `FLOAT` through `GetDouble`). Any other type throws `InvalidCastException`.
-- **A NULL cell throws `InvalidOperationException`.** Check `IsNull` first on nullable columns.
-- **Column indexes follow table order**, which is the order of `CREATE TABLE` or of the properties of a `[DataVoTable]` model.
+Conventional database drivers materialize a dictionary, `object[]`, or POCO for every row—200,000 rows means 200,000 heap allocations that the GC must later collect. `RowRef` avoids materialization entirely by decoding only the cells you read directly from the storage buffer.
 
-## How a pass behaves
+<div class="sketch-diagram">
+  <img class="light-only" src="/manual/fig-06-zero-alloc-rowref-light.svg" alt="FlatRowStore packed chunk copied in 1,024-row pages into a stack-only RowRef ref struct for zero-allocation column reads" />
+  <img class="dark-only" src="/manual/fig-06-zero-alloc-rowref-dark.svg" alt="FlatRowStore packed chunk copied in 1,024-row pages into a stack-only RowRef ref struct for zero-allocation column reads" />
+</div>
 
-- Rows are read 1,024 at a time. The read lock is held only while a page is copied out of storage, so a slow loop body never blocks writers.
-- A pass sees every row that existed for the whole pass exactly once. A row written or deleted during the pass may or may not be seen.
-- A schema change to the table during a pass stops it with `InvalidOperationException`.
-- Inside an explicit transaction the stream reads through the query engine so it sees the transaction's own writes. **That path allocates.**
+Because `RowRef` is a `ref struct`, the C# compiler enforces that it lives strictly on the stack—it cannot be boxed, stored on a class field, captured by a lambda, or held across an `await`. That compile-time guarantee makes it memory-safe for `RowRefStream` to reuse the same page buffer for the next 1,024 rows.
 
-## What "zero allocation" covers
+## Rules & Safety Guarantees
 
-The claim is deliberately narrow, and the benchmarks are consistent with it:
+- **Iteration-scoped lifetime:** A `RowRef` is valid only inside the `foreach` iteration that produced it. Copy any value you need to retain past the loop body.
+- **Span views follow the same lifetime:** `GetStringSpan` and `GetStringUtf8` return views directly into the row buffer; call `new string(span)` or copy the bytes if you need the text later.
+- **Strict typing with lossless widening:** Accessors must match the column's declared type (with lossless widening: `INT` via `GetInt64`, `FLOAT` via `GetDouble`). Mismatched types throw `InvalidCastException`.
+- **Explicit NULL checks:** Reading a NULL cell throws `InvalidOperationException`. Call `row.IsNull(ordinal)` first on nullable columns.
+- **Table column order:** Ordinals follow `CREATE TABLE` order or the property declaration order on a `[DataVoTable]` model.
 
-| Operation | Allocation |
-| --- | --- |
-| Full `RowRefStream` pass, after warm-up on that thread | 0 B |
-| Compiled `Count`, `Sum`, `Min`, `Max` over a filtered scan of 200,000 rows (see [Compiled Scan Kernels](/manual/internals/compiled-scan-kernels)) | 0 B per query, measured with BenchmarkDotNet's `MemoryDiagnoser` |
-| Point lookup into a `Player` on LSM storage | 144 B (the row itself) |
-| Point lookup into a `Player` on in-memory storage | 1,008 B, more than SQLite's 608 B |
-| A `RowRefStream` pass inside a transaction | Allocates |
+## Concurrency & Page Isolation
 
-The numbers come from the [Benchmark Results](/manual/performance/benchmarks). Zero allocation applies to scans over `RowRef`, not to every API: building a `Player` per row allocates a `Player` per row.
+- **Non-blocking 1,024-row pages:** The engine acquires a short read lock only while copying a 1,024-row page into the stream buffer, then releases it before your loop body executes—slow consumers never stall writers.
+- **Pass semantics:** Every row that exists for the entire pass is visited once; concurrent inserts or deletes may or may not appear. A concurrent schema change aborts the pass with `InvalidOperationException`.
+- **Inside explicit transactions:** `StreamRef()` falls back to the query engine so it observes the transaction's own uncommitted writes. **That transactional path allocates.**
 
-## Native AOT
+## What "Zero Allocation" Covers
 
-Nothing here uses reflection or code generation at run time. `DataVo.Core` builds with `IsAotCompatible` enabled and the IL trim and AOT diagnostics treated as errors, so a regression fails the build. See [Native AOT Deployment](/manual/client-interfaces/native-aot).
+Zero allocation applies specifically to `RowRefStream` scans and compiled scan-kernel aggregates—materializing a `Player` class instance still allocates the `Player` object itself.
 
-## Related
+| Operation | Managed Allocation |
+| --- | ---: |
+| Full `RowRefStream` pass (after thread warm-up) | **0 B** |
+| Compiled LINQ `Count`/`Sum`/`Min`/`Max` over 200,000 rows | **0 B** |
+| Compact `InMemory` PK lookup into `Player` (`FlatRowStore`) | **56 B** (the `Player` object itself) |
+| `Lsm` PK lookup into `Player` | **144 B** |
+| `RowRefStream` pass inside an explicit transaction | Allocates |
 
-- [Compiled Scan Kernels](/manual/internals/compiled-scan-kernels)
-- [Query Planner & Fast Paths](/manual/storage-engine/query-planner-fast-paths)
-- [Compiled LINQ (Source Generators)](/manual/client-interfaces/source-generators)
+Nothing in `RowRef` or `RowRefStream` uses runtime reflection or `System.Reflection.Emit`; `DataVo.Core` compiles cleanly with `IsAotCompatible` and zero trim/AOT warnings.
+
+## See Also
+- [Streaming Queries](/manual/fundamentals/streaming-queries) — Comparing `Execute`, `StreamQuery`, and `StreamRef`
+- [Compiled Scan Kernels](/manual/internals/compiled-scan-kernels) — Build-time LINQ kernels that run over stored bytes with 0 B allocation
+- [Native AOT Deployment](/manual/client-interfaces/native-aot) — Publishing trimmed Native AOT binaries
