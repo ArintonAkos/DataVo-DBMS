@@ -17,7 +17,7 @@ var result = stmt.Execute(new DataVoQueryParameter("r", "EU"), new DataVoQueryPa
 
 ## Dispatch Cascade
 
-Every `SELECT` is offered to the fast paths in order. A fast path either returns the exact same rows as the general evaluator—in the same order—or declines cleanly; declining is never an error.
+Every `SELECT` is offered to the fast paths in order. A fast path either returns the exact same rows as the general evaluator (in the same order) or declines cleanly; declining is never an error.
 
 <div class="sketch-diagram">
   <img class="light-only" src="/manual/fig-05-planner-fast-paths-light.svg" alt="Query planner dispatch cascade trying Typed Single-Table, Typed Join, and Hybrid Vector paths before the General Evaluator fallback" />
@@ -68,6 +68,6 @@ What the planner does **not** do:
 - It does not use secondary indexes to satisfy `ORDER BY` or non-counting `GROUP BY` shapes.
 
 ## See Also
-- [Zero-Allocation Row Model](/manual/internals/zero-allocation-rows) — Stack-only `RowRef` scans over stored bytes
-- [Compiled Scan Kernels](/manual/internals/compiled-scan-kernels) — How Roslyn interceptors compile LINQ predicates into storage loops
-- [DataVo vs SQLite](/manual/performance/datavo-vs-sqlite) — Measured latency across 28 SQL shapes and 5 hybrid vector queries
+- [Zero-Allocation Row Model](/manual/internals/zero-allocation-rows): Stack-only `RowRef` scans over stored bytes
+- [Compiled Scan Kernels](/manual/internals/compiled-scan-kernels): How Roslyn interceptors compile LINQ predicates into storage loops
+- [DataVo vs SQLite](/manual/performance/datavo-vs-sqlite): Measured latency across 28 SQL shapes and 5 hybrid vector queries

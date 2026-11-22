@@ -27,7 +27,7 @@ features:
     details: Native VECTOR(n) columns with FLAT and HNSW indexes plus pull-drain Z-set incremental view maintenance over SQL and LINQ.
     link: /manual/fundamentals/vector-search
   - title: Roslyn AOT & Compiled LINQ
-    details: DataVo.Generators compiles DataVoTable<T> lambdas and [DataVoQuery] methods at build time — zero EF Core dependency, Native AOT clean.
+    details: DataVo.Generators compiles DataVoTable<T> lambdas and [DataVoQuery] methods at build time, with no EF Core dependency and full Native AOT support.
     link: /manual/client-interfaces/source-generators
 ---
 
@@ -35,8 +35,8 @@ DataVo is a managed C# embedded database engine that runs directly inside your `
 
 ## Start Here
 
-- [Introduction](/manual/getting-started/introduction) — Architecture overview and choose-your-path guide.
-- [Quickstart](/manual/getting-started/quickstart) — Create a database, insert rows, and query in 60 seconds.
-- [Choosing an Interface](/manual/getting-started/choosing-an-interface) — Compare `DataVoContext`, Compiled LINQ, ADO.NET, Dapper, and EF Core.
-- [DataVo vs SQLite](/manual/performance/datavo-vs-sqlite) — Oracle-verified benchmarks across 28 SQL shapes and filtered vector search.
-- [Status & Roadmap](/manual/getting-started/roadmap) — Release candidate scope, durability guarantees, and the v0.5 plan.
+- [Introduction](/manual/getting-started/introduction): Architecture overview and choose-your-path guide.
+- [Quickstart](/manual/getting-started/quickstart): Create a database, insert rows, and query in 60 seconds.
+- [Choosing an Interface](/manual/getting-started/choosing-an-interface): Compare `DataVoContext`, Compiled LINQ, ADO.NET, Dapper, and EF Core.
+- [DataVo vs SQLite](/manual/performance/datavo-vs-sqlite): Oracle-verified benchmarks across 28 SQL shapes and filtered vector search.
+- [Status & Roadmap](/manual/getting-started/roadmap): Release candidate scope, durability guarantees, and the v0.5 plan.

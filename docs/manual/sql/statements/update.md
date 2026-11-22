@@ -108,9 +108,7 @@ SET Score = 0;
 
 ## See Also
 
-- [INSERT](/manual/sql/statements/insert) — Adding new rows to a table
-- [DELETE](/manual/sql/statements/delete) — Removing rows and compacting storage with `VACUUM`
-- [SELECT](/manual/sql/statements/select) — Querying updated rows and `WHERE` predicate syntax
-- [Indexes](/manual/sql/statements/indexes) — How B-Tree, `HNSW`, `FLAT`, and `COLUMNAR` indexes behave on writes
-- [Transactions](/manual/sql/statements/transactions) — Atomic multi-statement updates with `BEGIN`, `SAVEPOINT`, `COMMIT`, and `ROLLBACK`
-- [Transactions & MVCC](/manual/fundamentals/transactions-and-mvcc) — Snapshot isolation and write-conflict rules
+- [INSERT](/manual/sql/statements/insert): Adding new rows to a table
+- [DELETE](/manual/sql/statements/delete): Removing rows and compacting storage with `VACUUM`
+- [SELECT](/manual/sql/statements/select): Querying updated rows and `WHERE` predicate syntax
+- [Transactions](/manual/sql/statements/transactions): Atomic multi-statement updates with `BEGIN`, `SAVEPOINT`, `COMMIT`, and `ROLLBACK`

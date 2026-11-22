@@ -104,9 +104,7 @@ The default `Lsm` storage mode compacts deleted keys automatically during backgr
 
 ## See Also
 
-- [INSERT](/manual/sql/statements/insert) — Adding new rows to a table
-- [UPDATE](/manual/sql/statements/update) — Modifying existing rows
-- [CREATE TABLE](/manual/sql/statements/create-table) — Configuring `ON DELETE CASCADE` and `ON DELETE RESTRICT` foreign keys
-- [Transactions](/manual/sql/statements/transactions) — Using `BEGIN`, `SAVEPOINT`, `ROLLBACK TO SAVEPOINT`, and `COMMIT`
-- [Transactions & MVCC](/manual/fundamentals/transactions-and-mvcc) — How `TransactionContext` buffers uncommitted writes and deletes
-- [ALTER & DROP](/manual/sql/statements/alter-and-drop) — Dropping entire tables with `DROP TABLE`
+- [INSERT](/manual/sql/statements/insert): Adding new rows to a table
+- [UPDATE](/manual/sql/statements/update): Modifying existing rows
+- [CREATE TABLE](/manual/sql/statements/create-table): Configuring `ON DELETE CASCADE` and `ON DELETE RESTRICT` foreign keys
+- [Transactions](/manual/sql/statements/transactions): Using `BEGIN`, `SAVEPOINT`, `ROLLBACK TO SAVEPOINT`, and `COMMIT`

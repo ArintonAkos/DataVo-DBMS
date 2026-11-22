@@ -40,7 +40,7 @@ CREATE INDEX <index_name> ON <table_name> (<column_name> [, <column_name>, ...])
 | `BTREE` (default) | `USING BTREE` (or omit `USING`) | Single or composite scalar columns | Equality lookups, range scans, selective join probes, and single-key integer `GROUP BY COUNT`. |
 | `HNSW` | `USING HNSW [WITH (...)]` | Single `VECTOR(n)` column | Fast approximate nearest-neighbor (ANN) search on medium and large embedding tables. |
 | `FLAT` | `USING FLAT [WITH (metric = ...)]` | Single `VECTOR(n)` column | Exact exhaustive vector search on small tables and recall benchmarks. |
-| `COLUMNAR` | `USING COLUMNAR` | Numeric (`INT`, `BIGINT`, `FLOAT`, `DOUBLE`), `BIT`, and `DATE` columns | High-speed `COUNT`, `SUM`, `AVG`, `MIN`, and `MAX` aggregations without decoding full rows. |
+| `COLUMNAR` | `USING COLUMNAR` | Numeric (`INT`, `BIGINT`, `FLOAT`, `DOUBLE`), `BIT`, and `DATE` columns | Vectorized `COUNT`, `SUM`, `AVG`, `MIN`, and `MAX` aggregations without decoding full rows. |
 
 ## Scalar B-Tree Indexes (`USING BTREE`)
 
@@ -97,7 +97,7 @@ Passing HNSW graph options (`m`, `ef_construction`, `ef_search`, `enable_diversi
 
 ### Filtered Vector Search Behavior
 
-For hybrid queries combining `WHERE` predicates with `ORDER BY embedding <=> @q LIMIT k` (or `<->`), DataVo automatically widens the candidate beam and switches to an exact SIMD scan when graph traversal would cost more than scanning stored vectors—ensuring filtered `LIMIT k` queries return all `k` matching rows whenever enough rows qualify.
+For hybrid queries combining `WHERE` predicates with `ORDER BY embedding <=> @q LIMIT k` (or `<->`), DataVo automatically widens the candidate beam and switches to an exact SIMD scan when graph traversal would cost more than scanning stored vectors, ensuring filtered `LIMIT k` queries return all `k` matching rows whenever enough rows qualify.
 
 ## Columnar Indexes (`USING COLUMNAR`)
 
@@ -137,8 +137,7 @@ DROP INDEX ix_players_score ON players;
 
 ## See Also
 
-- [ALTER TABLE & DROP](/manual/sql/statements/alter-and-drop) — Dropping indexes (`DROP INDEX ... ON <table>`) and altering indexed columns
-- [Vector Search](/manual/fundamentals/vector-search) — End-to-end guide to embeddings, `<=>` / `<->` distance operators, and hybrid vector queries
-- [Query Planner](/manual/internals/query-planner) — How DataVo routes queries to B-Tree, HNSW, FLAT, and Columnar fast paths
-- [EXPLAIN](/manual/sql/statements/explain) — Inspecting logical and physical execution plans
-- [Data Types](/manual/sql/data-types) — Supported scalar and `VECTOR(n)` column types
+- [ALTER TABLE & DROP](/manual/sql/statements/alter-and-drop): Dropping indexes (`DROP INDEX ... ON <table>`) and altering indexed columns
+- [Vector Search](/manual/fundamentals/vector-search): Embeddings, `<=>` / `<->` distance operators, and hybrid vector queries
+- [Query Planner](/manual/internals/query-planner): How DataVo routes queries to B-Tree, HNSW, FLAT, and Columnar fast paths
+- [EXPLAIN](/manual/sql/statements/explain): Inspecting logical and physical execution plans

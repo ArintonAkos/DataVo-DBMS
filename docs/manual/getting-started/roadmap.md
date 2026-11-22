@@ -43,21 +43,21 @@ The current release on NuGet is **0.4.0-rc.1 (release candidate, 17 November 202
 
 ## Milestone History & v0.5 Plan
 
-### v0.2 — Embedded Engine Baseline
+### v0.2: Embedded Engine Baseline
 - LSM storage with WAL, arena MemTables, background SSTable flushes/compaction, and clustered `INT`/`GUID` primary keys.
 - Native AOT compliance (`IL2026`/`IL3050` as errors), zero-alloc `RowRef` scans, `VECTOR(n)` with `HNSW`/`FLAT`, and NuGet packaging.
 
-### v0.3 — Columnar Indexes & Compact Rows *(shipped in `0.4.0-rc.1`)*
+### v0.3: Columnar Indexes & Compact Rows *(shipped in `0.4.0-rc.1`)*
 - `[Columnar]` / `USING COLUMNAR` indexes with SIMD-accelerated single-table aggregates.
 - Packed `FlatRowStore` in-memory layout (49.2 B/row in benchmarks, 52.1 ns PK lookup).
 
-### v0.4 — Columnar SSTables, Correctness & Typed Execution *(published as `0.4.0-rc.1`)*
+### v0.4: Columnar SSTables, Correctness & Typed Execution *(published as `0.4.0-rc.1`)*
 - **Out-of-core columnar SSTables (format v8):** 4,096-row segments with NULL/NaN masks, min/max zone maps, and incremental shadow/delete vectors.
 - **Oracle-verified correctness:** Fixed 5 cross-engine oracle bugs (`B1`–`B5`), `WHERE ... HAVING` without `GROUP BY`, `BIT` predicate binding, and culture-invariant `DOUBLE` lookups.
 - **Typed execution:** `OR`/`LIKE` fast paths, integer-key hash joins, index-driven joins, dense bit-set anti-joins, unboxed `GROUP BY`, UTF-8 byte matching, and in-place top-k.
 - **Vector search:** HNSW diversity heuristic on by default (100% recall@10 on clustered data), cost-based exact scan fallback, SQL `WITH (...)` HNSW parameters, and pre-optimized SIMD kernels.
 
-### v0.5 — Native Interop & Client Ergonomics *(planned)*
+### v0.5: Native Interop & Client Ergonomics *(planned)*
 - **Track A (Native Interop):** Native AOT C ABI (`dv_open`, `dv_exec`, `dv_prepare`) for C/Python/Rust/Go, zero-copy Apache Arrow C Data Interface export from columnar buffers/SSTables, and a reference Python binding.
 - **Track B (Client Applications):**
   - *Done:* Build-time compiled `OrderBy`/`ThenBy`, `Skip`/`Take`, `Select` projections, and single-table `ExecuteUpdate`/`ExecuteDelete` in `DataVo.Generators`.
@@ -78,6 +78,6 @@ Unity is an **evaluation target**, not a supported runtime. The public `DataVo.C
 
 ## See Also
 
-- [Limits & Unsupported Features](/manual/reference/limits) — Exact engine limits and unsupported SQL/API features.
-- [DataVo vs SQLite](/manual/performance/datavo-vs-sqlite) — v0.4 benchmark findings and correctness notes.
-- [LSM & Durability](/manual/fundamentals/lsm-and-durability) — WAL fsync modes and crash recovery guarantees.
+- [Limits & Unsupported Features](/manual/reference/limits): Exact engine limits and unsupported SQL/API features.
+- [DataVo vs SQLite](/manual/performance/datavo-vs-sqlite): v0.4 benchmark findings and correctness notes.
+- [LSM & Durability](/manual/fundamentals/lsm-and-durability): WAL fsync modes and crash recovery guarantees.

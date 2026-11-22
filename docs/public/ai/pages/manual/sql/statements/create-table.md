@@ -62,7 +62,7 @@ CREATE TABLE IF NOT EXISTS employees (
 
 ## Primary Keys
 
-Each table may declare at most one `PRIMARY KEY`—either inline on a single column or as a table-level constraint. Declaring both a column-level and a table-level `PRIMARY KEY` on the same table throws a `ParserException`.
+Each table may declare at most one `PRIMARY KEY`, either inline on a single column or as a table-level constraint. Declaring both a column-level and a table-level `PRIMARY KEY` on the same table throws a `ParserException`.
 
 - **Single-column `INT` or `GUID` primary keys** are clustered on the `Lsm` storage engine, enabling fast key seeks and range scans.
 - **Composite primary keys** are declared at the table level:
@@ -163,9 +163,7 @@ Multi-column `UNIQUE (c1, c2)` constraints, expression-based `DEFAULT` clauses, 
 
 ## See Also
 
-- [Data Types](/manual/sql/data-types) — Complete list of column types, aliases, and `.NET` CLR mappings
-- [ALTER TABLE & DROP](/manual/sql/statements/alter-and-drop) — Adding, modifying, and dropping columns or tables
-- [CREATE INDEX](/manual/sql/statements/indexes) — Creating `BTREE`, `HNSW`, `FLAT`, and `COLUMNAR` indexes
-- [INSERT](/manual/sql/statements/insert) — Populating tables and triggering constraint checks
-- [Vector Search](/manual/fundamentals/vector-search) — Indexing and querying `VECTOR(n)` columns
-- [SQL Compatibility](/manual/sql/compatibility) — Full dialect comparison against SQLite and PostgreSQL
+- [Data Types](/manual/sql/data-types): Column types, aliases, and `.NET` CLR mappings
+- [ALTER TABLE & DROP](/manual/sql/statements/alter-and-drop): Adding, modifying, and dropping columns or tables
+- [CREATE INDEX](/manual/sql/statements/indexes): Creating `BTREE`, `HNSW`, `FLAT`, and `COLUMNAR` indexes
+- [INSERT](/manual/sql/statements/insert): Populating tables and triggering constraint checks

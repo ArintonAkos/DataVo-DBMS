@@ -23,7 +23,7 @@ int totalScore = db.Table<Player>()
 1. **Analyze:** The incremental Roslyn generator locates `DataVoTable<T>` query chains and validates static lambdas containing comparisons, boolean checks, null tests, `&&`, `||`, and parentheses.
 2. **Emit interceptor:** For each qualifying call site, the generator emits an interceptor in the `DataVo.Generated` namespace marked with `[InterceptsLocation]`, routing that exact call to generated C# with zero runtime reflection.
 3. **Specialize the condition struct:** When the predicate references only unindexed fixed-width columns (`int`, `long`, `float`, `double`, `bool`, `Guid`, `DataVoDate`, `DateOnly`), the generator emits a `struct` implementing the engine's predicate interface.
-4. **Inline into the storage loop:** Because the storage scan is generic over the condition struct across `InMemory`, `Lsm`, and `Disk`, the JIT / Native AOT compiler inlines the predicate directly into the row loop—no virtual dispatch or delegate call per row.
+4. **Inline into the storage loop:** Because the storage scan is generic over the condition struct across `InMemory`, `Lsm`, and `Disk`, the JIT / Native AOT compiler inlines the predicate directly into the row loop, with no virtual dispatch or delegate call per row.
 
 ## Fixed-Offset Byte Evaluation
 
@@ -41,7 +41,7 @@ When every column up to the last column referenced by the predicate has a fixed 
 | `Sum(selector)` | Yes (single non-nullable `int`, `long`, `float`, `double` column) | Accumulates in registers; integer overflow throws `OverflowException`. |
 | `Min(selector)`, `Max(selector)` | Yes (single `int`, `long`, `float`, `double`, `DataVoDate`, `DateOnly` column) | Skips `NULL`; `NaN` orders below all numbers. |
 
-When target columns are also marked `[Columnar]`, the kernel upgrades automatically to SIMD columnar chunk evaluation—achieving **27.5–90.1 µs** over 200,000 rows with **0 B allocated** (see [Benchmark Results](/manual/performance/benchmarks)).
+When target columns are also marked `[Columnar]`, the kernel upgrades automatically to SIMD columnar chunk evaluation, running in **27.1–89.6 µs** over 200,000 rows with **0 B allocated** on Apple M4 Pro (see [Benchmark Results](/manual/performance/benchmarks)).
 
 Inside an explicit transaction, queries stream through the MVCC snapshot path instead of reading raw storage in place, so transactional scans allocate.
 
@@ -50,6 +50,6 @@ Inside an explicit transaction, queries stream through the MVCC snapshot path in
 Any lambda shape the generator cannot compile—such as capturing a local variable instead of passing a state argument, calling an arbitrary C# method, performing arithmetic inside the predicate, or comparing two columns—still executes correctly by streaming and filtering with the original lambda. The compiler emits diagnostic warnings (`DATAVOL001`–`DATAVOL005`) explaining why the call was not intercepted. Predicates on `[PrimaryKey]` or `[Indexed]` columns continue using their index fast paths.
 
 ## See Also
-- [Compiled LINQ](/manual/client-interfaces/compiled-linq) — Full list of supported LINQ operators and `DATAVOL001`–`DATAVOL005` diagnostics
-- [Roslyn Source Generators](/manual/client-interfaces/source-generators) — Setting up `[DataVoTable]`, `[DataVoQuery]`, and `<InterceptorsNamespaces>`
-- [Zero-Allocation Row Model](/manual/internals/zero-allocation-rows) — Manual zero-GC table scans with `RowRef`
+- [Compiled LINQ](/manual/client-interfaces/compiled-linq): Full list of supported LINQ operators and `DATAVOL001`–`DATAVOL005` diagnostics
+- [Roslyn Source Generators](/manual/client-interfaces/source-generators): Setting up `[DataVoTable]`, `[DataVoQuery]`, and `<InterceptorsNamespaces>`
+- [Zero-Allocation Row Model](/manual/internals/zero-allocation-rows): Manual zero-GC table scans with `RowRef`

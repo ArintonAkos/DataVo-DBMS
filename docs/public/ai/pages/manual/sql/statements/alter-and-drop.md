@@ -94,7 +94,7 @@ ALTER TABLE metrics MODIFY COLUMN count BIGINT NOT NULL DEFAULT 0;
 
 - **Existing data validation:**
   - Switching a column to `NOT NULL` fails with `ConstraintViolationException` (`NotNullViolation`) if any existing row contains `NULL`.
-  - Shrinking `VARCHAR(n)` fails with `ConstraintViolationException` (`ValueTooLong`) if any existing string exceeds the new length `n`—DataVo never silently truncates data.
+  - Shrinking `VARCHAR(n)` fails with `ConstraintViolationException` (`ValueTooLong`) if any existing string exceeds the new length `n`; DataVo never silently truncates data.
   - Incompatible type conversions for existing values fail and leave the table untouched.
 - **Protected columns:** You cannot modify a column that is a `PRIMARY KEY`, `UNIQUE`, `FOREIGN KEY`, referenced parent column, or part of any index.
 - **No constraint additions:** You cannot add `PRIMARY KEY`, `UNIQUE`, or `FOREIGN KEY` constraints via `MODIFY COLUMN`.
@@ -130,8 +130,6 @@ In DataVo `v0.4`, `DROP INDEX` **requires** the `ON <table_name>` clause and doe
 
 ## See Also
 
-- [CREATE TABLE](/manual/sql/statements/create-table) — Declaring tables, primary keys, unique constraints, and foreign keys
-- [CREATE INDEX](/manual/sql/statements/indexes) — Creating B-Tree, HNSW, FLAT, and Columnar indexes
-- [Databases & Security](/manual/sql/statements/databases-and-security) — `DROP DATABASE`, `DESCRIBE`, and `SHOW TABLES`
-- [Data Types](/manual/sql/data-types) — Supported column types and length rules
-- [SQL Compatibility](/manual/sql/compatibility) — Dialect differences from SQLite and PostgreSQL
+- [CREATE TABLE](/manual/sql/statements/create-table): Declaring tables, primary keys, unique constraints, and foreign keys
+- [CREATE INDEX](/manual/sql/statements/indexes): Creating B-Tree, HNSW, FLAT, and Columnar indexes
+- [Data Types](/manual/sql/data-types): Supported column types and length rules

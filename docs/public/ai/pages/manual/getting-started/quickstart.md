@@ -88,7 +88,7 @@ insert.Execute(
     new DataVoQueryParameter("region", "EU"));
 
 var topPlayers = db.Prepare("SELECT Id, Name, Score FROM players WHERE Score >= @min ORDER BY Score DESC");
-var result = topPlayers.Execute(new DataVoQueryParameter("min", 900))[0];
+var result = topPlayers.Execute(new DataVoQueryParameter("min", 900));
 
 foreach (var row in result.Data)
 {
@@ -115,7 +115,7 @@ Add `DataVo.Generators` and annotate a C# `Player` class with `[DataVoTable("pla
 
 ## See Also
 
-- [Choosing an Interface](/manual/getting-started/choosing-an-interface) — Compare SQL, Compiled LINQ, ADO.NET, Dapper, and EF Core.
-- [Storage Modes](/manual/fundamentals/storage-modes) — Understand `InMemory`, `Lsm`, and `Disk` trade-offs.
-- [DataVoContext API](/manual/client-interfaces/datavo-context-api) — Full reference for prepared statements, typed writes, and streaming.
-- [Vector Search](/manual/fundamentals/vector-search) — Store `VECTOR(n)` embeddings alongside relational columns.
+- [Choosing an Interface](/manual/getting-started/choosing-an-interface): Compare SQL, Compiled LINQ, ADO.NET, Dapper, and EF Core.
+- [Storage Modes](/manual/fundamentals/storage-modes): Understand `InMemory`, `Lsm`, and `Disk` trade-offs.
+- [DataVoContext API](/manual/client-interfaces/datavo-context-api): Full reference for prepared statements, typed writes, and streaming.
+- [Vector Search](/manual/fundamentals/vector-search): Store `VECTOR(n)` embeddings alongside relational columns.

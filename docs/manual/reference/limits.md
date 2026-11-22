@@ -56,7 +56,7 @@ DataVo provides a calendar `DATE` type (`YYYY-MM-DD`) and has **no** `DATETIME` 
 
 ## See Also
 
-- [SQL Compatibility](/manual/sql/compatibility) — Full SQL dialect support matrix
-- [SQL Data Types](/manual/sql/data-types) — Supported column types and C# mappings
-- [Transactions & MVCC](/manual/fundamentals/transactions-and-mvcc) — Snapshot isolation contract and write-conflict behavior
-- [Query Planner](/manual/internals/query-planner) — Fast paths vs. general evaluator
+- [SQL Compatibility](/manual/sql/compatibility): Full SQL dialect support matrix
+- [SQL Data Types](/manual/sql/data-types): Supported column types and C# mappings
+- [Transactions & MVCC](/manual/fundamentals/transactions-and-mvcc): Snapshot isolation contract and write-conflict behavior
+- [Query Planner](/manual/internals/query-planner): Fast paths vs. general evaluator

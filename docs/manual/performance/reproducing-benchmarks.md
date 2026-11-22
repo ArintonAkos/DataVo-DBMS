@@ -5,7 +5,7 @@ description: CLI cookbook for running DataVo's BenchmarkDotNet microbenchmarks, 
 
 # Reproducing Benchmarks
 
-Every chart and table in the performance documentation can be reproduced from the repository root using Release builds on .NET 10. Run scenarios **serially** on an idle machine—parallel runs contend on CPU and storage flushes and invalidate latency tails.
+Every chart and table in the performance documentation can be reproduced from the repository root using Release builds on .NET 10. Run scenarios **serially** on an idle machine; parallel runs contend on CPU and storage flushes and invalidate latency tails.
 
 ```bash
 # 1. Capture environment metadata first
@@ -113,5 +113,5 @@ python3 docs/scripts/generate-ci-benchmark-plots.py
 :::
 
 ## See Also
-- [Benchmark Results & Methodology](/manual/performance/benchmarks) — Full results, methodology, and cross-platform CI findings
-- [DataVo vs SQLite](/manual/performance/datavo-vs-sqlite) — 1M-row SQL matrix and hybrid vector decision guide
+- [Benchmark Results & Methodology](/manual/performance/benchmarks): Full results, methodology, and cross-platform CI findings
+- [DataVo vs SQLite](/manual/performance/datavo-vs-sqlite): 1M-row SQL matrix and hybrid vector decision guide

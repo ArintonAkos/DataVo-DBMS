@@ -1,11 +1,11 @@
 ---
 title: Functions & Operators
-description: Complete Turso-style reference for DataVo v0.4 aggregate, window, and scalar functions plus arithmetic, comparison, logical, pattern, and vector distance operators.
+description: Reference for DataVo v0.4 aggregate, window, and scalar functions plus arithmetic, comparison, logical, pattern, and vector distance operators.
 ---
 
 # Functions & Operators
 
-DataVo v0.4 provides a focused, zero-ambiguity set of SQL aggregate functions, the `RANK()` window function, `LOWER`/`UPPER` string scalar functions, standard relational and arithmetic operators, and native vector distance operators (`<->`, `<=>`).
+DataVo v0.4 provides a focused set of SQL aggregate functions, the `RANK()` window function, `LOWER`/`UPPER` string scalar functions, standard relational and arithmetic operators, and native vector distance operators (`<->`, `<=>`).
 
 ```sql
 SELECT
@@ -240,7 +240,7 @@ LIMIT 10;
 ```
 
 ::: warning No `<#>` Operator or Core SQL Distance Functions
-DataVo v0.4 supports **only** `<->` (L2) and `<=>` (Cosine). There is **no** `<#>` inner-product operator, and there are **no** core SQL `COSINE_DISTANCE()` or `L2_DISTANCE()` scalar functions — always use the infix `<=>` and `<->` operators in SQL queries.
+DataVo v0.4 supports **only** `<->` (L2) and `<=>` (Cosine). There is **no** `<#>` inner-product operator, and there are **no** core SQL `COSINE_DISTANCE()` or `L2_DISTANCE()` scalar functions; always use the infix `<=>` and `<->` operators in SQL queries.
 :::
 
 ## Excluded Functions & Expressions in v0.4
@@ -261,9 +261,7 @@ Perform formatting, date arithmetic, conditional projections, or type conversion
 
 ## See Also
 
-- [SELECT](/manual/sql/statements/select) — Using functions and operators in `SELECT`, `WHERE`, `GROUP BY`, `HAVING`, and `ORDER BY`
-- [Data Types](/manual/sql/data-types) — Numeric widths, `DATE` representation, `VARCHAR` ordinal rules, and `VECTOR(n)`
-- [Vector Search](/manual/fundamentals/vector-search) — Creating `HNSW` and `FLAT` indexes for `<->` and `<=>` queries
-- [Indexes](/manual/sql/statements/indexes) — Index types and operator acceleration
-- [SQL Compatibility](/manual/sql/compatibility) — Side-by-side dialect matrix against SQLite and PostgreSQL
-- [Query Planner](/manual/internals/query-planner) — Columnar aggregates, typed scans, and general evaluator rules
+- [SELECT](/manual/sql/statements/select): Using functions and operators in `SELECT`, `WHERE`, `GROUP BY`, `HAVING`, and `ORDER BY`
+- [Data Types](/manual/sql/data-types): Numeric widths, `DATE` representation, `VARCHAR` ordinal rules, and `VECTOR(n)`
+- [Vector Search](/manual/fundamentals/vector-search): Creating `HNSW` and `FLAT` indexes for `<->` and `<=>` queries
+- [SQL Compatibility](/manual/sql/compatibility): Side-by-side dialect matrix against SQLite and PostgreSQL

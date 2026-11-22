@@ -72,7 +72,7 @@ DataVoBatchResult stats = db.ApplyBatch(batch);
 
 ## Snapshots, Auth & Change Capture
 
-- **Snapshots:** Capture and restore point-in-time engine state for the current session with `DataVoSnapshot snap = db.CreateSnapshot()` and `db.RestoreSnapshot(snap)` — useful for deterministic test resets or branching simulation state.
+- **Snapshots:** Capture and restore point-in-time engine state for the current session with `DataVoSnapshot snap = db.CreateSnapshot()` and `db.RestoreSnapshot(snap)`, useful for deterministic test resets or branching simulation state.
 - **Session Auth:** When `EnableAuthorization = true`, switch the active principal per session with `db.Login(username, password)` and `db.Logout()`. See [Databases & Security SQL](/manual/sql/statements/databases-and-security).
 - **Change Capture:** `db.Changes` exposes the engine's `ChangeCapture` stream, which feeds reactive subscriptions and custom CDC consumers.
 
@@ -115,7 +115,7 @@ public ChangeCapture Changes { get; }
 
 ## See Also
 
-- [Streaming Queries](/manual/fundamentals/streaming-queries) — Lazy `StreamQuery` and zero-allocation `StreamRef` scans
-- [Reactive Views](/manual/fundamentals/reactive-views) — Z-set incremental view maintenance via `Subscribe` and `SubscribeZeroAlloc`
-- [Source Generators](/manual/client-interfaces/source-generators) — Compile-time table helpers and `[DataVoQuery]` methods
-- [Configuration Reference](/manual/reference/configuration) — All `DataVoConfig` storage, LSM, and security options
+- [Streaming Queries](/manual/fundamentals/streaming-queries): Lazy `StreamQuery` and zero-allocation `StreamRef` scans
+- [Reactive Views](/manual/fundamentals/reactive-views): Z-set incremental view maintenance via `Subscribe` and `SubscribeZeroAlloc`
+- [Source Generators](/manual/client-interfaces/source-generators): Compile-time table helpers and `[DataVoQuery]` methods
+- [Configuration Reference](/manual/reference/configuration): All `DataVoConfig` storage, LSM, and security options

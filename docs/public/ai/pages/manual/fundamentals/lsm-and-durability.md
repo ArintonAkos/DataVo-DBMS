@@ -46,7 +46,7 @@ Each SSTable is written sequentially to a temporary file, fsynced, atomically re
 | `ClusteredPrimaryKeys` | `true` | Stores single `INT` or `GUID` PK tables directly under their key (no separate PK index) | Keep `true` for fast PK seeks and range scans (set at `CREATE TABLE`) |
 | `IoSchedulerMode` | `Off` | Controls legacy `Disk` I/O scheduling (`Off`, `PoolingOnly`, or reserved `GroupCommit`) | Only relevant for legacy `StorageMode.Disk` (`Lsm` uses its own commit log) |
 
-> When reporting or comparing write throughput, always pair the number with its durability setting—for example, `LSM Strict` vs. `LSM Relaxed`.
+> When reporting or comparing write throughput, always pair the number with its durability setting (for example, `LSM Strict` vs. `LSM Relaxed`).
 
 ## Crash Atomicity and Visibility
 
@@ -92,6 +92,6 @@ Like `Disk` mode, an LSM directory is owned by one process at a time via `datavo
 
 ## See Also
 
-- [Storage Modes](/manual/fundamentals/storage-modes) — Compare `InMemory`, `Lsm`, `Disk`, `Wasm`, and `Custom`
-- [Transactions & MVCC](/manual/fundamentals/transactions-and-mvcc) — Snapshot isolation and atomic multi-statement commits
-- [Configuration Reference](/manual/reference/configuration) — Full `DataVoConfig` reference
+- [Storage Modes](/manual/fundamentals/storage-modes): Compare `InMemory`, `Lsm`, `Disk`, `Wasm`, and `Custom`
+- [Transactions & MVCC](/manual/fundamentals/transactions-and-mvcc): Snapshot isolation and atomic multi-statement commits
+- [Configuration Reference](/manual/reference/configuration): Full `DataVoConfig` reference

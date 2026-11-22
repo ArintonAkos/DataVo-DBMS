@@ -111,7 +111,7 @@ Queries inside an explicit transaction evaluate against the transaction's write 
 DataVo enforces **first-committer-wins** under snapshot isolation:
 
 - If two concurrent transactions update or delete the same row, the first transaction to `COMMIT` succeeds.
-- The second transaction fails with a write-conflict error—either immediately during `UPDATE`/`DELETE` if the competing commit has already finished, or at `COMMIT`.
+- The second transaction fails with a write-conflict error, either immediately during `UPDATE`/`DELETE` if the competing commit has already finished, or at `COMMIT`.
 - At `COMMIT`, DataVo also re-validates `PRIMARY KEY`, `UNIQUE`, and `FOREIGN KEY` constraints against concurrent commits.
 - On `Lsm`, `COMMIT` publishes as a single atomic batch and is discarded on failure. On `InMemory`, applied steps are journaled and rolled back on failure.
 
@@ -122,7 +122,7 @@ DataVo enforces **first-committer-wins** under snapshot isolation:
 
 ## Session Transactions in C#
 
-Transactions are scoped to a session ID. `DataVoContext` does not expose a `BeginTransaction()` C# method—execute transaction SQL statements directly and pass a `Guid sessionId` when running concurrent transactions on a shared context:
+Transactions are scoped to a session ID. `DataVoContext` does not expose a `BeginTransaction()` C# method; execute transaction SQL statements directly and pass a `Guid sessionId` when running concurrent transactions on a shared context:
 
 ```csharp
 Guid txSession = Guid.NewGuid();
@@ -136,9 +136,7 @@ When using the ADO.NET provider (`DataVo.Data`), `DataVoConnection.BeginTransact
 
 ## See Also
 
-- [Transactions & MVCC](/manual/fundamentals/transactions-and-mvcc) — Architecture of MVCC snapshots, conflict semantics, and ADO.NET examples
-- [LSM & Durability](/manual/fundamentals/lsm-and-durability) — WAL crash atomicity and fsync guarantees on `COMMIT`
-- [INSERT](/manual/sql/statements/insert) — Inserting rows inside transactions
-- [UPDATE](/manual/sql/statements/update) — Modifying rows and triggering conflict detection
-- [DELETE](/manual/sql/statements/delete) — Deleting rows atomically within transactions
-- [Databases & Security](/manual/sql/statements/databases-and-security) — `TRANSACTION` permission required when RBAC is enabled
+- [Transactions & MVCC](/manual/fundamentals/transactions-and-mvcc): MVCC snapshots, conflict semantics, and ADO.NET examples
+- [LSM & Durability](/manual/fundamentals/lsm-and-durability): WAL crash atomicity and fsync guarantees on `COMMIT`
+- [UPDATE](/manual/sql/statements/update): Modifying rows and triggering conflict detection
+- [DELETE](/manual/sql/statements/delete): Deleting rows atomically within transactions

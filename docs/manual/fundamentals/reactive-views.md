@@ -5,7 +5,7 @@ description: Register standing SQL or compiled LINQ queries and receive incremen
 
 # Live Reactive Views
 
-Live Reactive Views let you register a standing SQL or compiled LINQ query and receive exact **incremental deltas** (`Added`, `Removed`, `Updated`) whenever underlying tables change—without polling or rescanning. Powered by **Z-set Incremental View Maintenance (IVM)** inspired by DBSP, every committed write emits signed tuple weights (`+1` insert, `-1` delete, `(-1, +1)` update) that update only affected keys or groups.
+Live Reactive Views let you register a standing SQL or compiled LINQ query and receive exact **incremental deltas** (`Added`, `Removed`, `Updated`) whenever underlying tables change, without polling or rescanning. Powered by **Z-set Incremental View Maintenance (IVM)** inspired by DBSP, every committed write emits signed tuple weights (`+1` insert, `-1` delete, `(-1, +1)` update) that update only affected keys or groups.
 
 ```csharp
 using DataVo.Core;
@@ -30,7 +30,7 @@ db.DispatchPendingNotifications(); // invokes callback on the calling thread
 ```
 
 ::: info DataVo Extension
-Live Reactive Views (`Subscribe`, `SubscribeZeroAlloc`, `SubscribeInto`, and `DispatchPendingNotifications`) are a DataVo .NET-native IVM extension. Subscriptions return `IDisposable` directly—there is no separate `LiveView` wrapper class.
+Live Reactive Views (`Subscribe`, `SubscribeZeroAlloc`, `SubscribeInto`, and `DispatchPendingNotifications`) are a DataVo .NET-native IVM extension. Subscriptions return `IDisposable` directly; there is no separate `LiveView` wrapper class.
 :::
 
 ## Choosing a Subscription API
@@ -143,6 +143,6 @@ IDisposable SubscribeInto(Memory<TProjection> destination, Action<int> onUpdated
 
 ## See Also
 
-- [Roslyn Source Generators](/manual/client-interfaces/source-generators) — Compile-time `IReactiveRowProjector<T>` generation for `SubscribeInto`
-- [Streaming Queries](/manual/fundamentals/streaming-queries) — Pull-based `yield return` and `StreamRef` table scans
-- [Zero-Allocation Row Model](/manual/internals/zero-allocation-rows) — Memory layout of `RowRef` spans
+- [Roslyn Source Generators](/manual/client-interfaces/source-generators): Compile-time `IReactiveRowProjector<T>` generation for `SubscribeInto`
+- [Streaming Queries](/manual/fundamentals/streaming-queries): Pull-based `yield return` and `StreamRef` table scans
+- [Zero-Allocation Row Model](/manual/internals/zero-allocation-rows): Memory layout of `RowRef` spans

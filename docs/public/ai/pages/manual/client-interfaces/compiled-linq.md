@@ -46,7 +46,7 @@ On compilers without interceptors (such as Unity), the same code compiles and re
 | --- | --- |
 | `Where` | Translates `==`, `!=`, `<`, `<=`, `>`, `>=`, `&&`, `\|\|`, boolean flags, and `null` checks. Uses PK/B-Tree indexes when available; streams in 1,024-row pages otherwise. |
 | `FirstOrDefault`, `SingleOrDefault` | PK equality on `Lsm` reads a single row (0 B on miss). |
-| `Count`, `Any`, `Sum`, `Min`, `Max` | Compiles directly into the storage scan (or `[Columnar]` index) for numeric/bool/date/Guid columns — **0 B allocated** once warm. |
+| `Count`, `Any`, `Sum`, `Min`, `Max` | Compiles directly into the storage scan (or `[Columnar]` index) for numeric/bool/date/Guid columns (**0 B allocated** once warm). |
 | `OrderBy`, `OrderByDescending`, `ThenBy`, `ThenByDescending` | Emits `ORDER BY`; combined with `Take`, retains only top-K rows during the scan. |
 | `Skip`, `Take` | Emits `OFFSET @offset LIMIT @limit` following `Enumerable` clamping semantics. |
 | `Select` | Projects only the referenced columns (`SELECT name, score ...`) without instantiating full models. |
@@ -121,6 +121,6 @@ using var sub = players
 
 ## See Also
 
-- [Roslyn Source Generators](/manual/client-interfaces/source-generators) — `[DataVoTable]` annotations, generated helpers, and `[DataVoQuery]`
-- [Reactive Views](/manual/fundamentals/reactive-views) — Pull-drain Z-set IVM model and choosing a subscription API
-- [Compiled Scan Kernels](/manual/internals/compiled-scan-kernels) — How zero-allocation scan predicates and columnar indexes work
+- [Roslyn Source Generators](/manual/client-interfaces/source-generators): `[DataVoTable]` annotations, generated helpers, and `[DataVoQuery]`
+- [Reactive Views](/manual/fundamentals/reactive-views): Pull-drain Z-set IVM model and choosing a subscription API
+- [Compiled Scan Kernels](/manual/internals/compiled-scan-kernels): How zero-allocation scan predicates and columnar indexes work

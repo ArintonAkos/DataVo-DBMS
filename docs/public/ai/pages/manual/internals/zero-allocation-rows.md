@@ -27,14 +27,14 @@ The same zero-allocation stream is available without a model type via `db.Stream
 
 ## How `RowRef` Works
 
-Conventional database drivers materialize a dictionary, `object[]`, or POCO for every row—200,000 rows means 200,000 heap allocations that the GC must later collect. `RowRef` avoids materialization entirely by decoding only the cells you read directly from the storage buffer.
+Conventional database drivers materialize a dictionary, `object[]`, or POCO for every row: 200,000 rows means 200,000 heap allocations that the GC must later collect. `RowRef` avoids materialization entirely by decoding only the cells you read directly from the storage buffer.
 
 <div class="sketch-diagram">
   <img class="light-only" src="/manual/fig-06-zero-alloc-rowref-light.svg" alt="FlatRowStore packed chunk copied in 1,024-row pages into a stack-only RowRef ref struct for zero-allocation column reads" />
   <img class="dark-only" src="/manual/fig-06-zero-alloc-rowref-dark.svg" alt="FlatRowStore packed chunk copied in 1,024-row pages into a stack-only RowRef ref struct for zero-allocation column reads" />
 </div>
 
-Because `RowRef` is a `ref struct`, the C# compiler enforces that it lives strictly on the stack—it cannot be boxed, stored on a class field, captured by a lambda, or held across an `await`. That compile-time guarantee makes it memory-safe for `RowRefStream` to reuse the same page buffer for the next 1,024 rows.
+Because `RowRef` is a `ref struct`, the C# compiler enforces that it lives strictly on the stack: it cannot be boxed, stored on a class field, captured by a lambda, or held across an `await`. That compile-time guarantee makes it memory-safe for `RowRefStream` to reuse the same page buffer for the next 1,024 rows.
 
 ## Rules & Safety Guarantees
 
@@ -46,13 +46,13 @@ Because `RowRef` is a `ref struct`, the C# compiler enforces that it lives stric
 
 ## Concurrency & Page Isolation
 
-- **Non-blocking 1,024-row pages:** The engine acquires a short read lock only while copying a 1,024-row page into the stream buffer, then releases it before your loop body executes—slow consumers never stall writers.
+- **Non-blocking 1,024-row pages:** The engine acquires a short read lock only while copying a 1,024-row page into the stream buffer, then releases it before your loop body executes, so slow consumers never stall writers.
 - **Pass semantics:** Every row that exists for the entire pass is visited once; concurrent inserts or deletes may or may not appear. A concurrent schema change aborts the pass with `InvalidOperationException`.
 - **Inside explicit transactions:** `StreamRef()` falls back to the query engine so it observes the transaction's own uncommitted writes. **That transactional path allocates.**
 
 ## What "Zero Allocation" Covers
 
-Zero allocation applies specifically to `RowRefStream` scans and compiled scan-kernel aggregates—materializing a `Player` class instance still allocates the `Player` object itself.
+Zero allocation applies specifically to `RowRefStream` scans and compiled scan-kernel aggregates; materializing a `Player` class instance still allocates the `Player` object itself.
 
 | Operation | Managed Allocation |
 | --- | ---: |
@@ -65,6 +65,6 @@ Zero allocation applies specifically to `RowRefStream` scans and compiled scan-k
 Nothing in `RowRef` or `RowRefStream` uses runtime reflection or `System.Reflection.Emit`; `DataVo.Core` compiles cleanly with `IsAotCompatible` and zero trim/AOT warnings.
 
 ## See Also
-- [Streaming Queries](/manual/fundamentals/streaming-queries) — Comparing `Execute`, `StreamQuery`, and `StreamRef`
-- [Compiled Scan Kernels](/manual/internals/compiled-scan-kernels) — Build-time LINQ kernels that run over stored bytes with 0 B allocation
-- [Native AOT Deployment](/manual/client-interfaces/native-aot) — Publishing trimmed Native AOT binaries
+- [Streaming Queries](/manual/fundamentals/streaming-queries): Comparing `Execute`, `StreamQuery`, and `StreamRef`
+- [Compiled Scan Kernels](/manual/internals/compiled-scan-kernels): Build-time LINQ kernels that run over stored bytes with 0 B allocation
+- [Native AOT Deployment](/manual/client-interfaces/native-aot): Publishing trimmed Native AOT binaries

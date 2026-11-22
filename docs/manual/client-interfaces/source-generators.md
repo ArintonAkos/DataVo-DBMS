@@ -18,8 +18,8 @@ public sealed class Player
 {
     [PrimaryKey] public int Id { get; set; }
     public string Name { get; set; } = "";
-    [Indexed] public int Score { get; set; }
-    [Columnar] public string Region { get; set; } = "";
+    [Indexed, Columnar] public int Score { get; set; }
+    public string Region { get; set; } = "";
     [SpatialIndex] public Vector3 Position { get; set; }
 }
 
@@ -99,6 +99,6 @@ CREATE INDEX ix_players_score ON players (score);
 
 ## See Also
 
-- [Compiled LINQ & Spatial Queries](/manual/client-interfaces/compiled-linq) — `DataVoTable<T>` LINQ interceptors, 3D spatial queries, and reactive subscriptions
-- [Native AOT Deployment](/manual/client-interfaces/native-aot) — Publishing AOT binaries with `DataVo.Generators`
-- [Compiled Scan Kernels](/manual/internals/compiled-scan-kernels) — How generated predicates execute directly over storage bytes
+- [Compiled LINQ & Spatial Queries](/manual/client-interfaces/compiled-linq): `DataVoTable<T>` LINQ interceptors, 3D spatial queries, and reactive subscriptions
+- [Native AOT Deployment](/manual/client-interfaces/native-aot): Publishing AOT binaries with `DataVo.Generators`
+- [Compiled Scan Kernels](/manual/internals/compiled-scan-kernels): How generated predicates execute directly over storage bytes

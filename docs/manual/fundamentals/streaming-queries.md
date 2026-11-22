@@ -5,7 +5,7 @@ description: Compare buffered Execute, paged yield-return StreamQuery, compiled 
 
 # Streaming Queries
 
-By default, `db.Execute("SELECT ...")` buffers the entire result set into `List<Dictionary<string, object?>>` before returning. When scanning large tables or stopping early on a match, use DataVo's pull-based streaming APIs to process rows incrementally in 1,024-row pages—or with zero heap allocations.
+By default, `db.Execute("SELECT ...")` buffers the entire result set into `List<Dictionary<string, object?>>` before returning. When scanning large tables or stopping early on a match, use DataVo's pull-based streaming APIs to process rows incrementally in 1,024-row pages, or with zero heap allocations.
 
 ```csharp
 using DataVo.Core;
@@ -22,7 +22,7 @@ foreach (DataVoRow row in db.StreamQuery(
 {
     Console.WriteLine($"{row["name"]}: {row["score"]}");
     if ((int)row["id"]! == targetId)
-        break; // triggers yield break — remaining pages are never read
+        break; // triggers yield break; remaining pages are never read
 }
 ```
 
@@ -48,7 +48,7 @@ For eligible single-table `SELECT` queries, `StreamQuery` fetches 1,024-row page
 - **Owned rows:** Each `DataVoRow` owns its decoded values (`row["Column"]` or `row[ordinal]`), so you can safely store rows beyond the loop iteration.
 - **Per-page locking:** During pure paged streaming, DataVo acquires and releases the read scope **per 1,024-row page**, so a slow consumer never stalls concurrent writers.
 
-`StreamQuery` automatically falls back to materializing first—and still streams the resulting rows lazily—when a query uses `JOIN`, `GROUP BY`, `HAVING`, `ORDER BY`, `DISTINCT`, CTEs, `RANK()`, indexed equality probes, or runs inside an explicit `BEGIN` transaction (which needs a single snapshot).
+`StreamQuery` automatically falls back to materializing first (while still streaming the resulting rows lazily) when a query uses `JOIN`, `GROUP BY`, `HAVING`, `ORDER BY`, `DISTINCT`, CTEs, `RANK()`, indexed equality probes, or runs inside an explicit `BEGIN` transaction (which needs a single snapshot).
 
 ## Compiled `DataVoTable<T>` Streaming
 
@@ -104,6 +104,6 @@ public RowRefStream StreamRef();
 
 ## See Also
 
-- [Zero-Allocation Row Model](/manual/internals/zero-allocation-rows) — Memory layout and typed accessors of `RowRef`
-- [Live Reactive Views](/manual/fundamentals/reactive-views) — Receive incremental deltas instead of rescanning tables
-- [Roslyn Source Generators](/manual/client-interfaces/source-generators) — Compile-time predicates on `DataVoTable<T>`
+- [Zero-Allocation Row Model](/manual/internals/zero-allocation-rows): Memory layout and typed accessors of `RowRef`
+- [Live Reactive Views](/manual/fundamentals/reactive-views): Receive incremental deltas instead of rescanning tables
+- [Roslyn Source Generators](/manual/client-interfaces/source-generators): Compile-time predicates on `DataVoTable<T>`

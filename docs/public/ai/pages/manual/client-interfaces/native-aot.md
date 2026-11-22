@@ -3,7 +3,7 @@
 > Source route: /manual/client-interfaces/native-aot
 > Source file: manual/client-interfaces/native-aot.md
 
-`DataVo.Core`, `DataVo.Data`, and `DataVo.Generators` are engineered for `.NET 10` Native AOT. Trim and AOT analyzers are enabled across the core and ADO.NET assemblies with `IL2026` and `IL3050` treated as build errors and verified on every change.
+`DataVo.Core`, `DataVo.Data`, and `DataVo.Generators` are built and tested for `.NET 10` Native AOT. Trim and AOT analyzers are enabled across the core and ADO.NET assemblies with `IL2026` and `IL3050` treated as build errors and verified on every change.
 
 ```xml
 <PropertyGroup>
@@ -39,6 +39,6 @@ The repository validates AOT cleanliness with `scripts/check-aot-baseline.sh`, w
 
 ## See Also
 
-- [Roslyn Source Generators](/manual/client-interfaces/source-generators) — Compile-time helpers and `[DataVoQuery]`
-- [Compiled LINQ & Spatial Queries](/manual/client-interfaces/compiled-linq) — Zero-reflection LINQ interceptors
-- [Zero-Allocation Rows](/manual/internals/zero-allocation-rows) — `RowRef` and `StreamRef` internals
+- [Roslyn Source Generators](/manual/client-interfaces/source-generators): Compile-time helpers and `[DataVoQuery]`
+- [Compiled LINQ & Spatial Queries](/manual/client-interfaces/compiled-linq): Zero-reflection LINQ interceptors
+- [Zero-Allocation Rows](/manual/internals/zero-allocation-rows): `RowRef` and `StreamRef` internals

@@ -1,6 +1,6 @@
 ---
 title: "I wrote an embedded database and Postgres sync engine in C#. Here is where it wins and where it loses."
-description: "Part 1 of 7: In-process SQL, SIMD vector search, Z-set incremental views, and offline-first Postgres sync in pure .NET 10—measured across macOS, Linux, and Windows."
+description: "Part 1 of 7: In-process SQL, SIMD vector search, Z-set incremental views, and offline-first Postgres sync in pure .NET 10, measured across macOS, Linux, and Windows."
 outline: [2, 3]
 prev: false
 next:
@@ -27,7 +27,7 @@ At a glance, the approach pays off in four specific places:
 - **Filtered vector search inside ordinary SQL:** Top-10 search over 50,000 × 384-dimensional embeddings with SQL `JOIN` and `WHERE` filters runs in **0.26–3.62 ms** at **100% recall@10**, in the same transaction log as the relational tables.
 - **Compact offline-first Postgres sync:** End-to-end PostgreSQL 17 replication transfers **45.5 bytes per row** over the wire (**8.0× smaller** than ElectricSQL `1.8.1`) with **5.1–6.9× lower** client GC allocations, converging automatically after a burst of 500 offline writes.
 
-It also loses in predictable places—unindexed substring scans (**1.35× slower** than SQLite on `LIKE '%042-%'`), whole-table analytical scans without `[Columnar]` (**3–340× slower** than DuckDB), Linux single-row durable `StrictFsync` latency (**0.241 ms** vs **0.108 ms**, **2.2× slower** than SQLite WAL `FULL`), and sync hub cold-start time (**2.4 s** to load 100k rows). Those losses are reported alongside the wins below, because an embedded database is only useful once you know where its boundaries are.
+It also loses in predictable places: unindexed substring scans (**1.35× slower** than SQLite on `LIKE '%042-%'`), whole-table analytical scans without `[Columnar]` (**3–340× slower** than DuckDB), Linux single-row durable `StrictFsync` latency (**0.241 ms** vs **0.108 ms**, **2.2× slower** than SQLite WAL `FULL`), and sync hub cold-start time (**2.4 s** to load 100k rows). Those losses are reported alongside the wins below, because an embedded database is only useful once you know where its boundaries are.
 
 ## Why put all of this in one process?
 
@@ -53,7 +53,7 @@ DataVo exists for four narrower situations where the usual stack starts to show 
 
 *Figure 1: Traditional .NET local-first assembly vs. single-process consolidation in DataVo.*
 
-It is equally important to be clear about what DataVo is **not**. It is not a client/server database: a lock file (`datavo.lock`) gives one process exclusive ownership of a database directory. Transactions provide snapshot isolation rather than serializability <a class="cite-badge" href="#ref-2">2</a>. Its SQL dialect intentionally leaves out features teams expect from full-scale SQL engines—no `CASE`/`CAST`/`COALESCE` or date functions, no window functions beyond `RANK()`, and no `CREATE VIEW`, triggers, or stored procedures. At `0.4.0-rc.1` it is prerelease software whose on-disk format does not yet carry a cross-version compatibility guarantee: standalone local databases require an export and re-import across breaking format changes, whereas `DataVo-Sync` setups treat PostgreSQL as the source of truth and can simply wipe and re-hydrate the local replica (**~0.7 s** for 100k rows).
+It is equally important to be clear about what DataVo is **not**. It is not a client/server database: a lock file (`datavo.lock`) gives one process exclusive ownership of a database directory. Transactions provide snapshot isolation rather than serializability <a class="cite-badge" href="#ref-2">2</a>. Its SQL dialect intentionally leaves out features teams expect from full-scale SQL engines: no `CASE`/`CAST`/`COALESCE` or date functions, no window functions beyond `RANK()`, and no `CREATE VIEW`, triggers, or stored procedures. At `0.4.0-rc.1` it is prerelease software whose on-disk format does not yet carry a cross-version compatibility guarantee: standalone local databases require an export and re-import across breaking format changes, whereas `DataVo-Sync` setups treat PostgreSQL as the source of truth and can simply wipe and re-hydrate the local replica (**~0.7 s** for 100k rows).
 
 ## How the engine is put together
 
@@ -62,7 +62,7 @@ It is equally important to be clear about what DataVo is **not**. It is not a cl
 DataVo organizes data in two ways to strike a balance between fast point lookups and analytical scans (as shown in Figure 2):
 
 - **InMemory (`FlatRowStore`)** packs rows as fixed-width cells inside contiguous byte buffers instead of allocating one heap object per row (as illustrated in Figure 2a). On the benchmark schema, this reduces memory footprint from **640.3 bytes/row** (the object-per-row layout it replaced) down to **49.2 bytes/row** with shared strings. Integer primary keys map directly to row slots via a hash map. Nothing survives process exit.
-- **LSM** follows the log-structured merge tree described by O'Neil et al. <a class="cite-badge" href="#ref-3">3</a> (and surveyed in *Designing Data-Intensive Applications* <a class="cite-badge" href="#ref-2">2</a>). Writes append to a commit log (`LsmStrictFsync = true` waits for stable storage before acknowledging), enter an arena-backed MemTable, flush at 32 MB into immutable memory-mapped SSTables on a background thread, and compact asynchronously. When a table has a single `INT` or `GUID` primary key, rows are stored **clustered** under that key—so a key lookup or range scan seeks straight to the row instead of probing a secondary index and performing a separate row fetch.
+- **LSM** follows the log-structured merge tree described by O'Neil et al. <a class="cite-badge" href="#ref-3">3</a> (and surveyed in *Designing Data-Intensive Applications* <a class="cite-badge" href="#ref-2">2</a>). Writes append to a commit log (`LsmStrictFsync = true` waits for stable storage before acknowledging), enter an arena-backed MemTable, flush at 32 MB into immutable memory-mapped SSTables on a background thread, and compact asynchronously. When a table has a single `INT` or `GUID` primary key, rows are stored **clustered** under that key, so a key lookup or range scan seeks straight to the row instead of probing a secondary index and performing a separate row fetch.
 - **Columnar SSTables (`[Columnar]` / `CREATE INDEX ... USING COLUMNAR`)** store selected columns a second time as dense, contiguous typed arrays (Figure 2b). On LSM, flush and compaction write those columns into each SSTable in 4,096-row segments paired with min/max zone maps and `NULL`/`NaN` bitmasks. Analytical queries like `COUNT(*) WHERE Amount >= @lo` skip excluded chunks via zone maps and scan surviving chunks directly from memory-mapped files, requiring no index rebuild when the database reopens. This borrows the core insight from Abadi et al.'s column-store work <a class="cite-badge" href="#ref-4">4</a>, kept opt-in per column because rows remain DataVo's primary layout.
 
 <div class="sketch-diagram light-only">
@@ -99,7 +99,7 @@ Queries that no typed path accepts fall back to the general evaluator, which mat
 
 ### Vector search, incremental views, and Postgres sync
 
-- **Vector search (`VECTOR(n)`):** `FLAT` computes exact distances using SIMD intrinsics (`AVX2` / Arm `AdvSimd`). `HNSW` implements Malkov and Yashunin's hierarchical navigable small-world graph <a class="cite-badge" href="#ref-5">5</a>. Because filtering inside a graph traversal is tricky, a filtered query does not push predicates into the graph edges; instead it requests roughly `LIMIT / selectivity` candidates, evaluates the relational filter on stored rows, and expands the search if too few survive. When walking the graph would cost more than scanning—or when expansion still falls short—it switches to an exact filter-first scan and ranks only the passing rows, preventing short results.
+- **Vector search (`VECTOR(n)`):** `FLAT` computes exact distances using SIMD intrinsics (`AVX2` / Arm `AdvSimd`). `HNSW` implements Malkov and Yashunin's hierarchical navigable small-world graph <a class="cite-badge" href="#ref-5">5</a>. Because filtering inside a graph traversal is tricky, a filtered query does not push predicates into the graph edges; instead it requests roughly `LIMIT / selectivity` candidates, evaluates the relational filter on stored rows, and expands the search if too few survive. When walking the graph would cost more than scanning, or when expansion still falls short, it switches to an exact filter-first scan and ranks only the passing rows, preventing short results.
 - **Z-set incremental views:** Following Budiu et al.'s DBSP model <a class="cite-badge" href="#ref-6">6</a>, a table is represented as a *Z-set* where every row carries an integer weight (`+1` for an insert, `-1` for a delete). Writes emit small Z-set deltas that update materialized views without re-running the underlying query. This applies only to query shapes the reactive planner supports; unsupported shapes execute normally.
 - **DataVo-Sync:** Because DataVo-Sync is a commercial product, I keep its internal architecture private and describe only the external behaviour tested here. It connects a sync server reading PostgreSQL logical replication to an embedded client library writing into a local DataVo store (`InMemory` or `Lsm`), streaming compressed columnar deltas over WebSockets (`wire v2` + Brotli) and queuing offline local writes for upload and conflict resolution.
 
@@ -173,7 +173,7 @@ Two caveats keep this result honest. First, this table compares DataVo's build-t
 
 ## Maintaining views incrementally
 
-Consider a reactive dashboard, trading blotter, or live game leaderboard that joins three tables—`Orders × Accounts × Markets`—with a `GROUP BY`, while new rows arrive continuously (visualized in Figure 5). In a traditional embedded database, every refresh re-executes the entire join unless you maintain custom summary tables by hand (for example, with SQLite `AFTER INSERT/UPDATE/DELETE` triggers). With declarative Z-set incremental view maintenance (IVM), each write pushes a tiny `+1` / `-1` delta through the view operator graph and updates only the affected groups without trigger boilerplate:
+Consider a reactive dashboard, trading blotter, or live game leaderboard that joins three tables (`Orders × Accounts × Markets`) with a `GROUP BY`, while new rows arrive continuously (visualized in Figure 5). In a traditional embedded database, every refresh re-executes the entire join unless you maintain custom summary tables by hand (for example, with SQLite `AFTER INSERT/UPDATE/DELETE` triggers). With declarative Z-set incremental view maintenance (IVM), each write pushes a tiny `+1` / `-1` delta through the view operator graph and updates only the affected groups without trigger boilerplate:
 
 <div class="sketch-diagram light-only">
 
@@ -213,7 +213,7 @@ This speedup is specifically a property of incremental maintenance on multi-tabl
 
 ## Vector search with SQL filters
 
-In local RAG tools and desktop AI agents, vector similarity almost always comes wrapped in relational filters and joins—filtering by user, workspace, category, or author metadata before returning the top results:
+In local RAG tools and desktop AI agents, vector similarity almost always comes wrapped in relational filters and joins, filtering by user, workspace, category, or author metadata before returning the top results:
 
 ```sql
 SELECT d.Id, d.Title, d.Embedding <=> @query AS distance
@@ -280,7 +280,7 @@ Storage benchmarks expose operating-system behaviour as much as engine design, p
 | **DataVo Relaxed** | **0.0086 ms** | 0.0272 ms | **0.0045 ms** |
 | **SQLite WAL `NORMAL`** | 0.0114 ms | **0.0134 ms** | 0.0054 ms |
 
-Where the operating system and drive enforce a genuine multi-millisecond flush—Apple's APFS SSD and the Windows runner's `FlushFileBuffers`—both durable engines hit the exact same **~3.9–4.0 ms** wall. Where flush is cheap (~0.1 ms on the Linux CI virtual disk), engine overhead becomes visible and SQLite WAL `FULL` is roughly **2.2× faster** per commit than DataVo Production.
+Where the operating system and drive enforce a genuine multi-millisecond flush (Apple's APFS SSD and the Windows runner's `FlushFileBuffers`), both durable engines hit the exact same **~3.9–4.0 ms** wall. Where flush is cheap (~0.1 ms on the Linux CI virtual disk), engine overhead becomes visible and SQLite WAL `FULL` is roughly **2.2× faster** per commit than DataVo Production.
 
 Under mixed 80% read / 20% write YCSB load:
 
@@ -296,15 +296,15 @@ Inserting **1,000,000 records** in one batch, closing the database, and reopenin
 
 | Platform & Engine | Batch insert | On disk | Reopen | First read after |
 | --- | ---: | ---: | ---: | ---: |
-| Apple M4 Pro — DataVo Production (`02fa240f`, 21 Nov) | 704.9 ms | **27.725 MB** | 4.5 ms | 3.8 ms |
-| Apple M4 Pro — DataVo Relaxed (`02fa240f`, 21 Nov) | **403.1 ms** | **27.725 MB** | 1.7 ms | **< 0.1 ms** |
-| Apple M4 Pro — SQLite `WAL NORMAL` (`02fa240f`, 21 Nov) | 697.4 ms | 29.082 MB | **0.4 ms** | 1.2 ms |
-| Linux x64 — DataVo Production (20 Nov) | 1,365.8 ms | **28.155 MB** | 27.3 ms | 10.4 ms |
-| Linux x64 — DataVo Relaxed (20 Nov) | **946.4 ms** | **28.155 MB** | 1.6 ms | **0.1 ms** |
-| Linux x64 — SQLite `WAL NORMAL` (20 Nov) | 1,839.1 ms | 29.082 MB | **0.6 ms** | 3.9 ms |
-| Windows x64 — DataVo Production (20 Nov) | 1,811.5 ms | **28.155 MB** | 40.3 ms | 14.1 ms |
-| Windows x64 — DataVo Relaxed (20 Nov) | **1,299.3 ms** | **28.155 MB** | 3.9 ms | **0.1 ms** |
-| Windows x64 — SQLite `WAL NORMAL` (20 Nov) | 2,605.2 ms | 29.082 MB | **1.8 ms** | 5.4 ms |
+| Apple M4 Pro · DataVo Production (`02fa240f`, 21 Nov) | 704.9 ms | **27.725 MB** | 4.5 ms | 3.8 ms |
+| Apple M4 Pro · DataVo Relaxed (`02fa240f`, 21 Nov) | **403.1 ms** | **27.725 MB** | 1.7 ms | **< 0.1 ms** |
+| Apple M4 Pro · SQLite `WAL NORMAL` (`02fa240f`, 21 Nov) | 697.4 ms | 29.082 MB | **0.4 ms** | 1.2 ms |
+| Linux x64 · DataVo Production (20 Nov) | 1,365.8 ms | **28.155 MB** | 27.3 ms | 10.4 ms |
+| Linux x64 · DataVo Relaxed (20 Nov) | **946.4 ms** | **28.155 MB** | 1.6 ms | **0.1 ms** |
+| Linux x64 · SQLite `WAL NORMAL` (20 Nov) | 1,839.1 ms | 29.082 MB | **0.6 ms** | 3.9 ms |
+| Windows x64 · DataVo Production (20 Nov) | 1,811.5 ms | **28.155 MB** | 40.3 ms | 14.1 ms |
+| Windows x64 · DataVo Relaxed (20 Nov) | **1,299.3 ms** | **28.155 MB** | 3.9 ms | **0.1 ms** |
+| Windows x64 · SQLite `WAL NORMAL` (20 Nov) | 2,605.2 ms | 29.082 MB | **1.8 ms** | 5.4 ms |
 
 *(As with YCSB, the `WhitepaperEngineMatrix` harness does not currently instantiate an `SQLite WAL FULL` comparator in `space-and-recovery`; the matched pair in this table is `DataVo Relaxed` against `SQLite WAL NORMAL`.)*
 
@@ -328,7 +328,7 @@ We can visualize concurrent contention under multiple threads in Figure 8:
 | **Linux x64 CI** (`44916996459`, 21 Nov) | DataVo (`InMemory`) | **1,552,810** | 7,719,876 | **50,986** | **0.006 ms** | **0.212 ms** |
 | **Linux x64 CI** (`44916996459`, 21 Nov) | SQLite (`WAL, normal`) | 819,171 | 4,048,881 | 49,367 | 0.178 ms | 2.515 ms |
 | **Linux x64 CI** (`44916996459`, 21 Nov) | SQLite (`shared-cache`) | 336,952 | 1,721,428 | 2 | 0.095 ms | 5,105 ms |
-| **Windows x64 CI** (`44916996459`, 21 Nov) | DataVo (`InMemory`) | **1,879,968** | 17,477,611 | **0** *(starved)* | **0.006 ms** | — *(0 writes)* |
+| **Windows x64 CI** (`44916996459`, 21 Nov) | DataVo (`InMemory`) | **1,879,968** | 17,477,611 | **0** *(starved)* | **0.006 ms** | *(0 writes)* |
 | **Windows x64 CI** (`44916996459`, 21 Nov) | SQLite (`WAL, normal`) | 339,416 | 2,375,126 | **20,592** | 0.206 ms | **3.796 ms** |
 | **Windows x64 CI** (`44916996459`, 21 Nov) | SQLite (`shared-cache`) | 613,042 | 3,855,821 | 1 | 0.012 ms | 6,286 ms |
 
@@ -362,7 +362,7 @@ Four observations stand out across the sync suite (as seen in Figure 9):
 
 - **Wire size and client memory.** Over loopback, wall-clock sync times are relatively close, but wire payload and GC pressure diverge sharply. DataVo-Sync transfers **45.5 B/row** (**4.7× smaller** than plain JSON and **8.0× smaller** than ElectricSQL) while allocating **36.4–49.1 MB** on the client (**2.6–3.6× less** than custom JSON/SQLite and **5.1–6.9× less** than ElectricSQL's `251.4 MB` / `259 MB` peak RSS). On cellular or metered field connections, wire size dominates sync time.
 - **Live commit propagation (PG commit → visible locally).** DataVo-Sync `lsm` reaches **1.98 ms p50** (and **1.09 ms p50** in Scenario B), compared to **3.44 ms p50** for ElectricSQL's HTTP long-poll and **1.33–1.53 ms p50** for the custom direct-push JSON/WebSocket baseline.
-- **Offline burst and convergence.** Two replicas (`A` and `B`) sync 1,000 rows from PostgreSQL; `A` disconnects, commits **500 local writes** (400 inserts and 100 updates), and reconnects. Across **6 of 6 CI runs**, PostgreSQL, `A`, and `B` converged identically row-for-row across all 1,400 rows—peer `B` observed `A`'s writes in **80.9–243.4 ms**, and PostgreSQL committed them in **188.6–259.0 ms**.
+- **Offline burst and convergence.** Two replicas (`A` and `B`) sync 1,000 rows from PostgreSQL; `A` disconnects, commits **500 local writes** (400 inserts and 100 updates), and reconnects. Across **6 of 6 CI runs**, PostgreSQL, `A`, and `B` converged identically row-for-row across all 1,400 rows: peer `B` observed `A`'s writes in **80.9–243.4 ms**, and PostgreSQL committed them in **188.6–259.0 ms**.
 - **Fan-out and 1,000-client hub stress.** Fanning 20,000 rows out to 50 concurrent WebSocket clients finishes in **7.13 s** (**140,218 aggregate rows/s**). Pushing the hub alone (PostgreSQL bridge off) from **10 → 100 → 1,000 concurrent WebSocket clients** on a single 2-vCPU VM holds **9.8k–14.3k rows/s** aggregate throughput, graphed in Figure 10:
 
 ![Figure 10: WebSocket sync scaling from 10 to 1,000 concurrent clients on a 2-vCPU hub](/blog/part-1/03-websocket-client-scaling.png)
@@ -383,7 +383,7 @@ Put those limits together with the wins, and the decision boundary is straightfo
 
 - **Use SQLite** if you want the default embedded SQL database with the broadest SQL support, the largest ecosystem, and two decades of failure experience. DataVo's dialect is its own and its `0.4.0-rc.1` on-disk format may still change.
 - **Use DuckDB** if your workload is whole-table OLAP analytics over large datasets or Parquet/CSV files. It is one to three orders of magnitude faster than either DataVo or SQLite on those queries.
-- **Use ElectricSQL** if you want read-path sync from PostgreSQL into a browser or app from an established, maintained product. My comparison covers one workload—initial sync and live latency over loopback—not its full feature set. In this setup it served as a read path; DataVo-Sync adds an offline write path, which is a different scope rather than a better implementation of the same one.
+- **Use ElectricSQL** if you want read-path sync from PostgreSQL into a browser or app from an established, maintained product. My comparison covers one workload (initial sync and live latency over loopback), not its full feature set. In this setup it served as a read path; DataVo-Sync adds an offline write path, which is a different scope rather than a better implementation of the same one.
 - **Try DataVo** if you are building in .NET and specifically want managed Native AOT packaging with zero native binaries, SQL + `VECTOR(n)` search + Z-set incremental views in one transaction log, or bidirectional offline-first PostgreSQL sync.
 
 ## Getting started
@@ -404,14 +404,15 @@ db.Execute("CREATE TABLE Notes (Id INT PRIMARY KEY, Tag VARCHAR(32), Embedding V
 - **Open-source engine and documentation:** [github.com/ArintonAkos/DataVo-DBMS](https://github.com/ArintonAkos/DataVo-DBMS) · [Full Manual](https://arintonakos.github.io/DataVo-DBMS/)
 - **Commercial `DataVo-Sync` add-on:** For early access or licensing for offline-first PostgreSQL sync, reach out via `@ArintonAkos` on GitHub.
 
-> [!TIP]
-> Enjoyed the deep dive? Star [`ArintonAkos/DataVo-DBMS`](https://github.com/ArintonAkos/DataVo-DBMS) on GitHub to follow Parts 2–7.
+::: tip Source Code
+The source code, benchmark harnesses, and raw CI logs for this series are in [`ArintonAkos/DataVo-DBMS`](https://github.com/ArintonAkos/DataVo-DBMS).
+:::
 
 ## What comes next
 
 - **[Part 2.](/blog/part-2-packed-buffers-aot-and-roslyn-codegen)** Packed byte buffers, Native AOT, and Roslyn codegen: how a 55 ns point lookup works with zero native binaries, prepared statements, and typed execution paths.
 - **Part 3.** What an fsync costs, across operating systems: the 4 ms tie, the 0.1 ms Linux case, and the Windows scaling problem.
-- **Part 4.** Cutting 100k-row sync allocations from 1.2 GB to 36 MB: zero-allocation initial sync and compressed columnar wire transfer.
+- **Part 4.** Z-sets, from incremental views to a 36 MB sync: wire protocol, offline conflict convergence, and reproducible Docker benchmarks against PostgreSQL 17 and ElectricSQL 1.8.1.
 - **Part 5.** HNSW, the JIT, and the exact fallback: recall on clustered data, and why a graph search sometimes loses to a scan.
 - **Part 6.** Differential oracle testing: how our matrix caught five wrong-answer bugs before we tuned a single microsecond.
 - **Part 7.** Building an offline-first .NET 10 app end-to-end: combining Native AOT, filtered `VECTOR(n)` search, live Z-set views, and bidirectional Postgres sync in a real desktop/mobile architecture.

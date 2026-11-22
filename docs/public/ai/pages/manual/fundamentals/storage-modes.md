@@ -69,6 +69,6 @@ For `Lsm` and `Disk`, DataVo serves one engine per directory per process:
 
 ## See Also
 
-- [LSM & Durability](/manual/fundamentals/lsm-and-durability) — WAL commit atomicity, strict vs. relaxed fsync, and SSTable layout
-- [Configuration Reference](/manual/reference/configuration) — Complete list of `DataVoConfig` properties and defaults
-- [Transactions & MVCC](/manual/fundamentals/transactions-and-mvcc) — Snapshot isolation and concurrency across storage modes
+- [LSM & Durability](/manual/fundamentals/lsm-and-durability): WAL commit atomicity, strict vs. relaxed fsync, and SSTable layout
+- [Configuration Reference](/manual/reference/configuration): Complete list of `DataVoConfig` properties and defaults
+- [Transactions & MVCC](/manual/fundamentals/transactions-and-mvcc): Snapshot isolation and concurrency across storage modes

@@ -33,7 +33,7 @@ Medians compare DataVo LSM (`LsmStrictFsync = false`) against SQLite (`WAL`, `sy
 ## Three Rules Behind the Numbers
 
 1. **Stay on a typed fast path:** DataVo is fast when a query runs on its typed single-table scan, typed integer-key join, SIMD columnar index, or hybrid vector path. Queries that fall back to the general evaluator (`DISTINCT`, CTEs, `RIGHT`/`FULL` joins, text/GUID joins, cross-table `OR`, or joins inside explicit transactions) allocate 2–4 KB per row and are substantially slower than SQLite. See [Query Planner & Fast Paths](/manual/internals/query-planner).
-2. **SQLite's row decoder leads slightly on raw full scans:** When both engines touch all 1,000,000 rows without an index advantage, SQLite's record header offset table gives it a 1.05–1.8× edge over DataVo's sequential cell walk. DataVo wins full scans by doing less work—hashing instead of sorting for `GROUP BY`, or scanning 4,096-row columnar chunks with zone maps.
+2. **SQLite's row decoder leads slightly on raw full scans:** When both engines touch all 1,000,000 rows without an index advantage, SQLite's record header offset table gives it a 1.05–1.8× edge over DataVo's sequential cell walk. DataVo wins full scans by doing less work: hashing instead of sorting for `GROUP BY`, or scanning 4,096-row columnar chunks with zone maps.
 3. **Index coverage decides edge cases:** SQLite uses covering secondary indexes for high-cardinality `GROUP BY` and per-row probes. DataVo uses clustered PKs for ranges, secondary indexes for equality/selective inner joins, and single-column integer indexes for counting `GROUP BY` (nullable keys still require a null-flag pass on LSM).
 
 ## 28 Relational SQL Shapes (1,000,000 Orders) {#relational-results}
@@ -65,7 +65,7 @@ Median latency per call (p99 in brackets). Ratio = SQLite / DataVo LSM (> 1 mean
 | **J6** Orders × Customers, `GROUP BY c.Region` | 130 ms (141 ms) | 195 ms | 764 ms | 3.40 ms | **5.87×** |
 | **J7** Products (2%) × Orders, `COUNT`, `SUM` | 6.70 ms (9.62 ms) | 6.20 ms | 15.3 ms | 1.05 ms | **2.29×** |
 
-**Mechanisms:** SQLite executes J1, J4, and J6 as index nested-loop joins (1M B-tree descents). DataVo uses hash joins, index-driven probes (J2, J3, J7), and a 12.5 KB `DenseInt64Set` bit set for key-only tables (J1, J4, J5—cutting per-call allocation to 31–41 KB). SQLite narrowly wins J5 (36.6 ms vs 39.1 ms) because DataVo pays per-row cell walking plus rebuilding the bit set per call.
+**Mechanisms:** SQLite executes J1, J4, and J6 as index nested-loop joins (1M B-tree descents). DataVo uses hash joins, index-driven probes (J2, J3, J7), and a 12.5 KB `DenseInt64Set` bit set for key-only tables (J1, J4, J5, cutting per-call allocation to 31–41 KB). SQLite narrowly wins J5 (36.6 ms vs 39.1 ms) because DataVo pays per-row cell walking plus rebuilding the bit set per call.
 :::
 
 ::: details Filters (W1–W6)
@@ -167,16 +167,16 @@ The initial 14 November oracle run caught **5 correctness bugs** (outer-join pre
 ::: details Correctness Findings Log (B1–B5)
 | # | Query Shape | Bug Before Fix | Fix Commit |
 | --- | --- | --- | --- |
-| **B1** | `LEFT JOIN ... WHERE c.Id IS NULL` (J5) | Returned `0` instead of `250,395` (filtered before NULL padding) | `bfb1390` — filter after outer join |
-| **B2** | `COUNT(DISTINCT CustomerId)` | Returned `2,000` instead of `175` (`DISTINCT` dropped) | `6743521` — parsed & routed to general path |
-| **B3** | Vector top-10 + `JOIN` with table alias (V3) | Returned 0–2 rows (alias `d` didn't match table `Docs`) | `8ce4295` — resolve qualifiers via table service |
-| **B4** | 3-table join with `AND` across two dimensions (J2/J3) | Returned `0` rows instead of `1,827` (mismatched key order) | `fd81cf8` — canonical table key ordering |
-| **B5** | Vector top-10 + `JOIN Authors WHERE a.Country = @k` (V4) | 9/10 rows failed filter (`a.Country` dropped) | `8ce4295` — pre-filter, join, and expand candidates |
+| **B1** | `LEFT JOIN ... WHERE c.Id IS NULL` (J5) | Returned `0` instead of `250,395` (filtered before NULL padding) | `bfb1390`: filter after outer join |
+| **B2** | `COUNT(DISTINCT CustomerId)` | Returned `2,000` instead of `175` (`DISTINCT` dropped) | `6743521`: parsed & routed to general path |
+| **B3** | Vector top-10 + `JOIN` with table alias (V3) | Returned 0–2 rows (alias `d` didn't match table `Docs`) | `8ce4295`: resolve qualifiers via table service |
+| **B4** | 3-table join with `AND` across two dimensions (J2/J3) | Returned `0` rows instead of `1,827` (mismatched key order) | `fd81cf8`: canonical table key ordering |
+| **B5** | Vector top-10 + `JOIN Authors WHERE a.Country = @k` (V4) | 9/10 rows failed filter (`a.Country` dropped) | `8ce4295`: pre-filter, join, and expand candidates |
 :::
 
 **Scope limits:** Single Apple M4 Pro machine, warm OS page cache, read-only timed queries, and ADO.NET client overhead included for SQLite/DuckDB. On x64 Linux/Windows runners, DataVo's scan lead over SQLite is 2–2.8× narrower (see [Benchmark Results](/manual/performance/benchmarks#part-iii-platforms)). Treat differences under ~20% in single-run scenarios as within measurement noise.
 
 ## See Also
-- [Benchmark Results](/manual/performance/benchmarks) — Microbenchmarks, durability (`fsync`), reactive IVM, and cross-platform CI numbers
-- [Reproducing Benchmarks](/manual/performance/reproducing-benchmarks) — CLI commands to run `sql-matrix` and `hybrid-vector` locally
-- [Query Planner & Fast Paths](/manual/internals/query-planner) — How to keep queries on DataVo's typed fast paths
+- [Benchmark Results](/manual/performance/benchmarks): Microbenchmarks, durability (`fsync`), reactive IVM, and cross-platform CI numbers
+- [Reproducing Benchmarks](/manual/performance/reproducing-benchmarks): CLI commands to run `sql-matrix` and `hybrid-vector` locally
+- [Query Planner & Fast Paths](/manual/internals/query-planner): How to keep queries on DataVo's typed fast paths

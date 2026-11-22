@@ -54,6 +54,6 @@ Console.WriteLine(db.Execute("SELECT Id, Name FROM players")[0].Data.Count); // 
 
 ## See Also
 
-- [Quickstart](/manual/getting-started/quickstart) — Build a complete in-memory and persistent LSM example.
-- [Choosing an Interface](/manual/getting-started/choosing-an-interface) — Decide between `DataVoContext`, Compiled LINQ, ADO.NET, Dapper, and EF Core.
-- [Native AOT](/manual/client-interfaces/native-aot) — Publishing trimmed, single-file native binaries.
+- [Quickstart](/manual/getting-started/quickstart): Build a complete in-memory and persistent LSM example.
+- [Choosing an Interface](/manual/getting-started/choosing-an-interface): Decide between `DataVoContext`, Compiled LINQ, ADO.NET, Dapper, and EF Core.
+- [Native AOT](/manual/client-interfaces/native-aot): Publishing trimmed, single-file native binaries.

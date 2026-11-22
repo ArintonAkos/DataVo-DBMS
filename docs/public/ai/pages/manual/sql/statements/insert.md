@@ -99,9 +99,7 @@ To upsert rows in application code, check existence or handle the key conflict i
 
 ## See Also
 
-- [UPDATE](/manual/sql/statements/update) — Modifying existing rows with `SET` expressions
-- [DELETE](/manual/sql/statements/delete) — Removing rows and compacting storage with `VACUUM`
-- [CREATE TABLE](/manual/sql/statements/create-table) — Defining column types, `DEFAULT` values, and constraints
-- [Data Types](/manual/sql/data-types) — Supported SQL types including `DATE`, `GUID`, and `VECTOR(n)`
-- [Transactions](/manual/sql/statements/transactions) — Grouping writes with `BEGIN`, `SAVEPOINT`, `COMMIT`, and `ROLLBACK`
-- [Vector Search](/manual/fundamentals/vector-search) — Storing and querying `VECTOR(n)` embeddings
+- [UPDATE](/manual/sql/statements/update): Modifying existing rows with `SET` expressions
+- [DELETE](/manual/sql/statements/delete): Removing rows and compacting storage with `VACUUM`
+- [CREATE TABLE](/manual/sql/statements/create-table): Defining column types, `DEFAULT` values, and constraints
+- [Transactions](/manual/sql/statements/transactions): Grouping writes with `BEGIN`, `SAVEPOINT`, `COMMIT`, and `ROLLBACK`

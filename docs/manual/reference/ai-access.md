@@ -5,7 +5,7 @@ description: Consume DataVo v0.4 documentation in LLMs and coding assistants via
 
 # AI Access & MCP
 
-DataVo publishes a curated, AI-readable Markdown export of the `v0.4.0-rc.1` manual and Engineering Blog alongside the VitePress site. Only public manual and blog pages are exported — internal architecture notes, audits, and raw source directories are excluded.
+DataVo publishes a curated, AI-readable Markdown export of the `v0.4.0-rc.1` manual and Engineering Blog alongside the VitePress site. Only public manual and blog pages are exported; internal architecture notes, audits, and raw source directories are excluded.
 
 ## Static AI Endpoints
 
@@ -64,5 +64,5 @@ The worker exposes `POST /mcp` (`list_docs`, `get_doc`, `search_docs`, and `data
 
 ## See Also
 
-- [Introduction](/manual/getting-started/introduction) — Overview of DataVo v0.4.
-- [Quickstart](/manual/getting-started/quickstart) — Get started in C# in 60 seconds.
+- [Introduction](/manual/getting-started/introduction): Overview of DataVo v0.4.
+- [Quickstart](/manual/getting-started/quickstart): Get started in C# in 60 seconds.

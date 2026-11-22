@@ -95,7 +95,7 @@ LIMIT 10;
 DataVo guarantees the requested `LIMIT` whenever enough matching rows exist:
 
 1. **Adaptive candidate expansion:** DataVo requests `~LIMIT / selectivity` candidates from the vector index, tests scalar or joined filters on stored rows, and expands the candidate count if too few rows pass.
-2. **Exact-scan cost routing:** When a selective filter widens the HNSW beam past the break-even point (~9% of vectors at 384D, ~20% at 1,536D), HNSW automatically switches to an exact SIMD scan—improving both latency and recall. (Set `HNSWIndex.EnableExactScanCostRouting = false` in C# to disable.)
+2. **Exact-scan cost routing:** When a selective filter widens the HNSW beam past the break-even point (~9% of vectors at 384D, ~20% at 1,536D), HNSW automatically switches to an exact SIMD scan, improving both latency and recall. (Set `HNSWIndex.EnableExactScanCostRouting = false` in C# to disable.)
 3. **Exact table-scan fallback:** If expansion still finds fewer than `LIMIT` passing rows, DataVo filters the table first and ranks only the surviving rows against the index's stored vectors.
 
 ## C# Direct Vector Search (`SearchNearest`)
@@ -126,6 +126,6 @@ public List<Dictionary<string, object?>> SearchNearest(
 
 ## See Also
 
-- [SQL Indexes (`CREATE INDEX`)](/manual/sql/statements/indexes) — Full DDL syntax for `BTREE`, `HNSW`, `FLAT`, and `COLUMNAR` indexes
-- [SQL Data Types](/manual/sql/data-types) — `VECTOR(n)` column declarations and literal syntax
-- [LSM & Durability](/manual/fundamentals/lsm-and-durability) — How HNSW snapshots and FLAT indexes recover on reopen
+- [SQL Indexes (`CREATE INDEX`)](/manual/sql/statements/indexes): Full DDL syntax for `BTREE`, `HNSW`, `FLAT`, and `COLUMNAR` indexes
+- [SQL Data Types](/manual/sql/data-types): `VECTOR(n)` column declarations and literal syntax
+- [LSM & Durability](/manual/fundamentals/lsm-and-durability): How HNSW snapshots and FLAT indexes recover on reopen

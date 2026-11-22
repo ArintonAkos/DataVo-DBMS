@@ -40,6 +40,6 @@ For commercial licensing, evaluation builds, or architecture inquiries, reach ou
 
 ## See Also
 
-- [LSM & Durability](/manual/fundamentals/lsm-and-durability) — Local crash-safe persistence used by offline DataVo clients
-- [Live Reactive Views](/manual/fundamentals/reactive-views) — Real-time UI updates driven by local and synced changes
-- [Benchmarks](/manual/performance/benchmarks) — Embedded engine performance benchmarks
+- [LSM & Durability](/manual/fundamentals/lsm-and-durability): Local crash-safe persistence used by offline DataVo clients
+- [Live Reactive Views](/manual/fundamentals/reactive-views): Real-time UI updates driven by local and synced changes
+- [Benchmarks](/manual/performance/benchmarks): Embedded engine performance benchmarks

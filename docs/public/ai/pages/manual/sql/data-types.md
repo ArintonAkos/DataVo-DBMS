@@ -37,7 +37,7 @@ CREATE TABLE documents (
 
 ## The `DATE` Storage & Row Contract
 
-`DATE` stores only a calendar date—no time-of-day or timezone component—as a zero-based 32-bit `DayNumber` (`0` = `0001-01-01`, `3652058` = `9999-12-31`).
+`DATE` stores only a calendar date (with no time-of-day or timezone component) as a zero-based 32-bit `DayNumber` (`0` = `0001-01-01`, `3652058` = `9999-12-31`).
 
 - **Query materialization:** Reading a `DATE` column returns a `DataVoDate` struct (`DataVo.Core.DataVoDate`).
 - **.NET interoperability:** On `.NET 10`, convert cleanly with `DataVoDate.FromDateOnly(DateOnly)` / `.ToDateOnly()` or `DataVoDate.FromDateTime(DateTime)` / `.ToDateTime()` (midnight `DateTimeKind.Unspecified`).
@@ -55,6 +55,6 @@ DataVo throws a `ParserException` at `CREATE TABLE` or `ALTER TABLE` time for ty
 | `BLOB`, `BINARY`, `VARBINARY`, `JSON`, `JSONB` | Not supported as native column types in `v0.4`; encode as `VARCHAR` (e.g., Base64 or JSON text). |
 
 ## See Also
-- [CREATE TABLE](/manual/sql/statements/create-table) — Declaring columns, constraints, and defaults in `CREATE TABLE`
-- [Indexes](/manual/sql/statements/indexes) — Choosing B-Tree, HNSW, FLAT, or COLUMNAR indexes by column type
-- [SQL Compatibility](/manual/sql/compatibility) — Full dialect comparison against SQLite and PostgreSQL
+- [CREATE TABLE](/manual/sql/statements/create-table): Declaring columns, constraints, and defaults in `CREATE TABLE`
+- [Indexes](/manual/sql/statements/indexes): Choosing B-Tree, HNSW, FLAT, or COLUMNAR indexes by column type
+- [SQL Compatibility](/manual/sql/compatibility): Full dialect comparison against SQLite and PostgreSQL

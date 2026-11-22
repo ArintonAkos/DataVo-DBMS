@@ -119,7 +119,7 @@ DataVo authorizes operations using six engine-level permission tokens. Permissio
 | `ADMIN` | — | Full administrative privileges across every operation |
 
 ::: warning No Object-Level `ON <table>` Clause
-DataVo permissions are granted at the engine/principal level—there is **no `ON <table>` or `ON <database>.*` clause** in `GRANT` or `REVOKE`. Adding an `ON ...` clause produces a `ParserException`.
+DataVo permissions are granted at the engine/principal level: there is **no `ON <table>` or `ON <database>.*` clause** in `GRANT` or `REVOKE`. Adding an `ON ...` clause produces a `ParserException`.
 :::
 
 ### Granting, Revoking & Inspecting Privileges
@@ -162,8 +162,6 @@ Unauthorized statements throw an `AuthorizationException` when engine authentica
 
 ## See Also
 
-- [CREATE TABLE](/manual/sql/statements/create-table) — Defining tables inside a database
-- [ALTER TABLE & DROP](/manual/sql/statements/alter-and-drop) — Altering and dropping tables and indexes
-- [Transactions](/manual/sql/statements/transactions) — Transaction control statements covered by the `TRANSACTION` permission
-- [Configuration Reference](/manual/reference/configuration) — Engine authentication and security configuration options
-- [SQL Compatibility](/manual/sql/compatibility) — Dialect comparison and DataVo-specific extensions
+- [CREATE TABLE](/manual/sql/statements/create-table): Defining tables inside a database
+- [Transactions](/manual/sql/statements/transactions): Transaction control statements covered by the `TRANSACTION` permission
+- [Configuration Reference](/manual/reference/configuration): Engine authentication and security configuration options

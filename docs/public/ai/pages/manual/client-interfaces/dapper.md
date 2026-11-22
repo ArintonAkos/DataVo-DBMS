@@ -3,7 +3,7 @@
 > Source route: /manual/client-interfaces/dapper
 > Source file: manual/client-interfaces/dapper.md
 
-Dapper works out of the box with DataVo via `DataVo.Data`. Because `DataVoConnection` implements `DbConnection`, Dapper's `IDbConnection` extension methods require no DataVo-specific adapter package.
+Dapper works directly with DataVo via `DataVo.Data`. Because `DataVoConnection` implements `DbConnection`, Dapper's `IDbConnection` extension methods require no DataVo-specific adapter package.
 
 ```csharp
 using Dapper;
@@ -74,6 +74,6 @@ Both interfaces can share the same underlying database: use Dapper for flexible 
 
 ## See Also
 
-- [ADO.NET Provider (DataVo.Data)](/manual/client-interfaces/ado-net) — Connection strings, savepoints, and reader behavior
-- [Compiled LINQ & Spatial Queries](/manual/client-interfaces/compiled-linq) — Zero-reflection compile-time queries
-- [Choosing an Interface](/manual/getting-started/choosing-an-interface) — Compare all DataVo client APIs
+- [ADO.NET Provider (DataVo.Data)](/manual/client-interfaces/ado-net): Connection strings, savepoints, and reader behavior
+- [Compiled LINQ & Spatial Queries](/manual/client-interfaces/compiled-linq): Zero-reflection compile-time queries
+- [Choosing an Interface](/manual/getting-started/choosing-an-interface): Compare all DataVo client APIs

@@ -5,7 +5,7 @@ description: Standard System.Data.Common provider for embedded DataVo databases,
 
 # ADO.NET Provider (`DataVo.Data`)
 
-`DataVo.Data` implements the standard `System.Data.Common` abstractions (`DbConnection`, `DbCommand`, `DbDataReader`, `DbTransaction`, `DbParameter`) over the in-process DataVo engine. Any library targeting `IDbConnection` — including [Dapper](/manual/client-interfaces/dapper) — works without custom adapters.
+`DataVo.Data` implements the standard `System.Data.Common` abstractions (`DbConnection`, `DbCommand`, `DbDataReader`, `DbTransaction`, `DbParameter`) over the in-process DataVo engine. Any library targeting `IDbConnection`, including [Dapper](/manual/client-interfaces/dapper), works without custom adapters.
 
 ```csharp
 using DataVo.Data;
@@ -79,6 +79,6 @@ Calling `Prepare()` (or using parameterized commands) routes execution through D
 
 ## See Also
 
-- [Dapper](/manual/client-interfaces/dapper) — Using Dapper over `DataVoConnection`
-- [Error Handling](/manual/reference/error-handling) — `DataVoException` and `DV*` error codes
-- [Native AOT Deployment](/manual/client-interfaces/native-aot) — Trim and AOT compatibility for `DataVo.Data`
+- [Dapper](/manual/client-interfaces/dapper): Using Dapper over `DataVoConnection`
+- [Error Handling](/manual/reference/error-handling): `DataVoException` and `DV*` error codes
+- [Native AOT Deployment](/manual/client-interfaces/native-aot): Trim and AOT compatibility for `DataVo.Data`

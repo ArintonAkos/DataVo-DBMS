@@ -5,7 +5,7 @@ description: Architecture overview of DataVo v0.4, a C#-native embedded database
 
 # Introduction
 
-DataVo is an embedded database engine written in C# for `.NET 10`. It runs directly inside your application process with no external server, no native DLLs, and full Native AOT compatibility — combining SQL, LSM storage, columnar indexes, vector search, and live reactive views in one library.
+DataVo is an embedded database engine written in C# for `.NET 10`. It runs directly inside your application process with no external server, no native DLLs, and full Native AOT compatibility, combining SQL, LSM storage, columnar indexes, vector search, and live reactive views in one library.
 
 ```csharp
 using DataVo.Core;
@@ -44,7 +44,7 @@ Console.WriteLine($"{result.Data[0]["Name"]}: {result.Data[0]["Score"]}");
 
 ## Architecture Overview
 
-Every client interface — `DataVoContext`, compiled LINQ, ADO.NET, Dapper, and the EF Core bridge — routes into the same parser, typed query planner, and storage engines.
+Every client interface—`DataVoContext`, compiled LINQ, ADO.NET, Dapper, and the EF Core bridge—routes into the same parser, typed query planner, and storage engines.
 
 <div class="sketch-diagram">
   <img class="light-only" src="/manual/fig-01-architecture-light.svg" alt="DataVo architecture showing client interfaces, SQL parser, typed fast-path planner, and InMemory and LSM storage engines" />
@@ -61,7 +61,7 @@ Every client interface — `DataVoContext`, compiled LINQ, ADO.NET, Dapper, and 
 
 ### Typed Fast Paths & Vector Search
 
-Queries are first offered to **typed execution paths** (single-table scans, integer-key hash joins, columnar aggregates, index-driven joins, and filtered vector search) that read cells straight from stored bytes without building per-row dictionaries. If a query shape is outside the fast paths, it falls back seamlessly to the general evaluator with identical semantics.
+Queries are first offered to **typed execution paths** (single-table scans, integer-key hash joins, columnar aggregates, index-driven joins, and filtered vector search) that read cells straight from stored bytes without building per-row dictionaries. If a query shape is outside the fast paths, it falls back to the general evaluator with identical semantics.
 
 `VECTOR(n)` columns are first-class relational columns backed by SIMD-accelerated `FLAT` (exact) or `HNSW` (approximate graph with cost-based exact fallback) indexes, keeping embeddings and metadata in one transaction log.
 
@@ -74,7 +74,7 @@ Queries are first offered to **typed execution paths** (single-table scans, inte
 | `DataVo.Data` | Standard ADO.NET provider (`DataVoConnection`, `DataVoCommand`, `DataVoDataReader`) + Dapper | Yes |
 | `DataVo.EntityFrameworkCore` | Experimental EF Core bridge (`UseDataVo(...)`); not a standalone provider | No |
 
-## Where DataVo Fits — and Where It Doesn't
+## Where DataVo Fits and Where It Doesn't
 
 - **Strong fit:** Local-first `.NET 10` apps, game tooling, simulations, and retrieval workloads that combine relational filtering with vector search. On warm caches, v0.4 outperforms SQLite on key lookups, low-cardinality `GROUP BY`, integer-key joins, columnar aggregates, and filtered vector search.
 - **Not a fit:** Client/server deployments, multi-process writes to one directory (`datavo.lock` enforces single-process ownership), stored procedures/triggers, or serializable predicate locking. For whole-table analytics over tens of millions of rows, DuckDB remains orders of magnitude faster.
@@ -82,7 +82,7 @@ Queries are first offered to **typed execution paths** (single-table scans, inte
 
 ## See Also
 
-- [Installation & Packages](/manual/getting-started/installation) — NuGet packages (`0.4.0-rc.1`) and `.NET 10` requirements.
-- [Quickstart](/manual/getting-started/quickstart) — End-to-end C# walkthrough with `InMemory` and `Lsm`.
-- [DataVo vs SQLite](/manual/performance/datavo-vs-sqlite) — Oracle-verified benchmarks across 28 SQL shapes and vector queries.
-- [Status & Roadmap](/manual/getting-started/roadmap) — Release candidate guarantees, boundaries, and the v0.5 plan.
+- [Installation & Packages](/manual/getting-started/installation): NuGet packages (`0.4.0-rc.1`) and `.NET 10` requirements.
+- [Quickstart](/manual/getting-started/quickstart): End-to-end C# walkthrough with `InMemory` and `Lsm`.
+- [DataVo vs SQLite](/manual/performance/datavo-vs-sqlite): Oracle-verified benchmarks across 28 SQL shapes and vector queries.
+- [Status & Roadmap](/manual/getting-started/roadmap): Release candidate guarantees, boundaries, and the v0.5 plan.

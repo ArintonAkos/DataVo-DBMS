@@ -103,6 +103,6 @@ catch (DataVo.Data.DataVoException ex) when (ex.ErrorCode == DataVoErrorCodes.De
 
 ## See Also
 
-- [DataVoContext API](/manual/client-interfaces/datavo-context-api) — Checking `QueryResult` on SQL execution
-- [ADO.NET Provider](/manual/client-interfaces/ado-net) — Catching `DataVoException`
-- [Limits & Unsupported Features](/manual/reference/limits) — Known engine and SQL dialect boundaries
+- [DataVoContext API](/manual/client-interfaces/datavo-context-api): Checking `QueryResult` on SQL execution
+- [ADO.NET Provider](/manual/client-interfaces/ado-net): Catching `DataVoException`
+- [Limits & Unsupported Features](/manual/reference/limits): Known engine and SQL dialect boundaries

@@ -54,6 +54,6 @@ Every construct marked **Supported** returns identical results across storage mo
 - **No silent type fallbacks:** Unsupported types such as `DECIMAL`, `NUMERIC`, `DATETIME`, and `TIMESTAMP` throw an explicit `ParserException` instead of silently storing text.
 
 ## See Also
-- [Data Types](/manual/sql/data-types) — Supported SQL types, .NET CLR mappings, and unsupported type errors
-- [Query Planner](/manual/internals/query-planner) — How DataVo chooses between typed fast paths and the general evaluator
-- [Functions & Operators](/manual/sql/functions) — Complete list of aggregates, window functions, scalar functions, and operators
+- [Data Types](/manual/sql/data-types): Supported SQL types, .NET CLR mappings, and unsupported type errors
+- [Query Planner](/manual/internals/query-planner): How DataVo chooses between typed fast paths and the general evaluator
+- [Functions & Operators](/manual/sql/functions): Complete list of aggregates, window functions, scalar functions, and operators

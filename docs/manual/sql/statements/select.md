@@ -299,7 +299,7 @@ LEFT JOIN MatchTotals m ON m.PlayerId = h.Id
 ORDER BY h.Score DESC;
 ```
 
-::: info DataVo Extension — `WITH RECURSIVE`
+::: info DataVo Extension: `WITH RECURSIVE`
 Standard one-shot `SELECT` queries support non-recursive `WITH` CTEs. **`WITH RECURSIVE`** is supported specifically for [Live Reactive Views](/manual/fundamentals/reactive-views) created via `Subscribe` in C#.
 :::
 
@@ -349,10 +349,7 @@ SELECT Id, Name FROM players WHERE Region = 'NA';
 
 ## See Also
 
-- [Functions & Operators](/manual/sql/functions) — Complete reference for aggregates, `RANK()`, `LOWER`/`UPPER`, and vector operators
-- [EXPLAIN](/manual/sql/statements/explain) — Inspecting query plans, physical operators, and fast-path choices
-- [Indexes](/manual/sql/statements/indexes) — Accelerating `WHERE`, `JOIN`, and vector `ORDER BY` queries with `BTREE`, `HNSW`, `FLAT`, and `COLUMNAR`
-- [Query Planner](/manual/internals/query-planner) — Typed fast paths, bounded top-k heaps, and general evaluator fallback rules
-- [Vector Search](/manual/fundamentals/vector-search) — Indexing and tuning `<->` and `<=>` similarity queries
-- [Live Reactive Views](/manual/fundamentals/reactive-views) — Continuous subscriptions and `WITH RECURSIVE` queries in C#
-- [SQL Compatibility](/manual/sql/compatibility) — Full dialect comparison against SQLite and PostgreSQL
+- [Functions & Operators](/manual/sql/functions): Aggregates, `RANK()`, `LOWER`/`UPPER`, and vector distance operators
+- [EXPLAIN](/manual/sql/statements/explain): Inspecting query plans, physical operators, and fast-path choices
+- [Indexes](/manual/sql/statements/indexes): Accelerating `WHERE`, `JOIN`, and vector `ORDER BY` queries
+- [Query Planner](/manual/internals/query-planner): Typed fast paths, bounded top-k heaps, and general evaluator fallback rules

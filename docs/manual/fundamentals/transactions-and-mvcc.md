@@ -26,7 +26,7 @@ db.Execute("UPDATE players SET score = 150 WHERE id = 1");
 db.Execute("COMMIT");
 ```
 
-> **`DataVoContext` uses SQL statements for transactions.** There is no `db.BeginTransaction()` method on `DataVoContext`—issue `BEGIN` / `COMMIT` / `ROLLBACK` via `db.Execute(...)`. If you need a `DbTransaction` object, use `DataVoConnection.BeginTransaction()` in [ADO.NET](/manual/client-interfaces/ado-net).
+> **`DataVoContext` uses SQL statements for transactions.** There is no `db.BeginTransaction()` method on `DataVoContext`: issue `BEGIN` / `COMMIT` / `ROLLBACK` via `db.Execute(...)`. If you need a `DbTransaction` object, use `DataVoConnection.BeginTransaction()` in [ADO.NET](/manual/client-interfaces/ado-net).
 
 ## Session-Bound Transactions & Savepoints
 
@@ -87,7 +87,7 @@ Multiple updates to the same row coalesce into a single pending version, and key
 
 DataVo enforces **first-committer-wins**:
 
-- If two transactions modify the same row, the first to commit succeeds. The second fails with a conflict error—either during `UPDATE`/`DELETE` if the other commit already finished, or at `COMMIT`. A failed `COMMIT` ends the transaction; retry from `BEGIN`.
+- If two transactions modify the same row, the first to commit succeeds. The second fails with a conflict error, either during `UPDATE`/`DELETE` if the other commit already finished, or at `COMMIT`. A failed `COMMIT` ends the transaction; retry from `BEGIN`.
 - At `COMMIT`, DataVo re-validates primary keys, `UNIQUE` constraints, and foreign keys against concurrent commits. Swapping key values between rows in the same transaction is supported because old rows are removed before new ones are written.
 - On `Lsm`, the entire `COMMIT` is written as one atomic batch and discarded on failure. On `InMemory`, applied steps are journaled and undone on failure.
 
@@ -121,6 +121,6 @@ tx.Commit();
 
 ## See Also
 
-- [SQL Transaction Statements](/manual/sql/statements/transactions) — Exact syntax for `BEGIN`, `COMMIT`, `ROLLBACK`, and `SAVEPOINT`
-- [LSM & Durability](/manual/fundamentals/lsm-and-durability) — Crash atomicity and strict fsync guarantees
-- [ADO.NET Provider](/manual/client-interfaces/ado-net) — `DataVoConnection` and `DataVoTransaction` usage
+- [SQL Transaction Statements](/manual/sql/statements/transactions): Exact syntax for `BEGIN`, `COMMIT`, `ROLLBACK`, and `SAVEPOINT`
+- [LSM & Durability](/manual/fundamentals/lsm-and-durability): Crash atomicity and strict fsync guarantees
+- [ADO.NET Provider](/manual/client-interfaces/ado-net): `DataVoConnection` and `DataVoTransaction` usage

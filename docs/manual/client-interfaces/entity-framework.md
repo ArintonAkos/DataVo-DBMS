@@ -5,7 +5,7 @@ description: Experimental EF Core integration bridge for DataVo with UseDataVo, 
 
 # Entity Framework Core
 
-::: warning Experimental Preview — Excluded from Native AOT
+::: warning Experimental Preview: Excluded from Native AOT
 `DataVo.EntityFrameworkCore` is an **experimental integration bridge**, not a standalone migration-capable EF Core provider. It relies on a host EF provider (such as `UseInMemoryDatabase`) for EF infrastructure services and is **excluded from DataVo's Native AOT guarantee**. For production or AOT workloads, use [`DataVoContext`](/manual/client-interfaces/datavo-context-api), [Compiled LINQ](/manual/client-interfaces/compiled-linq), or [ADO.NET / Dapper](/manual/client-interfaces/ado-net).
 :::
 
@@ -89,6 +89,6 @@ Note that `COSINE_DISTANCE()` and `L2_DISTANCE()` exist only as EF Core preview 
 
 ## See Also
 
-- [Compiled LINQ & Spatial Queries](/manual/client-interfaces/compiled-linq) — AOT-safe, zero-reflection LINQ alternative
-- [Error Handling](/manual/reference/error-handling) — `DataVoEfException` and engine error codes
-- [Native AOT Deployment](/manual/client-interfaces/native-aot) — Why `DataVo.EntityFrameworkCore` is excluded from AOT
+- [Compiled LINQ & Spatial Queries](/manual/client-interfaces/compiled-linq): AOT-safe, zero-reflection LINQ alternative
+- [Error Handling](/manual/reference/error-handling): `DataVoEfException` and engine error codes
+- [Native AOT Deployment](/manual/client-interfaces/native-aot): Why `DataVo.EntityFrameworkCore` is excluded from AOT

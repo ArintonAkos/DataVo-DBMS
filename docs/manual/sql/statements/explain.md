@@ -5,7 +5,7 @@ description: Inspect logical plans, physical execution paths, heuristic cost est
 
 # EXPLAIN
 
-`EXPLAIN` validates a `SELECT` query against the active catalog and returns a single diagnostic row describing which logical plan and physical execution path the planner selects, along with its estimated cost and decision rationale—without executing the query or returning table rows.
+`EXPLAIN` validates a `SELECT` query against the active catalog and returns a single diagnostic row describing which logical plan and physical execution path the planner selects, along with its estimated cost and decision rationale, without executing the query or returning table rows.
 
 ## Syntax
 
@@ -62,7 +62,7 @@ db.Execute("CREATE DATABASE App; USE App;");
 db.Execute("CREATE TABLE players (id INT PRIMARY KEY, name VARCHAR(80), region VARCHAR(16), score INT)");
 
 var result = db.Execute(
-    "EXPLAIN SELECT id, name FROM players WHERE region = 'EU' AND score >= 500");
+    "EXPLAIN SELECT id, name FROM players WHERE region = 'EU' AND score >= 500")[0];
 
 var row = result.Data[0];
 Console.WriteLine($"Plan:          {row["Plan"]}");
@@ -105,7 +105,7 @@ Console.WriteLine($"Reason:        {row["Reason"]}");
 
 ## See Also
 
-- [SELECT](/manual/sql/statements/select) — Full `SELECT` syntax, joins, grouping, and subqueries
-- [Query Planner & Fast Paths](/manual/internals/query-planner) — Runtime dispatch cascade for typed single-table, join, and vector fast paths
-- [CREATE INDEX](/manual/sql/statements/indexes) — Adding B-Tree, HNSW, FLAT, and Columnar indexes to speed up queries
-- [Configuration Reference](/manual/reference/configuration) — `EnableVolcanoExecution` and join-cardinality feedback settings
+- [SELECT](/manual/sql/statements/select): Full `SELECT` syntax, joins, grouping, and subqueries
+- [Query Planner & Fast Paths](/manual/internals/query-planner): Runtime dispatch cascade for typed single-table, join, and vector fast paths
+- [CREATE INDEX](/manual/sql/statements/indexes): Adding B-Tree, HNSW, FLAT, and Columnar indexes to speed up queries
+- [Configuration Reference](/manual/reference/configuration): `EnableVolcanoExecution` and join-cardinality feedback settings

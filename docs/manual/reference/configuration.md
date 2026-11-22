@@ -5,7 +5,7 @@ description: Complete DataVoConfig reference covering storage modes, LSM durabil
 
 # Configuration Reference
 
-`DataVoConfig` configures every aspect of an embedded `DataVoContext`. Most applications only set `StorageMode`, `DiskStoragePath`, and `LsmStrictFsync`; every other property ships with production-ready defaults.
+`DataVoConfig` configures every aspect of an embedded `DataVoContext`. Most applications only set `StorageMode`, `DiskStoragePath`, and `LsmStrictFsync`; every other property ships with sensible defaults.
 
 ```csharp
 using DataVo.Core;
@@ -84,6 +84,6 @@ Telemetry flags (`EnableVectorPredicateFastPathTelemetry`, `EnableHybridRoutingT
 
 ## See Also
 
-- [Storage Modes](/manual/fundamentals/storage-modes) — Comparing `InMemory`, `Lsm`, and legacy `Disk`
-- [LSM & Durability](/manual/fundamentals/lsm-and-durability) — `LsmStrictFsync` trade-offs and recovery guarantees
-- [ADO.NET Provider](/manual/client-interfaces/ado-net) — Connection string keys (`StorageMode`, `DataSource`, `WalEnabled`)
+- [Storage Modes](/manual/fundamentals/storage-modes): Comparing `InMemory`, `Lsm`, and legacy `Disk`
+- [LSM & Durability](/manual/fundamentals/lsm-and-durability): `LsmStrictFsync` trade-offs and recovery guarantees
+- [ADO.NET Provider](/manual/client-interfaces/ado-net): Connection string keys (`StorageMode`, `DataSource`, `WalEnabled`)
