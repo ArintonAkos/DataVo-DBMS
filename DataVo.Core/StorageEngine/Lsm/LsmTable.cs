@@ -112,7 +112,9 @@ public sealed class LsmTable : IDisposable
     private MemTable? _flushing; // frozen generation dequeued by the worker but not yet durable
     private Task _flushWorker = Task.CompletedTask;
     private bool _workerBusy;
+    private int _pendingCompactionChecks;
     private Exception? _backgroundError;
+    private bool _stopping;
     private bool _disposed;
 
     /// <summary>Creates an LSM table rooted at <paramref name="tableDirectory"/> and backed by <paramref name="manifest"/>.</summary>
@@ -320,6 +322,25 @@ public sealed class LsmTable : IDisposable
         }
     }
 
+    /// <summary>
+    /// Waits until all queued frozen MemTable flushes and scheduled background compaction checks finish.
+    /// </summary>
+    /// <example>
+    /// <code>
+    /// table.FlushActiveMemTable();
+    /// table.WaitForBackgroundWork();
+    /// </code>
+    /// </example>
+    internal void WaitForBackgroundWork()
+    {
+        lock (_gate)
+        {
+            DataVo.Core.Compat.ThrowHelper.ThrowIfDisposed(_disposed, this);
+            WaitForFlushPipelineNoLock(waitForScheduledCompactions: true);
+            ThrowIfUnusableNoLock();
+        }
+    }
+
     /// <summary>Releases the current active MemTable generation after draining pending flushes.</summary>
     public void Dispose()
     {
@@ -331,10 +352,13 @@ public sealed class LsmTable : IDisposable
                 return;
             }
 
-            // Drain the pipeline so no background flush touches state after disposal. A background
-            // error at this point is swallowed: Dispose must not throw, and every acknowledged
-            // write remains recoverable from the surviving WAL segments.
-            WaitForFlushPipelineNoLock();
+            _stopping = true;
+
+            // Drain pending flushes and any in-flight compaction so no background work touches state
+            // after disposal; scheduled compaction checks that have not started exit early on _stopping.
+            // A background error at this point is swallowed: Dispose must not throw, and every
+            // acknowledged write remains recoverable from the surviving WAL segments.
+            WaitForFlushPipelineNoLock(waitForScheduledCompactions: false);
 
             _disposed = true;
             active = _active;
@@ -925,11 +949,12 @@ public sealed class LsmTable : IDisposable
     {
         lock (_gate)
         {
-            if (_disposed || CompactionRegistry is null)
+            if (_stopping || _disposed || CompactionRegistry is null)
             {
                 return;
             }
 
+            _pendingCompactionChecks++;
             _flushWorker = _flushWorker.ContinueWith(
                 _ => RunScheduledCompactionCheck(),
                 CancellationToken.None,
@@ -942,8 +967,10 @@ public sealed class LsmTable : IDisposable
     {
         lock (_gate)
         {
-            if (_disposed || _backgroundError is not null)
+            _pendingCompactionChecks--;
+            if (_stopping || _disposed || _backgroundError is not null)
             {
+                Monitor.PulseAll(_gate);
                 return;
             }
 
@@ -1025,9 +1052,10 @@ public sealed class LsmTable : IDisposable
         return MaxCompactionLevel;
     }
 
-    private void WaitForFlushPipelineNoLock()
+    private void WaitForFlushPipelineNoLock(bool waitForScheduledCompactions = true)
     {
-        while ((_frozenQueue.Count > 0 || _workerBusy) && _backgroundError is null)
+        while ((_frozenQueue.Count > 0 || _workerBusy || (waitForScheduledCompactions && _pendingCompactionChecks > 0))
+            && _backgroundError is null)
         {
             Monitor.Wait(_gate);
         }

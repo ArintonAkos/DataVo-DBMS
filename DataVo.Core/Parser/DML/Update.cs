@@ -85,20 +85,24 @@ internal class Update(UpdateStatement ast) : BaseDbAction
             }
 
             _ = GetMaterializedSetExpressions(databaseName);
-            List<RowKey> toBeUpdated = IdentifyRowsToUpdate(databaseName);
-            if (toBeUpdated.Count == 0)
+            AcquiredDmlRowScope lockScope = DmlRowLockCoordinator.Acquire(
+                Locks,
+                databaseName,
+                _model.TableName,
+                _model.WhereExpression,
+                () => IdentifyRowsToUpdate(databaseName));
+
+            if (lockScope.TargetRowIds.Count == 0)
             {
                 Messages.Add("Rows affected: 0");
                 return;
             }
 
-            List<RowKey> rowWriteLocks = Locks.AcquireRowWriteLocks(databaseName, _model.TableName, toBeUpdated);
             int rowsAffected;
 
             try
             {
-                List<RowKey> revalidatedRowIds = RevalidateRowsAfterLock(databaseName, rowWriteLocks, toBeUpdated);
-                Dictionary<RowKey, Dictionary<string, object?>> revalidatedRows = Context.GetTableContents(revalidatedRowIds, _model.TableName, databaseName);
+                Dictionary<RowKey, Dictionary<string, object?>> revalidatedRows = Context.GetTableContents(lockScope.TargetRowIds, _model.TableName, databaseName);
 
                 if (revalidatedRows.Count == 0)
                 {
@@ -114,14 +118,14 @@ internal class Update(UpdateStatement ast) : BaseDbAction
                     }
 
                     ChangeRecorder? recorder = ChangeRecorder.TryCreate(Engine, databaseName);
-                    ExecuteUpdate(newRows, oldRowIds, revalidatedRows, databaseName, statementTxId, recorder);
+                    ExecuteUpdate(newRows, oldRowIds, revalidatedRows, databaseName, statementTxId, recorder, lockScope);
                     recorder?.Publish();
                     rowsAffected = newRows.Count;
                 }
             }
             finally
             {
-                Locks.ReleaseRowWriteLocks(databaseName, _model.TableName, rowWriteLocks);
+                DmlRowLockCoordinator.Release(Locks, databaseName, _model.TableName, lockScope);
             }
 
             Messages.Add($"Rows affected: {rowsAffected}");
@@ -214,60 +218,6 @@ internal class Update(UpdateStatement ast) : BaseDbAction
     {
         var whereStatement = new Statements.Where(_model.WhereExpression);
         return whereStatement.EvaluateWithoutJoin(_model.TableName, databaseName).ToList();
-    }
-
-    private List<RowKey> RevalidateRowsAfterLock(
-        string databaseName,
-        IReadOnlyList<RowKey> lockCoveredRowIds,
-        IReadOnlyList<RowKey> originalCandidates)
-    {
-        if (originalCandidates.Count == 0)
-        {
-            return [];
-        }
-
-        if (IsTriviallyTrueWhere(_model.WhereExpression))
-        {
-            return [.. originalCandidates];
-        }
-
-        HashSet<RowKey> lockCovered = [.. lockCoveredRowIds];
-
-        HashSet<RowKey> originalSet = [.. originalCandidates];
-
-        return IdentifyRowsToUpdate(databaseName)
-            .Where(rowId => originalSet.Contains(rowId))
-            .Where(rowId => rowId <= 0 || lockCovered.Count == 0 || lockCovered.Contains(rowId))
-            .ToList();
-    }
-
-    private static bool IsTriviallyTrueWhere(ExpressionNode expression)
-    {
-        if (expression is LiteralNode literal)
-        {
-            string? value = literal.Value?.ToString();
-            return value != null && value.Equals("true", StringComparison.OrdinalIgnoreCase);
-        }
-
-        if (expression is ColumnRefNode columnRef)
-        {
-            return columnRef.Column.Equals("true", StringComparison.OrdinalIgnoreCase);
-        }
-
-        if (expression is ResolvedColumnRefNode resolved)
-        {
-            return resolved.Column.Equals("true", StringComparison.OrdinalIgnoreCase);
-        }
-
-        if (expression is BinaryExpressionNode binary
-            && binary.Operator == "="
-            && binary.Left is LiteralNode leftLiteral
-            && binary.Right is LiteralNode rightLiteral)
-        {
-            return string.Equals(leftLiteral.Value?.ToString(), rightLiteral.Value?.ToString(), StringComparison.Ordinal);
-        }
-
-        return false;
     }
 
     private Dictionary<string, ExpressionNode> GetMaterializedSetExpressions(string databaseName)
@@ -469,7 +419,8 @@ internal class Update(UpdateStatement ast) : BaseDbAction
         Dictionary<RowKey, Dictionary<string, object?>> oldRowsById,
         string databaseName,
         long statementTxId,
-        ChangeRecorder? recorder)
+        ChangeRecorder? recorder,
+        AcquiredDmlRowScope lockScope)
     {
         IReadOnlyList<IndexFile> indexFiles = Catalog.GetTableIndexesReadOnly(_model.TableName, databaseName);
 
@@ -497,53 +448,71 @@ internal class Update(UpdateStatement ast) : BaseDbAction
         }
 
         List<RowKey> assignedRowIds = Context.InsertIntoTable(newRows, _model.TableName, databaseName);
-        for (int i = 0; i < newRows.Count; i++)
-        {
-            var newRow = newRows[i];
-            RowKey oldRowId = oldRowIds[i];
-            RowKey assignedRowId = assignedRowIds[i];
-            Dictionary<string, object?> oldRow = oldRows[i];
-            MvccCoordinator.RegisterUpdateVersion(Engine, databaseName, _model.TableName, oldRowId, assignedRowId, statementTxId, oldRow);
+        List<RowKey> relocatedRowLocks = DmlRowLockCoordinator.AcquireRelocatedRowWriteLocks(
+            Locks,
+            databaseName,
+            _model.TableName,
+            assignedRowIds,
+            lockScope.RowWriteLocks,
+            skipLocking: isClustered || lockScope.HoldsTableWriteLock);
 
-            if (recorder is { IsEnabled: true })
-            {
-                recorder.RecordUpdate(_model.TableName, assignedRowId, oldRow, newRow);
-            }
-        }
-
-        foreach (var index in indexFiles)
+        try
         {
-            CompiledQueries.DataVoCompiledQuery.MaintainIndexForUpdate(
-                Engine,
-                _model.TableName,
-                databaseName,
-                index,
-                oldRowIds,
-                oldRows,
-                assignedRowIds,
-                newRows);
-        }
-
-        if (!isClustered)
-        {
-            Context.DeleteFromTable(oldRowIds, _model.TableName, databaseName);
-        }
-
-        if (ImplicitWalCommit.IsEnabled(Engine))
-        {
-            var operations = new List<WalOperation>(newRows.Count);
             for (int i = 0; i < newRows.Count; i++)
             {
-                operations.Add(new WalOperation
+                var newRow = newRows[i];
+                RowKey oldRowId = oldRowIds[i];
+                RowKey assignedRowId = assignedRowIds[i];
+                Dictionary<string, object?> oldRow = oldRows[i];
+                MvccCoordinator.RegisterUpdateVersion(Engine, databaseName, _model.TableName, oldRowId, assignedRowId, statementTxId, oldRow);
+
+                if (recorder is { IsEnabled: true })
                 {
-                    OperationType = WalOperationType.Update,
-                    TableName = _model.TableName,
-                    RowId = RowKeyConversions.ToRowId(oldRowIds[i]),
-                    UpdatedColumns = new Dictionary<string, object?>(newRows[i], newRows[i].Comparer),
-                });
+                    recorder.RecordUpdate(_model.TableName, assignedRowId, oldRow, newRow);
+                }
             }
 
-            ImplicitWalCommit.CommitIfEnabled(Engine, databaseName, statementTxId, operations);
+            foreach (var index in indexFiles)
+            {
+                CompiledQueries.DataVoCompiledQuery.MaintainIndexForUpdate(
+                    Engine,
+                    _model.TableName,
+                    databaseName,
+                    index,
+                    oldRowIds,
+                    oldRows,
+                    assignedRowIds,
+                    newRows);
+            }
+
+            if (!isClustered)
+            {
+                Context.DeleteFromTable(oldRowIds, _model.TableName, databaseName);
+            }
+
+            if (ImplicitWalCommit.IsEnabled(Engine))
+            {
+                var operations = new List<WalOperation>(newRows.Count);
+                for (int i = 0; i < newRows.Count; i++)
+                {
+                    operations.Add(new WalOperation
+                    {
+                        OperationType = WalOperationType.Update,
+                        TableName = _model.TableName,
+                        RowId = RowKeyConversions.ToRowId(oldRowIds[i]),
+                        UpdatedColumns = new Dictionary<string, object?>(newRows[i], newRows[i].Comparer),
+                    });
+                }
+
+                ImplicitWalCommit.CommitIfEnabled(Engine, databaseName, statementTxId, operations);
+            }
+        }
+        finally
+        {
+            if (relocatedRowLocks.Count > 0)
+            {
+                Locks.ReleaseRowWriteLocks(databaseName, _model.TableName, relocatedRowLocks);
+            }
         }
     }
 

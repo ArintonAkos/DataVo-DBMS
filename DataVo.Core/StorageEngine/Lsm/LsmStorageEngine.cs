@@ -872,6 +872,20 @@ public sealed partial class LsmStorageEngine : IFixedWidthPatchStorageEngine, IL
     internal void FlushTableForTesting(string databaseName, string tableName) =>
         GetOrCreateTable(databaseName, tableName).Table.FlushActiveMemTable();
 
+    /// <summary>
+    /// Diagnostics: waits until all queued background flushes and scheduled compactions for the table complete.
+    /// </summary>
+    /// <param name="databaseName">The owning database name.</param>
+    /// <param name="tableName">The target table name.</param>
+    /// <example>
+    /// <code>
+    /// engine.FlushTableForTesting("db", "items");
+    /// engine.WaitForBackgroundWorkForTesting("db", "items");
+    /// </code>
+    /// </example>
+    internal void WaitForBackgroundWorkForTesting(string databaseName, string tableName) =>
+        GetOrCreateTable(databaseName, tableName).Table.WaitForBackgroundWork();
+
     /// <summary>Diagnostics: compacts every file of one level of the table into the next level.</summary>
     internal void CompactLevelForTesting(string databaseName, string tableName, int sourceLevel) =>
         GetOrCreateTable(databaseName, tableName).Table.CompactLevelForTesting(sourceLevel);

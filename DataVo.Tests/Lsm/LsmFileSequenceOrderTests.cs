@@ -50,6 +50,7 @@ public sealed class LsmFileSequenceOrderTests : IDisposable
             stop.Cancel();
             Task.WaitAll(writers);
             engine.FlushTableForTesting(Db, Table);
+            engine.WaitForBackgroundWorkForTesting(Db, Table);
 
             // A read drops the engine's hold on files that compaction replaced, so only live files remain on disk.
             _ = engine.ReadAllRows(Db, Table).Count();

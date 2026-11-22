@@ -427,6 +427,29 @@ public sealed class LsmTableTests
         Assert.Single(fixture.Manifest.GetLiveFiles(0));
     }
 
+    [Fact]
+    public void WaitForBackgroundWork_DrainsScheduledCompactionTriggeredByFlush()
+    {
+        using var fixture = new TableFixture();
+        var registry = new LsmFileRegistry(fixture.TableDirectory, fixture.Manifest);
+        using var table = new LsmTable(fixture.TableDirectory, fixture.Manifest)
+        {
+            CompactionRegistry = registry,
+            Level0CompactionThreshold = 2,
+        };
+
+        table.Put(Key(1), seqno: 1, Val("v1"));
+        Assert.NotNull(table.FlushActiveMemTable());
+
+        table.Put(Key(1), seqno: 2, Val("v2"));
+        Assert.NotNull(table.FlushActiveMemTable());
+
+        table.WaitForBackgroundWork();
+
+        Assert.Empty(fixture.Manifest.GetLiveFiles(0));
+        Assert.Single(fixture.Manifest.GetLiveFiles(1));
+    }
+
     private static byte[] Key(long pk)
     {
         var buf = new byte[8];

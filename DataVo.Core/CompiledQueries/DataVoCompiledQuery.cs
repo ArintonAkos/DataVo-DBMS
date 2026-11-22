@@ -2070,34 +2070,56 @@ public static class DataVoCompiledQuery
         {
             RowKey assignedRowId = context.Engine.StorageContext.InsertOneIntoTable(newRows[i], tableName, databaseName);
             newRowIds[i] = assignedRowId;
-            MvccCoordinator.RegisterUpdateVersion(context.Engine, databaseName, tableName, oldRowIds[i], assignedRowId, statementTxId, oldRows[i]);
         }
 
-        foreach (IndexFile index in indexFiles)
-        {
-            MaintainIndexForUpdate(context.Engine, tableName, databaseName, index, oldRowIds, oldRows, newRowIds, newRows);
-        }
+        List<RowKey> relocatedRowLocks = Parser.DML.DmlRowLockCoordinator.AcquireRelocatedRowWriteLocks(
+            context.Engine.LockManager,
+            databaseName,
+            tableName,
+            newRowIds,
+            oldRowIds,
+            skipLocking: isClustered);
 
-        if (!isClustered)
+        try
         {
-            context.Engine.StorageContext.DeleteFromTable(oldRowIds.ToList(), tableName, databaseName);
-        }
-
-        if (ImplicitWalCommit.IsEnabled(context.Engine))
-        {
-            var operations = new List<WalOperation>(newRows.Count);
             for (int i = 0; i < newRows.Count; i++)
             {
-                operations.Add(new WalOperation
-                {
-                    OperationType = WalOperationType.Update,
-                    TableName = tableName,
-                    RowId = RowKeyConversions.ToRowId(oldRowIds[i]),
-                    UpdatedColumns = new Dictionary<string, object?>(newRows[i], newRows[i].Comparer),
-                });
+                MvccCoordinator.RegisterUpdateVersion(context.Engine, databaseName, tableName, oldRowIds[i], newRowIds[i], statementTxId, oldRows[i]);
             }
 
-            ImplicitWalCommit.CommitIfEnabled(context.Engine, databaseName, statementTxId, operations);
+            foreach (IndexFile index in indexFiles)
+            {
+                MaintainIndexForUpdate(context.Engine, tableName, databaseName, index, oldRowIds, oldRows, newRowIds, newRows);
+            }
+
+            if (!isClustered)
+            {
+                context.Engine.StorageContext.DeleteFromTable(oldRowIds.ToList(), tableName, databaseName);
+            }
+
+            if (ImplicitWalCommit.IsEnabled(context.Engine))
+            {
+                var operations = new List<WalOperation>(newRows.Count);
+                for (int i = 0; i < newRows.Count; i++)
+                {
+                    operations.Add(new WalOperation
+                    {
+                        OperationType = WalOperationType.Update,
+                        TableName = tableName,
+                        RowId = RowKeyConversions.ToRowId(oldRowIds[i]),
+                        UpdatedColumns = new Dictionary<string, object?>(newRows[i], newRows[i].Comparer),
+                    });
+                }
+
+                ImplicitWalCommit.CommitIfEnabled(context.Engine, databaseName, statementTxId, operations);
+            }
+        }
+        finally
+        {
+            if (relocatedRowLocks.Count > 0)
+            {
+                context.Engine.LockManager.ReleaseRowWriteLocks(databaseName, tableName, relocatedRowLocks);
+            }
         }
 
         return newRowIds;
@@ -2206,14 +2228,21 @@ public static class DataVoCompiledQuery
         {
             for (int i = 0; i < newRows.Count; i++)
             {
-                if (TryGetSingleIntegerKey(oldRows[i], index.AttributeNames, out long oldKey))
+                bool hasOld = TryGetSingleIntegerKey(oldRows[i], index.AttributeNames, out long oldKey);
+                bool hasNew = TryGetSingleIntegerKey(newRows[i], index.AttributeNames, out long newKey);
+                if (hasOld && hasNew && oldKey == newKey && oldRowIds[i] == newRowIds[i])
                 {
-                    indexes.RemoveIntegerIndexEntry(oldKey, oldRowIds[i], indexName, tableName, databaseName);
+                    continue;
                 }
 
-                if (TryGetSingleIntegerKey(newRows[i], index.AttributeNames, out long newKey))
+                if (hasNew)
                 {
                     indexes.InsertIntegerIndexEntries([(newKey, newRowIds[i])], indexName, tableName, databaseName);
+                }
+
+                if (hasOld)
+                {
+                    indexes.RemoveIntegerIndexEntry(oldKey, oldRowIds[i], indexName, tableName, databaseName);
                 }
             }
 
@@ -2245,38 +2274,87 @@ public static class DataVoCompiledQuery
         {
             for (int i = 0; i < newRows.Count; i++)
             {
-                if (TryGetSingleGuidKey(oldRows[i], index.AttributeNames, out Guid oldKey))
+                bool hasOld = TryGetSingleGuidKey(oldRows[i], index.AttributeNames, out Guid oldKey);
+                bool hasNew = TryGetSingleGuidKey(newRows[i], index.AttributeNames, out Guid newKey);
+                if (hasOld && hasNew && oldKey == newKey && oldRowIds[i] == newRowIds[i])
                 {
-                    indexes.RemoveGuidIndexEntry(oldKey, oldRowIds[i], indexName, tableName, databaseName);
+                    continue;
                 }
 
-                if (TryGetSingleGuidKey(newRows[i], index.AttributeNames, out Guid newKey))
+                if (hasNew)
                 {
                     indexes.InsertGuidIndexEntries([(newKey, newRowIds[i])], indexName, tableName, databaseName);
+                }
+
+                if (hasOld)
+                {
+                    indexes.RemoveGuidIndexEntry(oldKey, oldRowIds[i], indexName, tableName, databaseName);
                 }
             }
 
             return;
         }
 
-        // Generic scalar (string BTree) path: delete the old (key, row id) pairs, then reinsert non-null keys.
-        var oldRowsById = new Dictionary<RowKey, Dictionary<string, object?>>(oldRows.Count);
-        for (int i = 0; i < oldRows.Count; i++)
-        {
-            oldRowsById[oldRowIds[i]] = oldRows[i];
-        }
+        MaintainScalarIndexForUpdate(indexes, index, indexName, tableName, databaseName, oldRowIds, oldRows, newRowIds, newRows);
+    }
 
-        indexes.DeleteRowsFromIndex(index, oldRowIds, oldRowsById, tableName, databaseName);
+    /// <summary>
+    /// Updates a generic scalar B-Tree index by computing the disjoint added and removed <c>(Key, RowId)</c> pairs
+    /// and inserting new pairs before removing old pairs so unchanged keys never vanish transiently.
+    /// </summary>
+    private static void MaintainScalarIndexForUpdate(
+        Indexing.IndexManager indexes,
+        IndexFile index,
+        string indexName,
+        string tableName,
+        string databaseName,
+        IReadOnlyList<RowKey> oldRowIds,
+        IReadOnlyList<Dictionary<string, object?>> oldRows,
+        IReadOnlyList<RowKey> newRowIds,
+        IReadOnlyList<Dictionary<string, object?>> newRows)
+    {
+        var oldPairs = new List<(string Key, RowKey RowId)>(oldRows.Count);
+        var newPairs = new List<(string Key, RowKey RowId)>(newRows.Count);
+
         for (int i = 0; i < newRows.Count; i++)
         {
-            Dictionary<string, object?> newRow = newRows[i];
-            if (index.AttributeNames.Any(attributeName => !newRow.TryGetValue(attributeName, out object? attributeValue) || attributeValue == null))
+            bool hasOld = IndexKeyEncoder.HasCompleteKey(oldRows[i], index.AttributeNames);
+            bool hasNew = IndexKeyEncoder.HasCompleteKey(newRows[i], index.AttributeNames);
+            string? oldKey = hasOld ? IndexKeyEncoder.BuildKeyString(oldRows[i], index.AttributeNames) : null;
+            string? newKey = hasNew ? IndexKeyEncoder.BuildKeyString(newRows[i], index.AttributeNames) : null;
+
+            if (hasOld && hasNew && oldRowIds[i] == newRowIds[i] && string.Equals(oldKey, newKey, StringComparison.Ordinal))
             {
                 continue;
             }
 
-            string indexValue = IndexKeyEncoder.BuildKeyString(newRow, index.AttributeNames);
-            indexes.InsertIntoIndex(indexValue, newRowIds[i], indexName, tableName, databaseName);
+            if (hasOld)
+            {
+                oldPairs.Add((oldKey!, oldRowIds[i]));
+            }
+
+            if (hasNew)
+            {
+                newPairs.Add((newKey!, newRowIds[i]));
+            }
+        }
+
+        if (oldPairs.Count > 1 || newPairs.Count > 1)
+        {
+            HashSet<(string Key, RowKey RowId)> oldSet = [.. oldPairs];
+            HashSet<(string Key, RowKey RowId)> newSet = [.. newPairs];
+            newPairs.RemoveAll(pair => oldSet.Contains(pair));
+            oldPairs.RemoveAll(pair => newSet.Contains(pair));
+        }
+
+        if (newPairs.Count > 0)
+        {
+            indexes.InsertManyIntoIndex(newPairs, indexName, tableName, databaseName);
+        }
+
+        if (oldPairs.Count > 0)
+        {
+            indexes.DeleteIndexEntries(oldPairs, indexName, tableName, databaseName);
         }
     }
 

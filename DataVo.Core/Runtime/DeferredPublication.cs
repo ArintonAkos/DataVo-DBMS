@@ -91,6 +91,28 @@ internal sealed class DeferredPublication
         return true;
     }
 
+    /// <summary>
+    /// Releases a virtual re-acquisition when <paramref name="lockKey"/> is already deferred in this batch.
+    /// Returns <see langword="false"/> when the lock was not yet deferred, allowing a caller that performed
+    /// no writes to release the underlying lock immediately.
+    /// </summary>
+    /// <param name="lockKey">The lock identifier key.</param>
+    /// <returns><see langword="true"/> if the lock is already managed by this deferred publication; otherwise <see langword="false"/>.</returns>
+    internal bool TryReleaseHeldWriteLockIfDeferred(string lockKey)
+    {
+        if (!_heldWriteLocks.TryGetValue(lockKey, out int nested))
+        {
+            return false;
+        }
+
+        if (nested > 0)
+        {
+            _heldWriteLocks[lockKey] = nested - 1;
+        }
+
+        return true;
+    }
+
     /// <summary>Runs every publish action in queue order. Called once the batch is durable.</summary>
     internal void RunPublish()
     {

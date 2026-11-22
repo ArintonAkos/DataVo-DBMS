@@ -6,12 +6,10 @@ using System.Collections.Concurrent;
 
 namespace DataVo.Tests.E2E;
 
-// NOTE: The engine's UPDATE path (delete-old + insert-new) is not atomic with respect to
-// concurrent DELETEs. Under heavy contention, a DELETE may fail to eliminate a row whose
-// underlying storage offset changed due to a concurrent UPDATE. This can leave 1-3 extra
-// rows alive per test run. Count and index-key assertions use a small tolerance to
-// accommodate this known race condition (see audit issue §2.7 / §3.6).
-
+/// <summary>
+/// Concurrent disk-mode DML and secondary-index integrity tests covering overlapping updates/deletes,
+/// duplicate primary-key races, composite indexes, and high-contention hot-key mutations.
+/// </summary>
 public class DiskIndexConcurrencyTests : SqlExecutionTestsBase
 {
     public DiskIndexConcurrencyTests()
@@ -21,11 +19,6 @@ public class DiskIndexConcurrencyTests : SqlExecutionTestsBase
             DiskStoragePath = "./test_datavo_index_concurrency"
         }, "IndexConcurrencyDb_Disk")
     {
-    }
-
-    private static int RaceToleranceFor(int operationCount)
-    {
-        return Math.Max(6, (int)Math.Ceiling(operationCount * 0.04));
     }
 
     [Fact]
@@ -105,24 +98,19 @@ public class DiskIndexConcurrencyTests : SqlExecutionTestsBase
 
         var result = ExecuteAndReturn($"SELECT Id, Name FROM {table};");
         Assert.False(result.IsError, string.Join(" | ", result.Messages));
-        int raceTolerance = RaceToleranceFor(mutationCount * 2);
-        Assert.InRange(result.Data.Count, seedRows, seedRows + raceTolerance);
+        Assert.Equal(seedRows, result.Data.Count);
 
-        int staleDeletedKeys = 0;
         for (int i = 1; i <= mutationCount; i++)
         {
-            if (Engine.IndexManager.IndexContainsKey($"Seed{i}", "idx_name_mix", table, TestDb))
-            {
-                staleDeletedKeys++;
-            }
+            Assert.False(
+                Engine.IndexManager.IndexContainsKey($"Seed{i}", "idx_name_mix", table, TestDb),
+                $"Expected deleted key Seed{i} to be absent in idx_name_mix for {table}.");
 
             int insertedId = 1000 + i;
             Assert.True(
                 Engine.IndexManager.IndexContainsKey($"New{insertedId}", "idx_name_mix", table, TestDb),
                 $"Expected inserted key New{insertedId} to be present in idx_name_mix for {table}.");
         }
-
-        Assert.InRange(staleDeletedKeys, 0, raceTolerance);
     }
 
     [Fact]
@@ -188,16 +176,14 @@ public class DiskIndexConcurrencyTests : SqlExecutionTestsBase
 
         var result = ExecuteAndReturn($"SELECT Id, Name FROM {table};");
         Assert.False(result.IsError, string.Join(" | ", result.Messages));
-        int raceTolerance = RaceToleranceFor(operations.Count);
-        Assert.InRange(result.Data.Count, expectedCount, expectedCount + raceTolerance);
+        Assert.Equal(expectedCount, result.Data.Count);
 
-        int staleDeletes = 0;
         foreach (int deletedId in deletedIds)
         {
-            bool stale = Engine.IndexManager.IndexContainsKey($"Seed{deletedId}", "idx_name_fuzz", table, TestDb);
-            if (stale) staleDeletes++;
+            Assert.False(
+                Engine.IndexManager.IndexContainsKey($"Seed{deletedId}", "idx_name_fuzz", table, TestDb),
+                $"Expected deleted key Seed{deletedId} to be absent in idx_name_fuzz for {table}.");
         }
-        Assert.InRange(staleDeletes, 0, raceTolerance);
 
         foreach (int insertedId in insertedIds)
         {
@@ -335,18 +321,14 @@ public class DiskIndexConcurrencyTests : SqlExecutionTestsBase
         int expectedCount = seedRows - deletedIds.Count + insertedIds.Count;
         var result = ExecuteAndReturn($"SELECT Id, Name FROM {table};");
         Assert.False(result.IsError, string.Join(" | ", result.Messages));
-        // Tolerate a small surplus: concurrent UPDATE rewriting a row can cause a DELETE
-        // to miss the moved row, leaving 1-3 extra rows alive.
-        int raceTolerance = RaceToleranceFor(operations.Count);
-        Assert.InRange(result.Data.Count, expectedCount, expectedCount + raceTolerance);
+        Assert.Equal(expectedCount, result.Data.Count);
 
-        int staleDeletes = 0;
         foreach (int deletedId in deletedIds)
         {
-            bool stale = Engine.IndexManager.IndexContainsKey($"Seed{deletedId}", "idx_name_fuzz_upd", table, TestDb);
-            if (stale) staleDeletes++;
+            Assert.False(
+                Engine.IndexManager.IndexContainsKey($"Seed{deletedId}", "idx_name_fuzz_upd", table, TestDb),
+                $"Expected deleted key Seed{deletedId} to be absent in idx_name_fuzz_upd for {table}.");
         }
-        Assert.InRange(staleDeletes, 0, raceTolerance);
 
         foreach (int insertedId in insertedIds)
         {
@@ -355,16 +337,15 @@ public class DiskIndexConcurrencyTests : SqlExecutionTestsBase
                 $"Expected inserted key Fuzz{insertedId} to be present in idx_name_fuzz_upd for {table}.");
         }
 
-        // UPDATE index assertions are best-effort under contention: the old key removal
-        // and new key insertion are not atomic, so a small number of stale entries is
-        // expected under heavy concurrent DML.
-        int staleUpdates = 0;
         foreach (int updatedId in updatedIds)
         {
-            bool oldKeyStale = Engine.IndexManager.IndexContainsKey($"Seed{updatedId}", "idx_name_fuzz_upd", table, TestDb);
-            if (oldKeyStale) staleUpdates++;
+            Assert.False(
+                Engine.IndexManager.IndexContainsKey($"Seed{updatedId}", "idx_name_fuzz_upd", table, TestDb),
+                $"Expected old updated key Seed{updatedId} to be absent in idx_name_fuzz_upd for {table}.");
+            Assert.True(
+                Engine.IndexManager.IndexContainsKey($"Upd{updatedId}", "idx_name_fuzz_upd", table, TestDb),
+                $"Expected new updated key Upd{updatedId} to be present in idx_name_fuzz_upd for {table}.");
         }
-        Assert.InRange(staleUpdates, 0, raceTolerance);
     }
 
     [Fact]
@@ -632,16 +613,14 @@ public class DiskIndexConcurrencyTests : SqlExecutionTestsBase
         int expectedCount = seedRows - deletedIds.Count + insertedIds.Count;
         var result = ExecuteAndReturn($"SELECT Id, Name FROM {table};");
         Assert.False(result.IsError, string.Join(" | ", result.Messages));
-        int raceTolerance = RaceToleranceFor(operations.Count);
-        Assert.InRange(result.Data.Count, Math.Max(0, expectedCount - raceTolerance), expectedCount + raceTolerance);
+        Assert.Equal(expectedCount, result.Data.Count);
 
-        int staleDeletes = 0;
         foreach (int deletedId in deletedIds)
         {
-            bool stale = Engine.IndexManager.IndexContainsKey($"Seed{deletedId}", "idx_name_large_vol", table, TestDb);
-            if (stale) staleDeletes++;
+            Assert.False(
+                Engine.IndexManager.IndexContainsKey($"Seed{deletedId}", "idx_name_large_vol", table, TestDb),
+                $"Large-vol: Expected deleted key Seed{deletedId} to be absent in idx_name_large_vol for {table}.");
         }
-        Assert.InRange(staleDeletes, 0, raceTolerance);
 
         foreach (int insertedId in insertedIds)
         {
@@ -650,13 +629,15 @@ public class DiskIndexConcurrencyTests : SqlExecutionTestsBase
                 $"Large-vol: Expected inserted key Fuzz{insertedId} to be present in idx_name_large_vol for {table}.");
         }
 
-        int staleUpdates = 0;
         foreach (int updatedId in updatedIds)
         {
-            bool oldKeyStale = Engine.IndexManager.IndexContainsKey($"Seed{updatedId}", "idx_name_large_vol", table, TestDb);
-            if (oldKeyStale) staleUpdates++;
+            Assert.False(
+                Engine.IndexManager.IndexContainsKey($"Seed{updatedId}", "idx_name_large_vol", table, TestDb),
+                $"Large-vol: Expected old updated key Seed{updatedId} to be absent in idx_name_large_vol for {table}.");
+            Assert.True(
+                Engine.IndexManager.IndexContainsKey($"Upd{updatedId}", "idx_name_large_vol", table, TestDb),
+                $"Large-vol: Expected new updated key Upd{updatedId} to be present in idx_name_large_vol for {table}.");
         }
-        Assert.InRange(staleUpdates, 0, raceTolerance);
     }
 
     [Theory]
@@ -769,11 +750,8 @@ public class DiskIndexConcurrencyTests : SqlExecutionTestsBase
         int expectedCount = seedRows - deletedIds.Count + insertedIds.Count;
         var result = ExecuteAndReturn($"SELECT Id, FirstName, LastName FROM {table};");
         Assert.False(result.IsError, string.Join(" | ", result.Messages));
-        int raceTolerance = RaceToleranceFor(operations.Count);
-        int minimumExpectedCount = Math.Max(0, expectedCount - raceTolerance);
-        Assert.InRange(result.Data.Count, minimumExpectedCount, expectedCount + raceTolerance);
+        Assert.Equal(expectedCount, result.Data.Count);
 
-        int staleDeletes = 0;
         foreach (int deletedId in deletedIds)
         {
             string deletedCompositeKey = IndexKeyEncoder.BuildKeyString(
@@ -784,10 +762,10 @@ public class DiskIndexConcurrencyTests : SqlExecutionTestsBase
                 },
                 ["FirstName", "LastName"]);
 
-            bool stale = Engine.IndexManager.IndexContainsKey(deletedCompositeKey, "idx_full_name", table, TestDb);
-            if (stale) staleDeletes++;
+            Assert.False(
+                Engine.IndexManager.IndexContainsKey(deletedCompositeKey, "idx_full_name", table, TestDb),
+                $"Composite: Deleted key ({deletedCompositeKey}) should be absent in idx_full_name for {table}.");
         }
-        Assert.InRange(staleDeletes, 0, raceTolerance);
 
         foreach (int insertedId in insertedIds)
         {
@@ -904,38 +882,24 @@ public class DiskIndexConcurrencyTests : SqlExecutionTestsBase
         int expectedCount = seedRows - deleteCount + insertCount;
         var result = ExecuteAndReturn($"SELECT Id, Name FROM {table};");
         Assert.False(result.IsError, string.Join(" | ", result.Messages));
-        int raceTolerance = RaceToleranceFor(operations.Count);
-        Assert.InRange(result.Data.Count, Math.Max(0, expectedCount - raceTolerance), expectedCount + raceTolerance);
+        Assert.Equal(expectedCount, result.Data.Count);
 
-        int staleDeletes = 0;
         foreach (int deletedId in deleteIds)
         {
-            Exception? probeException = Record.Exception(() =>
-            {
-                _ = Engine.IndexManager.IndexContainsKey($"Seed{deletedId}", "idx_name_overlap", table, TestDb);
-                _ = Engine.IndexManager.IndexContainsKey($"Overlap{deletedId}", "idx_name_overlap", table, TestDb);
-            });
-            Assert.Null(probeException);
-
-            bool seedStale = Engine.IndexManager.IndexContainsKey($"Seed{deletedId}", "idx_name_overlap", table, TestDb);
-            bool overlapStale = Engine.IndexManager.IndexContainsKey($"Overlap{deletedId}", "idx_name_overlap", table, TestDb);
-            if (seedStale || overlapStale) staleDeletes++;
+            Assert.False(
+                Engine.IndexManager.IndexContainsKey($"Seed{deletedId}", "idx_name_overlap", table, TestDb),
+                $"Overlap: Deleted seed key Seed{deletedId} should be absent in idx_name_overlap for {table}.");
+            Assert.False(
+                Engine.IndexManager.IndexContainsKey($"Overlap{deletedId}", "idx_name_overlap", table, TestDb),
+                $"Overlap: Deleted updated key Overlap{deletedId} should be absent in idx_name_overlap for {table}.");
         }
-        Assert.InRange(staleDeletes, 0, raceTolerance);
 
-        int missingInsertedKeys = 0;
         foreach (int insertedId in insertedIds)
         {
-            Exception? insertProbeException = Record.Exception(() =>
-                _ = Engine.IndexManager.IndexContainsKey($"Ins{insertedId}", "idx_name_overlap", table, TestDb));
-            Assert.Null(insertProbeException);
-
-            if (!Engine.IndexManager.IndexContainsKey($"Ins{insertedId}", "idx_name_overlap", table, TestDb))
-            {
-                missingInsertedKeys++;
-            }
+            Assert.True(
+                Engine.IndexManager.IndexContainsKey($"Ins{insertedId}", "idx_name_overlap", table, TestDb),
+                $"Overlap: Inserted key Ins{insertedId} should be present in idx_name_overlap for {table}.");
         }
-        Assert.InRange(missingInsertedKeys, 0, raceTolerance);
     }
 
     [Fact]
@@ -1003,56 +967,34 @@ public class DiskIndexConcurrencyTests : SqlExecutionTestsBase
         int expectedCount = seedRows - deleteIds.Count + insertIds.Count;
         var result = ExecuteAndReturn($"SELECT Id, FirstName, LastName, Email FROM {table};");
         Assert.False(result.IsError, string.Join(" | ", result.Messages));
-        int raceTolerance = RaceToleranceFor(operations.Count);
-        Assert.InRange(result.Data.Count, expectedCount, expectedCount + raceTolerance);
+        Assert.Equal(expectedCount, result.Data.Count);
 
         // Verify deleted rows are absent from all indices
-        int staleDeleteEntries = 0;
         foreach (int deletedId in deleteIds)
         {
-            if (Engine.IndexManager.IndexContainsKey($"First{deletedId}", "idx_fname", table, TestDb)
-                || Engine.IndexManager.IndexContainsKey($"Last{deletedId}", "idx_lname", table, TestDb)
-                || Engine.IndexManager.IndexContainsKey($"user{deletedId}@test.com", "idx_email", table, TestDb))
-            {
-                staleDeleteEntries++;
-            }
+            Assert.False(Engine.IndexManager.IndexContainsKey($"First{deletedId}", "idx_fname", table, TestDb));
+            Assert.False(Engine.IndexManager.IndexContainsKey($"Last{deletedId}", "idx_lname", table, TestDb));
+            Assert.False(Engine.IndexManager.IndexContainsKey($"user{deletedId}@test.com", "idx_email", table, TestDb));
         }
-        Assert.InRange(staleDeleteEntries, 0, raceTolerance);
 
-        // Verify updated rows have new keys in all indices
-        int staleUpdatedOldKeys = 0;
-        int missingUpdatedEntries = 0;
+        // Verify updated rows have new keys in all indices and old keys removed
         foreach (int updatedId in updateIds)
         {
-            if (Engine.IndexManager.IndexContainsKey($"First{updatedId}", "idx_fname", table, TestDb))
-            {
-                staleUpdatedOldKeys++;
-            }
-
-            bool hasUpdatedFirst = Engine.IndexManager.IndexContainsKey($"UpFirst{updatedId}", "idx_fname", table, TestDb);
-            bool hasUpdatedLast = Engine.IndexManager.IndexContainsKey($"UpLast{updatedId}", "idx_lname", table, TestDb);
-            bool hasUpdatedEmail = Engine.IndexManager.IndexContainsKey($"updated{updatedId}@test.com", "idx_email", table, TestDb);
-            if (!hasUpdatedFirst || !hasUpdatedLast || !hasUpdatedEmail)
-            {
-                missingUpdatedEntries++;
-            }
+            Assert.False(Engine.IndexManager.IndexContainsKey($"First{updatedId}", "idx_fname", table, TestDb));
+            Assert.False(Engine.IndexManager.IndexContainsKey($"Last{updatedId}", "idx_lname", table, TestDb));
+            Assert.False(Engine.IndexManager.IndexContainsKey($"user{updatedId}@test.com", "idx_email", table, TestDb));
+            Assert.True(Engine.IndexManager.IndexContainsKey($"UpFirst{updatedId}", "idx_fname", table, TestDb));
+            Assert.True(Engine.IndexManager.IndexContainsKey($"UpLast{updatedId}", "idx_lname", table, TestDb));
+            Assert.True(Engine.IndexManager.IndexContainsKey($"updated{updatedId}@test.com", "idx_email", table, TestDb));
         }
-        Assert.InRange(staleUpdatedOldKeys, 0, raceTolerance);
-        Assert.InRange(missingUpdatedEntries, 0, raceTolerance);
 
         // Verify inserted rows are present in all indices
-        int missingInsertedEntries = 0;
         foreach (int insertedId in insertIds)
         {
-            bool hasInsertedFirst = Engine.IndexManager.IndexContainsKey($"InsFirst{insertedId}", "idx_fname", table, TestDb);
-            bool hasInsertedLast = Engine.IndexManager.IndexContainsKey($"InsLast{insertedId}", "idx_lname", table, TestDb);
-            bool hasInsertedEmail = Engine.IndexManager.IndexContainsKey($"inserted{insertedId}@test.com", "idx_email", table, TestDb);
-            if (!hasInsertedFirst || !hasInsertedLast || !hasInsertedEmail)
-            {
-                missingInsertedEntries++;
-            }
+            Assert.True(Engine.IndexManager.IndexContainsKey($"InsFirst{insertedId}", "idx_fname", table, TestDb));
+            Assert.True(Engine.IndexManager.IndexContainsKey($"InsLast{insertedId}", "idx_lname", table, TestDb));
+            Assert.True(Engine.IndexManager.IndexContainsKey($"inserted{insertedId}@test.com", "idx_email", table, TestDb));
         }
-        Assert.InRange(missingInsertedEntries, 0, raceTolerance);
     }
 
     [Fact]
@@ -1195,6 +1137,64 @@ public class DiskIndexConcurrencyTests : SqlExecutionTestsBase
                     }
                 }
             }
+        }
+    }
+
+    [Fact]
+    [BrowserTranslateIgnore("Concurrent same-row update relocation test requires multi-session parallel execution")]
+    public async Task ConcurrentUpdates_OnDisjointColumnsOfSameRow_PreserveBothUpdates()
+    {
+        string table = $"SameRowDisjointUpd_{Guid.NewGuid():N}";
+        Execute($"CREATE TABLE {table} (Id INT PRIMARY KEY, ColA VARCHAR(50), ColB VARCHAR(50));");
+        Assert.False(ExecuteAndReturn($"CREATE INDEX idx_cola ON {table} (ColA);").IsError);
+        Assert.False(ExecuteAndReturn($"CREATE INDEX idx_colb ON {table} (ColB);").IsError);
+
+        const int rowCount = 48;
+        for (int i = 1; i <= rowCount; i++)
+        {
+            Execute($"INSERT INTO {table} (Id, ColA, ColB) VALUES ({i}, 'InitA{i}', 'InitB{i}');");
+        }
+
+        var startGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var tasks = new List<Task>(rowCount * 2);
+
+        for (int i = 1; i <= rowCount; i++)
+        {
+            int id = i;
+            Guid sessionA = Guid.NewGuid();
+            Guid sessionB = Guid.NewGuid();
+            ExecuteForSession(sessionA, $"USE {TestDb};");
+            ExecuteForSession(sessionB, $"USE {TestDb};");
+
+            tasks.Add(Task.Run(async () =>
+            {
+                await startGate.Task;
+                ExecuteForSession(sessionA, $"UPDATE {table} SET ColA = 'UpdatedA{id}' WHERE Id = {id};");
+            }));
+
+            tasks.Add(Task.Run(async () =>
+            {
+                await startGate.Task;
+                ExecuteForSession(sessionB, $"UPDATE {table} SET ColB = 'UpdatedB{id}' WHERE Id = {id};");
+            }));
+        }
+
+        startGate.SetResult();
+        await Task.WhenAll(tasks);
+
+        var rows = ExecuteAndReturn($"SELECT Id, ColA, ColB FROM {table};");
+        Assert.False(rows.IsError, string.Join(" | ", rows.Messages));
+        Assert.Equal(rowCount, rows.Data.Count);
+
+        for (int i = 1; i <= rowCount; i++)
+        {
+            var row = rows.Data.Single(r => Convert.ToInt32(r["Id"]) == i);
+            Assert.Equal($"UpdatedA{i}", row["ColA"]?.ToString());
+            Assert.Equal($"UpdatedB{i}", row["ColB"]?.ToString());
+            Assert.True(Engine.IndexManager.IndexContainsKey($"UpdatedA{i}", "idx_cola", table, TestDb));
+            Assert.True(Engine.IndexManager.IndexContainsKey($"UpdatedB{i}", "idx_colb", table, TestDb));
+            Assert.False(Engine.IndexManager.IndexContainsKey($"InitA{i}", "idx_cola", table, TestDb));
+            Assert.False(Engine.IndexManager.IndexContainsKey($"InitB{i}", "idx_colb", table, TestDb));
         }
     }
 

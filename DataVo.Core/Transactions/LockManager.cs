@@ -346,6 +346,34 @@ public sealed class LockManager
     }
 
     /// <summary>
+    /// Releases row-level write locks in reverse order without deferring them into an active write batch.
+    /// Intended for locks released before any data mutation occurs (for example, when retrying after a
+    /// concurrent out-of-place update relocates a target row).
+    /// </summary>
+    /// <param name="databaseName">The database name.</param>
+    /// <param name="tableName">The table name.</param>
+    /// <param name="rowIds">Row identifiers to unlock.</param>
+    /// <example>
+    /// <code>
+    /// locks.ReleaseRowWriteLocksImmediately("AppDb", "Users", staleRowLocks);
+    /// </code>
+    /// </example>
+    internal void ReleaseRowWriteLocksImmediately(string databaseName, string tableName, IReadOnlyList<RowKey> rowIds)
+    {
+        for (int i = rowIds.Count - 1; i >= 0; i--)
+        {
+            string rowKey = BuildRowKey(databaseName, tableName, rowIds[i]);
+            if (Runtime.DeferredPublication.Current is { } publication
+                && publication.TryReleaseHeldWriteLockIfDeferred("R:" + rowKey))
+            {
+                continue;
+            }
+
+            ReleaseRowWriteLockCore(rowKey);
+        }
+    }
+
+    /// <summary>
     /// Acquires row-level read locks in deterministic order.
     /// </summary>
     /// <param name="databaseName">The database name.</param>

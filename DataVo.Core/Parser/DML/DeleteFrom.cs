@@ -33,31 +33,34 @@ internal class DeleteFrom(DeleteFromStatement ast) : BaseDbAction
             }
             else
             {
-                List<RowKey> toBeDeleted = _model.WhereStatement.EvaluateWithoutJoin(_model.TableName, databaseName).ToList();
+                AcquiredDmlRowScope lockScope = DmlRowLockCoordinator.Acquire(
+                    Locks,
+                    databaseName,
+                    _model.TableName,
+                    _model.WhereStatement.GetExpression(),
+                    () => _model.WhereStatement.EvaluateWithoutJoin(_model.TableName, databaseName).ToList());
 
-                if (toBeDeleted.Count == 0)
+                if (lockScope.TargetRowIds.Count == 0)
                 {
                     Messages.Add("Rows affected: 0");
                     return;
                 }
 
-                List<RowKey> rowWriteLocks = Locks.AcquireRowWriteLocks(databaseName, _model.TableName, toBeDeleted);
                 ChangeRecorder? recorder = ChangeRecorder.TryCreate(Engine, databaseName);
                 try
                 {
-                    List<RowKey> revalidatedRowIds = RevalidateRowsAfterLock(databaseName, toBeDeleted, rowWriteLocks);
-                    foreach (RowKey rowId in revalidatedRowIds)
+                    foreach (RowKey rowId in lockScope.TargetRowIds)
                     {
                         MvccCoordinator.ValidateCanModifyRow(Engine, databaseName, _model.TableName, rowId, null, "DELETE");
                     }
 
-                    RowDeleter.Delete(Engine, revalidatedRowIds, _model.TableName, databaseName, statementTxId, recorder);
+                    RowDeleter.Delete(Engine, lockScope.TargetRowIds, _model.TableName, databaseName, statementTxId, recorder);
 
-                    Messages.Add($"Rows affected: {revalidatedRowIds.Count}");
+                    Messages.Add($"Rows affected: {lockScope.TargetRowIds.Count}");
                 }
                 finally
                 {
-                    Locks.ReleaseRowWriteLocks(databaseName, _model.TableName, rowWriteLocks);
+                    DmlRowLockCoordinator.Release(Locks, databaseName, _model.TableName, lockScope);
                 }
 
                 recorder?.Publish();
@@ -107,59 +110,5 @@ internal class DeleteFrom(DeleteFromStatement ast) : BaseDbAction
 
         txContext.RemoveBufferedInserts(_model.TableName, buffered);
         return toBeDeleted.Count;
-    }
-
-    private List<RowKey> RevalidateRowsAfterLock(
-        string databaseName,
-        IReadOnlyList<RowKey> originalCandidates,
-        IReadOnlyList<RowKey> lockCoveredRowIds)
-    {
-        if (originalCandidates.Count == 0)
-        {
-            return [];
-        }
-
-        HashSet<RowKey> lockCovered = [.. lockCoveredRowIds];
-        HashSet<RowKey> originalSet = [.. originalCandidates];
-
-        ExpressionNode whereExpression = _model.WhereStatement.GetExpression()!;
-        if (IsTriviallyTrueWhere(whereExpression))
-        {
-            return [.. originalCandidates];
-        }
-
-        return _model.WhereStatement.EvaluateWithoutJoin(_model.TableName, databaseName)
-            .Where(rowId => originalSet.Contains(rowId))
-            .Where(rowId => rowId <= 0 || lockCovered.Count == 0 || lockCovered.Contains(rowId))
-            .ToList();
-    }
-
-    private static bool IsTriviallyTrueWhere(ExpressionNode expression)
-    {
-        if (expression is LiteralNode literal)
-        {
-            string? value = literal.Value?.ToString();
-            return value != null && value.Equals("true", StringComparison.OrdinalIgnoreCase);
-        }
-
-        if (expression is ColumnRefNode columnRef)
-        {
-            return columnRef.Column.Equals("true", StringComparison.OrdinalIgnoreCase);
-        }
-
-        if (expression is ResolvedColumnRefNode resolved)
-        {
-            return resolved.Column.Equals("true", StringComparison.OrdinalIgnoreCase);
-        }
-
-        if (expression is BinaryExpressionNode binary
-            && binary.Operator == "="
-            && binary.Left is LiteralNode leftLiteral
-            && binary.Right is LiteralNode rightLiteral)
-        {
-            return string.Equals(leftLiteral.Value?.ToString(), rightLiteral.Value?.ToString(), StringComparison.Ordinal);
-        }
-
-        return false;
     }
 }
