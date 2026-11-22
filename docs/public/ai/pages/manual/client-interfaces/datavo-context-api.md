@@ -25,7 +25,7 @@ Console.WriteLine($"{result.Data[0]["name"]}: {result.Data[0]["score"]}");
 
 ## Executing SQL & Sessions
 
-`Execute(string sql)` accepts one or more semicolon-separated SQL statements and returns a `List<QueryResult>`. Each `QueryResult` exposes `Fields`, `Data` (row dictionaries), `Messages`, `IsError`, and `ErrorCode`.
+`Execute(string sql)` accepts one or more semicolon-separated SQL statements and returns a `List<QueryResult>`. Each `QueryResult` exposes `Fields`, `Data` (row dictionaries), `Messages`, `IsError`, and `ErrorCode`. To map a row dictionary into a model with a public parameterless constructor and writable properties, call `db.Map<T>(row)` (or `db.Get<T>(row, "column")` for a single column).
 
 Transactions and `USE <database>` bindings are scoped to a session. Pass an explicit `Guid sessionId` to `Execute` when you need independent transaction scopes on the same context:
 
@@ -92,6 +92,10 @@ public QueryResult Execute(params DataVoQueryParameter[] parameters);
 public QueryResult Execute(ReadOnlySpan<DataVoQueryParameter> parameters, Guid sessionId);
 public QueryResult ExecuteBorrowed(params DataVoQueryParameter[] parameters);
 public QueryResult ExecuteBorrowed(ReadOnlySpan<DataVoQueryParameter> parameters, Guid sessionId);
+
+// Result Row Mapping
+public T Map<T>(IReadOnlyDictionary<string, object?> row); // [DynamicallyAccessedMembers] parameterless ctor + public properties
+public T Get<T>(IReadOnlyDictionary<string, object?> row, string columnName);
 
 // Typed & Batch Writes
 public RowKey Insert<T>(string tableName, T entity);
