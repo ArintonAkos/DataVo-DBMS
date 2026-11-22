@@ -28,8 +28,6 @@ At a glance, five engineering choices drive both the speed and the packaging sto
 
 None of this is free. Every shortcut introduces parity invariants against the general SQL evaluator, memory-ordering subtleties, or compiler constraints, all tallied honestly in the final section.
 
----
-
 ## The invisible tax of crossing the managed–native boundary
 
 When a .NET application reads one row from an in-memory SQLite database via a prepared `SqliteCommand`, the lookup is far more than a B-tree probe in RAM. Even after `Prepare()` compiles the SQL into VDBE bytecode, every row fetch crosses an ABI boundary and navigates a dynamically typed C API <a class="cite-badge" href="#ref-2">2</a> <a class="cite-badge" href="#ref-3">3</a> (Figure 1).
@@ -55,8 +53,6 @@ When a .NET application reads one row from an in-memory SQLite database via a pr
 Keeping the engine in managed C# eliminates that entire boundary. On `net10.0`, `DataVo.Core.csproj` has only one NuGet package reference (`System.Numerics.Tensors` `10.0.0`, which compiles to managed SIMD intrinsics), and `DataVo.Data.csproj` references only `DataVo.Core`—meaning zero `.dll`, `.so`, or `.dylib` files per target platform and zero UTF-8-to-UTF-16 transcoding for in-memory strings.
 
 Yet removing the FFI wall alone is not enough: an earlier pure-managed build of DataVo still took **405–566 ns** and allocated **1,008 B** per in-memory lookup—slower than its own LSM disk engine (**241 ns**)—because every row still lived as a scattered heap object.
-
----
 
 ## Packing rows into cache-aligned byte buffers (`FlatRowStore`)
 
@@ -116,8 +112,6 @@ Switching to `FlatRowStore` cut retained row-store memory **13×**: from **640.3
 For streaming scans over serialized rows (including LSM SSTables), DataVo applies the same principle via **`RowRef`** (`DataVo.Core/Streaming/RowRef.cs`)—a stack-only `readonly ref struct` wrapping `ReadOnlySpan<byte>` that decodes cells on demand without heap allocations (see [Zero-Allocation Row Model](/manual/internals/zero-allocation-rows)).
 
 Compact memory alone still leaves hundreds of nanoseconds on the table if every lookup parses SQL, takes a table lock, or allocates a row dictionary—so the lookup path itself had to bypass all three.
-
----
 
 ## Tracing a 55 ns point lookup—and the 216 ns LSM fallback
 
@@ -248,8 +242,6 @@ One honest caveat: **this benchmark compares DataVo's build-time compiled LINQ p
 
 Still, every path outside an in-memory integer key—including LSM lookups, parameterized SQL, and live reactive queries—relies on one shared prepared-statement engine that must stay safe under concurrency.
 
----
-
 ## Prepared statements, AST isolation, and the bridge to reactive views
 
 Underneath both raw SQL and generated LINQ sits **`DataVoPreparedStatement`** (`DataVo.Core/PreparedStatements/DataVoPreparedStatement.cs`). Calling `ctx.Prepare(sql)` runs `Lexer` and `Parser` **once**, stores the template `List<SqlStatement>`, and runs `InitializeFastPathCandidates()` to classify eligible single-table `SELECT`, `UPDATE`, and `DELETE` shapes—caching a schema-versioned `CompiledSelectPlan` on first execution that automatically invalidates on `ALTER TABLE`.
@@ -295,8 +287,6 @@ Before attaching any capture hook, `BindSingleReactiveStatement` validates that 
 
 Preparing SQL once removes parse overhead, yet raw SQL still leaves schema discovery and typed object mapping to runtime—unless we move both into the C# compiler itself.
 
----
-
 ## Replacing runtime reflection and `Expression.Compile()` with Roslyn codegen
 
 Traditional .NET LINQ providers turn lambdas into heap-allocated `Expression<Func<T, bool>>` trees, walk them at runtime, and compile mappers via `Expression.Compile()` or `Reflection.Emit`. Under Native AOT, `Reflection.Emit` is unavailable, `Expression.Compile()` drops to a slow interpreter, and reflection over arbitrary model properties fights the IL trimmer <a class="cite-badge" href="#ref-6">6</a>.
@@ -316,7 +306,7 @@ Traditional .NET LINQ providers turn lambdas into heap-allocated `Expression<Fun
 
 *Figure 5: What moves to build time in `DataVo.Generators` versus what ships inside the trimmed Native AOT binary.*
 
-### 1. `DataVoTableGenerator`: four readers, zero reflection
+### `DataVoTableGenerator`: four readers, zero reflection
 
 Marking a model `[DataVoTable("players")]` triggers `DataVoTableGenerator` via `ForAttributeWithMetadataName` to emit `PlayerDataVoExtensions`, registering `DataVoTableInfo<Player>` automatically through `[ModuleInitializer]`. Instead of reflecting over properties at startup, it generates four specialized readers—`ReadRow`, `ReadStreamedRow`, `ReadPackedRow`, and `ReadReactiveRow`—with column ordinals baked into IL as compile-time constants:
 
@@ -347,7 +337,7 @@ private static Player ReadReactiveRow(in DataVo.Core.Runtime.Reactive.RowRef row
 }
 ```
 
-### 2. `DataVoLinqInterceptorGenerator`: `[InterceptsLocation]` at every call site
+### `DataVoLinqInterceptorGenerator`: `[InterceptsLocation]` at every call site
 
 For LINQ-shaped calls on `DataVoTable<T>` (`FirstOrDefault`, `SingleOrDefault`, `Where`, `OrderBy`/`ThenBy`, `Select`, `Sum`, `Min`, `Max`, `ExecuteUpdate`), `DataVoLinqInterceptorGenerator` emits C# 12+ `[InterceptsLocation]` interceptors <a class="cite-badge" href="#ref-5">5</a> targeting each exact call site. For `_players.FirstOrDefault(id, static (p, key) => p.Id == key)`, Roslyn rewrites the call to invoke the generated plan directly:
 
@@ -417,8 +407,6 @@ Any filter, sort key, or projection that the generator cannot translate still ex
 
 Compile-time codegen removes runtime reflection from user queries, but single-binary deployment only holds if the database engine itself passes the Native AOT trimmer cleanly.
 
----
-
 ## Locking the Native AOT fence (184 warnings to zero)
 
 Declaring a library "Native AOT compatible" is easy; keeping it trim-clean as features ship every week is harder. One unannotated `JsonSerializer.Serialize`, one `Activator.CreateInstance`, or one `dynamic` dispatch can break trimming <a class="cite-badge" href="#ref-6">6</a>.
@@ -445,8 +433,6 @@ Two CI gates enforce this fence on every commit: `scripts/check-aot-baseline.sh`
 
 Every shortcut and AOT guarantee described so far shifts complexity from runtime into architecture—so before adopting them, it is worth tallying the real cost.
 
----
-
 ## What this cost in complexity—and where it stops paying off
 
 In Part 1, I promised that Part 2 would explain not only how a 55 ns lookup is built, but **what it cost in complexity**. Shaving 660 nanoseconds out of a lookup shifts work into invariants, concurrency subtleties, and surface constraints:
@@ -461,8 +447,6 @@ In practice, let your workload pick the interface (see [Choosing an Interface](/
 > [!TIP]
 > Follow the repository at [`ArintonAkos/DataVo-DBMS`](https://github.com/ArintonAkos/DataVo-DBMS) to inspect `FlatRowStore`, `PackedKeyReader<T>`, `DataVo.Generators`, and `DataVo.AotSmoke` directly—or star the repo to catch Parts 3–7.
 
----
-
 ## What comes next
 
 - **Part 3.** What an fsync costs, across operating systems: the 4 ms tie, the 0.1 ms Linux case, and the Windows scaling problem.
@@ -470,8 +454,6 @@ In practice, let your workload pick the interface (see [Choosing an Interface](/
 - **Part 5.** HNSW, the JIT, and the exact fallback: recall on clustered data, and why a graph search sometimes loses to a scan.
 - **Part 6.** Differential oracle testing: how the matrix found five wrong answers before tuning anything.
 - **Part 7.** Building an offline-first .NET 10 app end-to-end: combining Native AOT, filtered `VECTOR(n)` search, live Z-set views, and bidirectional Postgres sync in a real desktop/mobile architecture.
-
----
 
 ## References
 

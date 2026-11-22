@@ -29,8 +29,6 @@ At a glance, the approach pays off in four specific places:
 
 It also loses in predictable places—unindexed substring scans (**1.35× slower** than SQLite on `LIKE '%042-%'`), whole-table analytical scans without `[Columnar]` (**3–340× slower** than DuckDB), Linux single-row durable `StrictFsync` latency (**0.241 ms** vs **0.108 ms**, **2.2× slower** than SQLite WAL `FULL`), and sync hub cold-start time (**2.4 s** to load 100k rows). Those losses are reported alongside the wins below, because an embedded database is only useful once you know where its boundaries are.
 
----
-
 ## Why put all of this in one process?
 
 The default embedded relational database is SQLite, and in most projects it remains the right default. It is small, extraordinarily well tested, and backed by two decades of production failure experience. Nothing in this series argues against that.
@@ -56,8 +54,6 @@ DataVo exists for four narrower situations where the usual stack starts to show 
 *Figure 1: Traditional .NET local-first assembly vs. single-process consolidation in DataVo.*
 
 It is equally important to be clear about what DataVo is **not**. It is not a client/server database: a lock file (`datavo.lock`) gives one process exclusive ownership of a database directory. Transactions provide snapshot isolation rather than serializability <a class="cite-badge" href="#ref-2">2</a>. Its SQL dialect intentionally leaves out features teams expect from full-scale SQL engines—no `CASE`/`CAST`/`COALESCE` or date functions, no window functions beyond `RANK()`, and no `CREATE VIEW`, triggers, or stored procedures. At `0.4.0-rc.1` it is prerelease software whose on-disk format does not yet carry a cross-version compatibility guarantee: standalone local databases require an export and re-import across breaking format changes, whereas `DataVo-Sync` setups treat PostgreSQL as the source of truth and can simply wipe and re-hydrate the local replica (**~0.7 s** for 100k rows).
-
----
 
 ## How the engine is put together
 
@@ -107,8 +103,6 @@ Queries that no typed path accepts fall back to the general evaluator, which mat
 - **Z-set incremental views:** Following Budiu et al.'s DBSP model <a class="cite-badge" href="#ref-6">6</a>, a table is represented as a *Z-set* where every row carries an integer weight (`+1` for an insert, `-1` for a delete). Writes emit small Z-set deltas that update materialized views without re-running the underlying query. This applies only to query shapes the reactive planner supports; unsupported shapes execute normally.
 - **DataVo-Sync:** Because DataVo-Sync is a commercial product, I keep its internal architecture private and describe only the external behaviour tested here. It connects a sync server reading PostgreSQL logical replication to an embedded client library writing into a local DataVo store (`InMemory` or `Lsm`), streaming compressed columnar deltas over WebSockets (`wire v2` + Brotli) and queuing offline local writes for upload and conflict resolution.
 
----
-
 ## How the measurements were collected
 
 Before looking at any chart, four ground rules govern how to read the numbers below:
@@ -137,8 +131,6 @@ Before looking at any chart, four ground rules govern how to read the numbers be
 | Sync CI | Ubuntu 26.04 x64, **2 vCPU**, PostgreSQL 17.12, ElectricSQL `1.8.1` in Docker | .NET 10.0.15 | DataVo-Sync E2E and 1,000-client stress, run `44756364158` (20 Nov) |
 
 </details>
-
----
 
 ## Point lookups and columnar scans
 
@@ -178,8 +170,6 @@ As charted in Figure 4, removing the native boundary pays off on frequent, tiny 
 Per lookup, DataVo allocates **56 B** in memory (just the returned entity) and **144 B** on LSM, versus **608 B** for SQLite through `Microsoft.Data.Sqlite`. The columnar `COUNT(*)` allocates **0 B** on the managed heap (versus **504 B** for SQLite).
 
 Two caveats keep this result honest. First, this table compares DataVo's build-time compiled LINQ path against SQLite and DuckDB over ADO.NET; when all engines execute SQL text prepared statements, integer-key lookups narrow considerably (**1.4 µs** vs **2.0 µs** on the M4 Pro). Second, if a column is *not* marked `[Columnar]`, DataVo falls back to scanning packed rows, where single-threaded DuckDB is substantially faster (**137 µs** vs **386 µs** on the M4 Pro).
-
----
 
 ## Maintaining views incrementally
 
@@ -221,8 +211,6 @@ db.DispatchPendingNotifications(); // pull-drain deltas on the caller thread
 
 This speedup is specifically a property of incremental maintenance on multi-table views supported by the reactive planner (documented in full in [Live Reactive Views (Z-set IVM)](/manual/client-interfaces/reactive-views)). On a simple single-table aggregate without joins, where recomputation is already cheap, the gap over SQLite shrinks to roughly **1.1×**.
 
----
-
 ## Vector search with SQL filters
 
 In local RAG tools and desktop AI agents, vector similarity almost always comes wrapped in relational filters and joins—filtering by user, workspace, category, or author metadata before returning the top results:
@@ -249,8 +237,6 @@ On **50,000 × 384-dimensional clustered embeddings** (Apple M4 Pro, 17 Nov), co
 Every query shape above achieved **100% recall@10**, zero short result sets, and zero rows violating the filter. At 1,536 dimensions, distance computation dominates more heavily and margins narrow; the closest case is `V4`, where `FLAT` is **1.4× faster** than `sqlite-vec`.
 
 Note also that HNSW is not free to construct: at 10,000 × 1,536-dimensional vectors, building the graph takes **6–10 seconds**. If a session runs 100 queries or fewer, an exact `FLAT` scan (**571–793 ms** total) finishes sooner overall; HNSW pays back its build cost only after roughly **290+ queries** (running at **2.38 ms** p50 per query).
-
----
 
 ## Twenty-eight SQL queries, and five wrong answers
 
@@ -280,8 +266,6 @@ The first run of this oracle on 14 November, against the unmodified engine, caug
 Each had a distinct bug underneath: a `WHERE` filter on the `NULL`-supplying side of an outer join evaluated before `NULL` padding existed; a parser dropping `DISTINCT` inside an aggregate; a planner comparing a table alias string against a raw table name; row keys emitted in a different order depending on join drive side; and a vector join path applying only the portion of `WHERE` that referenced the vector table.
 
 All five are fixed and covered by regression tests in `0.4.0-rc.1`. I include them here because speed numbers mean little without them: a fast wrong answer is not fast. Rigger and Su's *Pivoted Query Synthesis* <a class="cite-badge" href="#ref-7">7</a> and Slutz's *Massive Stochastic Testing of SQL* <a class="cite-badge" href="#ref-8">8</a> are the intellectual ancestors of this check, though here the oracle is an exact computation from the generator rather than a second database.
-
----
 
 ## Durability, concurrency, and recovery
 
@@ -353,8 +337,6 @@ Two distinct behaviours jump out of the full 21 November matrix:
 1. **Why SQLite `shared-cache` completes only 1–2 writes everywhere.** `SqliteConcurrentOpsEngine` originally opened only `mode=memory&cache=shared`, which does not support WAL and takes table-level locks (`SQLITE_LOCKED`), so 8 continuous readers starve both writers until `PRAGMA busy_timeout = 3000` expires repeatedly (`5,012–6,286 ms` write p99). Adding a file-backed `SQLite (WAL, normal)` comparator (`journal_mode=WAL`, `synchronous=NORMAL`) eliminates SQLite's starvation across every OS (**91,458** writes on Apple M4 Pro, **49,367** on Linux CI, and **20,592** on Windows CI).
 2. **Where DataVo wins and where it loses against SQLite `WAL, normal`.** Where DataVo's writers are not starved, DataVo beats `SQLite (WAL, normal)` cleanly: on Apple M4 Pro it delivers **2.79×** higher overall throughput (`1,087,329` vs `389,341` ops/s), **2.45×** more completed writes, and **2.1×** lower write p99 latency (`0.620 ms` vs `1.299 ms`); on Linux x64 CI it delivers **1.90×** higher overall throughput (`1,552,810` vs `819,171` ops/s), comparable completed writes (`50,986` vs `49,367`), **29.7×** lower read p99 (`0.006 ms` vs `0.178 ms`), and **11.9×** lower write p99 (`0.212 ms` vs `2.515 ms`). On the 4-vCPU Windows Hyper-V runner, however, `SQLite (WAL, normal)` sustained steady progress (`20,592` writes at `3.796 ms` p99) while DataVo's writers starved in this run (`0` writes; `9,297 ms` runtime), so mixed-contention reliability under Windows 4-vCPU oversubscription remains an open fix.
 
----
-
 ## Synchronising with PostgreSQL
 
 For field-service tablets, desktop POS terminals, or collaborative .NET apps, the local engine is only half the story; the other half is keeping it in step with PostgreSQL over unreliable networks.
@@ -389,8 +371,6 @@ Four observations stand out across the sync suite (as seen in Figure 9):
 
 At 1,000 concurrent clients saturating a 2-vCPU VM, median latency rises to **1,220 ms** and p99 to **4.6 s**. This stress test has no SQLite or ElectricSQL comparator.
 
----
-
 ## Where it loses, and choosing the right tool
 
 Every storage engine is a set of trade-offs. Beyond the SQLite wins on `W6`, `C8`, and `G3` and the Linux durable-commit gap noted earlier, three limits are worth knowing before trying DataVo today:
@@ -405,8 +385,6 @@ Put those limits together with the wins, and the decision boundary is straightfo
 - **Use DuckDB** if your workload is whole-table OLAP analytics over large datasets or Parquet/CSV files. It is one to three orders of magnitude faster than either DataVo or SQLite on those queries.
 - **Use ElectricSQL** if you want read-path sync from PostgreSQL into a browser or app from an established, maintained product. My comparison covers one workload—initial sync and live latency over loopback—not its full feature set. In this setup it served as a read path; DataVo-Sync adds an offline write path, which is a different scope rather than a better implementation of the same one.
 - **Try DataVo** if you are building in .NET and specifically want managed Native AOT packaging with zero native binaries, SQL + `VECTOR(n)` search + Z-set incremental views in one transaction log, or bidirectional offline-first PostgreSQL sync.
-
----
 
 ## Getting started
 
@@ -429,8 +407,6 @@ db.Execute("CREATE TABLE Notes (Id INT PRIMARY KEY, Tag VARCHAR(32), Embedding V
 > [!TIP]
 > Enjoyed the deep dive? Star [`ArintonAkos/DataVo-DBMS`](https://github.com/ArintonAkos/DataVo-DBMS) on GitHub to follow Parts 2–7.
 
----
-
 ## What comes next
 
 - **[Part 2.](/blog/part-2-packed-buffers-aot-and-roslyn-codegen)** Packed byte buffers, Native AOT, and Roslyn codegen: how a 55 ns point lookup works with zero native binaries, prepared statements, and typed execution paths.
@@ -439,8 +415,6 @@ db.Execute("CREATE TABLE Notes (Id INT PRIMARY KEY, Tag VARCHAR(32), Embedding V
 - **Part 5.** HNSW, the JIT, and the exact fallback: recall on clustered data, and why a graph search sometimes loses to a scan.
 - **Part 6.** Differential oracle testing: how our matrix caught five wrong-answer bugs before we tuned a single microsecond.
 - **Part 7.** Building an offline-first .NET 10 app end-to-end: combining Native AOT, filtered `VECTOR(n)` search, live Z-set views, and bidirectional Postgres sync in a real desktop/mobile architecture.
-
----
 
 ## References
 
