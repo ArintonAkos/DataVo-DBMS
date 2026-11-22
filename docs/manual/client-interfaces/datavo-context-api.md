@@ -75,7 +75,7 @@ DataVoBatchResult stats = db.ApplyBatch(batch);
 ## Snapshots, Auth & Change Capture
 
 - **Snapshots:** Capture and restore point-in-time engine state for the current session with `DataVoSnapshot snap = db.CreateSnapshot()` and `db.RestoreSnapshot(snap)` — useful for deterministic test resets or branching simulation state.
-- **Session Auth:** When `EnableAuthorization = true`, switch the active principal per session with `db.Login(username, password)` and `db.Logout()`. See [Admin & Security SQL](/manual/sql/statements/admin-and-security).
+- **Session Auth:** When `EnableAuthorization = true`, switch the active principal per session with `db.Login(username, password)` and `db.Logout()`. See [Databases & Security SQL](/manual/sql/statements/databases-and-security).
 - **Change Capture:** `db.Changes` exposes the engine's `ChangeCapture` stream, which feeds reactive subscriptions and custom CDC consumers.
 
 For lazy streaming (`StreamQuery`), zero-allocation scanning (`StreamRef`), and live reactive views (`Subscribe`, `SubscribeZeroAlloc`), see [Streaming Queries](/manual/fundamentals/streaming-queries) and [Reactive Views](/manual/fundamentals/reactive-views).

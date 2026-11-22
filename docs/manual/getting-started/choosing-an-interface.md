@@ -21,20 +21,12 @@ DataVo exposes five ways to query the same embedded engine. They differ in ergon
 
 ## How Every Interface Connects
 
-```mermaid
-flowchart TD
-  App["Your .NET 10 App"]
-  App --> LINQ["Compiled LINQ (DataVo.Generators)"]
-  App --> Ctx["DataVoContext (DataVo.Core)"]
-  App --> Ado["ADO.NET (DataVo.Data)"]
-  App --> EF["EF Core Bridge (DataVo.EntityFrameworkCore)"]
-  Dapper["Dapper"] --> Ado
-  LINQ --> Core["DataVo.Core Engine"]
-  Ctx --> Core
-  Ado --> Core
-  EF --> Core
-  Core --> Storage["InMemory | LSM | Disk (legacy)"]
-```
+<div class="sketch-diagram light-only">
+  <img src="/manual/fig-08-client-interfaces-light.svg" alt="Five .NET 10 client interfaces routing into the DataVo.Core engine and storage layers" />
+</div>
+<div class="sketch-diagram dark-only">
+  <img src="/manual/fig-08-client-interfaces-dark.svg" alt="Five .NET 10 client interfaces routing into the DataVo.Core engine and storage layers" />
+</div>
 
 ## The Same Query, Five Ways
 
@@ -80,6 +72,22 @@ int total = matches.Count;
 
 ::: info DataVo Extension
 Compiled LINQ reads the `Score` cell directly from packed row buffers without allocating `Player` instances. See [Compiled Scan Kernels](/manual/internals/compiled-scan-kernels) for how the generated code works.
+:::
+
+## Performance, Heap Allocation & Trade-offs
+
+All five interfaces execute against the same storage engine, indexes, and MVCC transaction coordinator. Their runtime cost differs strictly by **how much marshaling, SQL parsing, and object materialization sits between your C# code and stored row bytes**.
+
+| Interface | Measured / Architectural Latency & Heap Allocation | Native AOT | Key Advantages | Key Disadvantages |
+| --- | --- | --- | --- | --- |
+| **Compiled LINQ** (`DataVo.Generators`) | **55.0 ns / 56 B** (InMemory) and **216.2 ns / 144 B** (LSM) for PK point lookups over 100k rows; **27.1–89.6 µs / 0 B** for compiled `Count`/`Min`/`Sum`/`Max` over 200k `[Columnar]` rows *(M4 Pro, .NET 10.0.3)* | **100% AOT-safe** | Fastest reads & aggregates; zero-alloc scan kernels; compile-time type safety; `.SubscribeInto()` zero-GC reactive views | Requires `[DataVoTable]` + `<InterceptorsNamespaces>`; limited to single-table LINQ shapes (use SQL for joins/CTEs/DDL) |
+| **`DataVoContext` SQL** (`DataVo.Core`) | **1.2–1.4 µs** for prepared-statement PK point reads over 1M LSM rows (`db.Prepare(...)`). Ad-hoc `db.Execute(...)` adds SQL lex/parse overhead and materializes `Dictionary<string, object?>` per row | **100% AOT-safe** | Full SQL dialect (joins, CTEs, DDL, vector `<->`/`<=>`, `EXPLAIN`, transactions); `StreamRef` & `SubscribeZeroAlloc` available | String-typed results unless paired with `[DataVoQuery]` or `Map<T>`; higher GC pressure if returning large dictionary result sets |
+| **ADO.NET** (`DataVo.Data`) | *Not separately microbenchmarked.* Wraps `DataVoContext` prepared/ad-hoc SQL execution with `DataVoCommand`, `DataVoParameter`, and `DataVoDataReader` over `System.Data.Common` | **100% AOT-safe** | Standard .NET `DbConnection`/`DbDataReader` contract; drop-in for libraries expecting ADO.NET; exposes `BeginTransaction()` | More verbose boilerplate than `DataVoContext` or Compiled LINQ; no `DbProviderFactory`; misses DataVo-specific `StreamRef`/IVM APIs |
+| **Dapper** (`DataVo.Data` + `Dapper`) | *Not separately microbenchmarked.* Runs over `DataVoConnection`/`DataVoDataReader`, adding Dapper's parameter binding and POCO row materialization per returned row | **Reflection-based** *(per Dapper; AOT requires Dapper.AOT)* | Minimal boilerplate for plain SQL → POCO mapping; familiar API for existing .NET teams | Extra ADO.NET + Dapper mapping allocations vs. Compiled LINQ; reflection-based default mapping is not Native AOT clean |
+| **EF Core Bridge** (`DataVo.EntityFrameworkCore`) | *Not separately microbenchmarked.* Runs EF Core's model metadata, LINQ expression-tree inspection, and `DbContext` entity tracking on top of `DataVo.Core` | **Excluded from AOT** | Reuses existing EF Core `DbContext` entity models and `UseDataVo(...)` bootstrapping | Experimental preview; highest per-query overhead and memory footprint; limited LINQ translation vs. relational EF providers |
+
+::: tip Benchmark Grounding
+Point-lookup and filtered-aggregate numbers above are taken directly from the verified BenchmarkDotNet reports in `docs/public/benchmarks/2026-11-21-m4pro/` (Apple M4 Pro, .NET 10.0.3), and raw prepared-SQL PK lookup latency is from the 1M-row `sql-workload` suite in [Benchmarks](/manual/performance/benchmarks#sql-over-1-000-000-rows). ADO.NET, Dapper, and EF Core are thin or layered wrappers over `DataVo.Core` and are not separately timed in the BDN suite.
 :::
 
 ## See Also

@@ -294,20 +294,12 @@ DataVo exposes five ways to query the same embedded engine. They differ in ergon
 
 ## How Every Interface Connects
 
-```mermaid
-flowchart TD
-  App["Your .NET 10 App"]
-  App --> LINQ["Compiled LINQ (DataVo.Generators)"]
-  App --> Ctx["DataVoContext (DataVo.Core)"]
-  App --> Ado["ADO.NET (DataVo.Data)"]
-  App --> EF["EF Core Bridge (DataVo.EntityFrameworkCore)"]
-  Dapper["Dapper"] --> Ado
-  LINQ --> Core["DataVo.Core Engine"]
-  Ctx --> Core
-  Ado --> Core
-  EF --> Core
-  Core --> Storage["InMemory | LSM | Disk (legacy)"]
-```
+<div class="sketch-diagram light-only">
+  <img src="/manual/fig-08-client-interfaces-light.svg" alt="Five .NET 10 client interfaces routing into the DataVo.Core engine and storage layers" />
+</div>
+<div class="sketch-diagram dark-only">
+  <img src="/manual/fig-08-client-interfaces-dark.svg" alt="Five .NET 10 client interfaces routing into the DataVo.Core engine and storage layers" />
+</div>
 
 ## The Same Query, Five Ways
 
@@ -353,6 +345,22 @@ int total = matches.Count;
 
 ::: info DataVo Extension
 Compiled LINQ reads the `Score` cell directly from packed row buffers without allocating `Player` instances. See [Compiled Scan Kernels](/manual/internals/compiled-scan-kernels) for how the generated code works.
+:::
+
+## Performance, Heap Allocation & Trade-offs
+
+All five interfaces execute against the same storage engine, indexes, and MVCC transaction coordinator. Their runtime cost differs strictly by **how much marshaling, SQL parsing, and object materialization sits between your C# code and stored row bytes**.
+
+| Interface | Measured / Architectural Latency & Heap Allocation | Native AOT | Key Advantages | Key Disadvantages |
+| --- | --- | --- | --- | --- |
+| **Compiled LINQ** (`DataVo.Generators`) | **55.0 ns / 56 B** (InMemory) and **216.2 ns / 144 B** (LSM) for PK point lookups over 100k rows; **27.1–89.6 µs / 0 B** for compiled `Count`/`Min`/`Sum`/`Max` over 200k `[Columnar]` rows *(M4 Pro, .NET 10.0.3)* | **100% AOT-safe** | Fastest reads & aggregates; zero-alloc scan kernels; compile-time type safety; `.SubscribeInto()` zero-GC reactive views | Requires `[DataVoTable]` + `<InterceptorsNamespaces>`; limited to single-table LINQ shapes (use SQL for joins/CTEs/DDL) |
+| **`DataVoContext` SQL** (`DataVo.Core`) | **1.2–1.4 µs** for prepared-statement PK point reads over 1M LSM rows (`db.Prepare(...)`). Ad-hoc `db.Execute(...)` adds SQL lex/parse overhead and materializes `Dictionary<string, object?>` per row | **100% AOT-safe** | Full SQL dialect (joins, CTEs, DDL, vector `<->`/`<=>`, `EXPLAIN`, transactions); `StreamRef` & `SubscribeZeroAlloc` available | String-typed results unless paired with `[DataVoQuery]` or `Map<T>`; higher GC pressure if returning large dictionary result sets |
+| **ADO.NET** (`DataVo.Data`) | *Not separately microbenchmarked.* Wraps `DataVoContext` prepared/ad-hoc SQL execution with `DataVoCommand`, `DataVoParameter`, and `DataVoDataReader` over `System.Data.Common` | **100% AOT-safe** | Standard .NET `DbConnection`/`DbDataReader` contract; drop-in for libraries expecting ADO.NET; exposes `BeginTransaction()` | More verbose boilerplate than `DataVoContext` or Compiled LINQ; no `DbProviderFactory`; misses DataVo-specific `StreamRef`/IVM APIs |
+| **Dapper** (`DataVo.Data` + `Dapper`) | *Not separately microbenchmarked.* Runs over `DataVoConnection`/`DataVoDataReader`, adding Dapper's parameter binding and POCO row materialization per returned row | **Reflection-based** *(per Dapper; AOT requires Dapper.AOT)* | Minimal boilerplate for plain SQL → POCO mapping; familiar API for existing .NET teams | Extra ADO.NET + Dapper mapping allocations vs. Compiled LINQ; reflection-based default mapping is not Native AOT clean |
+| **EF Core Bridge** (`DataVo.EntityFrameworkCore`) | *Not separately microbenchmarked.* Runs EF Core's model metadata, LINQ expression-tree inspection, and `DbContext` entity tracking on top of `DataVo.Core` | **Excluded from AOT** | Reuses existing EF Core `DbContext` entity models and `UseDataVo(...)` bootstrapping | Experimental preview; highest per-query overhead and memory footprint; limited LINQ translation vs. relational EF providers |
+
+::: tip Benchmark Grounding
+Point-lookup and filtered-aggregate numbers above are taken directly from the verified BenchmarkDotNet reports in `docs/public/benchmarks/2026-11-21-m4pro/` (Apple M4 Pro, .NET 10.0.3), and raw prepared-SQL PK lookup latency is from the 1M-row `sql-workload` suite in [Benchmarks](/manual/performance/benchmarks#sql-over-1-000-000-rows). ADO.NET, Dapper, and EF Core are thin or layered wrappers over `DataVo.Core` and are not separately timed in the BDN suite.
 :::
 
 ## See Also
@@ -1268,7 +1276,7 @@ DataVoBatchResult stats = db.ApplyBatch(batch);
 ## Snapshots, Auth & Change Capture
 
 - **Snapshots:** Capture and restore point-in-time engine state for the current session with `DataVoSnapshot snap = db.CreateSnapshot()` and `db.RestoreSnapshot(snap)` — useful for deterministic test resets or branching simulation state.
-- **Session Auth:** When `EnableAuthorization = true`, switch the active principal per session with `db.Login(username, password)` and `db.Logout()`. See [Admin & Security SQL](/manual/sql/statements/admin-and-security).
+- **Session Auth:** When `EnableAuthorization = true`, switch the active principal per session with `db.Login(username, password)` and `db.Logout()`. See [Databases & Security SQL](/manual/sql/statements/databases-and-security).
 - **Change Capture:** `db.Changes` exposes the engine's `ChangeCapture` stream, which feeds reactive subscriptions and custom CDC consumers.
 
 For lazy streaming (`StreamQuery`), zero-allocation scanning (`StreamRef`), and live reactive views (`Subscribe`, `SubscribeZeroAlloc`), see [Streaming Queries](/manual/fundamentals/streaming-queries) and [Reactive Views](/manual/fundamentals/reactive-views).
@@ -1979,459 +1987,1596 @@ DataVo throws a `ParserException` at `CREATE TABLE` or `ALTER TABLE` time for ty
 | `BLOB`, `BINARY`, `VARBINARY`, `JSON`, `JSONB` | Not supported as native column types in `v0.4`; encode as `VARCHAR` (e.g., Base64 or JSON text). |
 
 ## See Also
-- [DDL Statements](/manual/sql/statements/ddl) — Declaring columns, constraints, and defaults in `CREATE TABLE`
+- [CREATE TABLE](/manual/sql/statements/create-table) — Declaring columns, constraints, and defaults in `CREATE TABLE`
 - [Indexes](/manual/sql/statements/indexes) — Choosing B-Tree, HNSW, FLAT, or COLUMNAR indexes by column type
 - [SQL Compatibility](/manual/sql/compatibility) — Full dialect comparison against SQLite and PostgreSQL
 
 ---
 
-# SELECT & EXPLAIN
+# SELECT
 
 > Source route: /manual/sql/statements/select
 > Source file: manual/sql/statements/select.md
 
-`SELECT` retrieves, filters, joins, aggregates, and ranks rows from one or more tables. `EXPLAIN` inspects the query planner's chosen execution path without returning table rows.
+The `SELECT` statement queries one or more tables or common table expressions (CTEs), applies row filters, joins, grouping, window ranking, ordering, and pagination, and returns a result set.
+
+## Syntax
 
 ```sql
-SELECT p.Region, COUNT(*) AS PlayerCount, AVG(p.Score) AS AvgScore
+[WITH cte_name AS (select_statement) [, ...]]
+SELECT [DISTINCT]
+    { * | table_or_alias.* | expression [[AS] alias] } [, ...]
+FROM table_name [[AS] alias]
+    [{ [INNER] | LEFT [OUTER] | RIGHT [OUTER] | FULL [OUTER] | CROSS }
+     JOIN table_name [[AS] alias] [ON join_condition]] [...]
+[WHERE filter_condition]
+[GROUP BY column_ref [, ...]]
+[HAVING group_condition]
+[UNION [ALL] select_statement [...]]
+[ORDER BY expression [ASC | DESC] [, ...]]
+[LIMIT count [OFFSET skip]]
+```
+
+## Parameters
+
+| Clause / Parameter | Description |
+| --- | --- |
+| `WITH cte_name AS (...)` | Defines one or more non-recursive common table expressions scoped to the query. |
+| `DISTINCT` | Eliminates duplicate output rows after projection. |
+| `expression [[AS] alias]` | Column reference, literal, arithmetic expression, aggregate, `RANK()` window expression, scalar function (`LOWER`, `UPPER`), or vector distance (`<->`, `<=>`). |
+| `FROM table_name [[AS] alias]` | Source base table or CTE name, with an optional alias. |
+| `JOIN ... ON join_condition` | Combines rows from multiple tables using `INNER`, `LEFT [OUTER]`, `RIGHT [OUTER]`, `FULL [OUTER]`, or `CROSS JOIN`. |
+| `WHERE filter_condition` | Filters individual rows before grouping and projection. |
+| `GROUP BY column_ref, ...` | Partitions matching rows into groups for aggregate evaluation. |
+| `HAVING group_condition` | Filters aggregated groups; also supported without `GROUP BY` to filter a single whole-table aggregate group. |
+| `UNION [ALL]` | Vertically combines the result rows of two or more compatible `SELECT` queries. |
+| `ORDER BY expression [ASC \| DESC]` | Sorts result rows ascending (`ASC`, default) or descending (`DESC`). |
+| `LIMIT count [OFFSET skip]` | Caps the number of returned rows and optionally skips the first `skip` rows. |
+
+## Columns & Aliases
+
+Project all columns with `*`, qualify columns by table or alias (`p.Name`), or compute derived values with arithmetic, scalar functions, aggregates, and vector distances. Use `AS` (optional) to assign an output column name.
+
+```sql
+SELECT
+    p.Id,
+    UPPER(p.Name) AS PlayerName,
+    p.Score + 100 AS BoostedScore,
+    p.Region
+FROM players AS p;
+```
+
+- Column aliases are reflected in result headers and can be referenced in `ORDER BY`.
+- When joining multiple tables that share column names (such as `Id`), qualify each reference with its table name or alias to avoid ambiguity errors.
+
+## FROM
+
+The `FROM` clause specifies the primary table or CTE to read. Assigning a short alias makes multi-table queries and qualified column references concise.
+
+```sql
+SELECT p.Name, p.Score
+FROM players p;
+```
+
+## WHERE
+
+The `WHERE` clause filters rows before grouping or window evaluation. DataVo supports comparison, logical, pattern, range, nullability, subquery, and vector distance predicates.
+
+```sql
+SELECT Id, Name, Score, Region
+FROM players
+WHERE Region IN ('EU', 'NA')
+  AND Score BETWEEN 500 AND 1500
+  AND Name LIKE 'A%'
+  AND Name NOT LIKE '%_bot'
+  AND Region IS NOT NULL;
+```
+
+Supported `WHERE` predicates include:
+
+- **Comparison:** `=`, `!=`, `<>`, `<`, `<=`, `>`, `>=` (text comparisons are ordinal UTF-8 code-point order).
+- **Logical:** `AND`, `OR`, `NOT` (with parentheses for grouping).
+- **Membership & Range:** `IN (v1, v2, ...)`, `NOT IN (...)`, `BETWEEN low AND high`, `NOT BETWEEN low AND high`.
+- **Pattern & Null:** `LIKE`, `NOT LIKE` (`%` matches any sequence, `_` matches any single character), `IS NULL`, `IS NOT NULL`.
+- **Vector Distance:** `<->` (L2 / Euclidean) and `<=>` (Cosine) against a `VECTOR(n)` column.
+
+::: info DataVo Extension
+Vector distance operators `<->` (L2) and `<=>` (Cosine) can be used directly inside `WHERE` predicates to filter by a maximum distance threshold:
+
+```sql
+SELECT Id, Title, Category
+FROM documents
+WHERE Category = 'guide'
+  AND Embedding <=> '[0.12, 0.85, 0.44]' < 0.25;
+```
+
+Vector literals must be single-quoted strings (or bound parameters such as `@queryVec`) whose element count matches the column's declared `VECTOR(n)` dimension.
+:::
+
+::: tip Clustered Range Seeks
+`BETWEEN` and range predicates on a clustered primary key (single `INT` or `GUID` `PRIMARY KEY` in `Lsm` mode) perform an index range seek instead of a full table scan.
+:::
+
+## JOIN
+
+DataVo supports `INNER JOIN`, `LEFT [OUTER] JOIN`, `RIGHT [OUTER] JOIN`, `FULL [OUTER] JOIN`, `CROSS JOIN`, self-joins, and multi-table join chains.
+
+### INNER and LEFT JOIN
+
+```sql
+SELECT
+    p.Name,
+    p.Region,
+    m.Points,
+    m.PlayedOn
 FROM players p
-WHERE p.Score >= 100
-GROUP BY p.Region
-HAVING COUNT(*) >= 5
-ORDER BY AvgScore DESC
-LIMIT 10 OFFSET 0;
+INNER JOIN matches m ON m.PlayerId = p.Id
+WHERE m.Points >= 50;
 ```
 
-## Clause Reference
-
-| Clause | Syntax | Notes |
-| --- | --- | --- |
-| `SELECT` | `SELECT [DISTINCT] <expr> [AS alias], ...` | Supports `*`, column refs, aliases, aggregates, `RANK()`, scalar functions, arithmetic, and vector distance. |
-| `FROM` | `FROM <table> [AS alias]` | Accepts base tables and CTE names. |
-| `JOIN` | `INNER \| LEFT \| RIGHT \| FULL [OUTER] \| CROSS JOIN <table> [alias] ON <cond>` | `INNER` and `LEFT` on integer equality keys use typed hash joins; others use the general evaluator. |
-| `WHERE` | `WHERE <predicate>` | Supports `AND`, `OR`, `NOT`, comparisons, `IN`, `BETWEEN`, `LIKE`/`NOT LIKE`, `IS [NOT] NULL`, subqueries, and vector distance predicates. |
-| `GROUP BY` | `GROUP BY <col>, ...` | Groups rows before applying aggregate functions. |
-| `HAVING` | `HAVING <predicate>` | Filters grouped results; also works **without** `GROUP BY` (treats the filtered table as a single group). |
-| `ORDER BY` | `ORDER BY <expr> [ASC \| DESC], ...` | Supports multi-column sorting and vector distance ranking. |
-| `LIMIT` / `OFFSET` | `LIMIT <n> [OFFSET <m>]` | `ORDER BY ... LIMIT k` uses a bounded top-k heap on typed scans and joins. |
-
-## Joins
+Use `LEFT JOIN` (or `LEFT OUTER JOIN`) to retain rows from the left table even when no matching row exists on the right (`NULL` fills unmatched right columns):
 
 ```sql
-SELECT u.Name, d.Name AS Department
-FROM Users u
-LEFT JOIN Departments d ON u.DepartmentId = d.Id;
+SELECT
+    p.Id,
+    p.Name,
+    m.Points
+FROM players p
+LEFT JOIN matches m ON m.PlayerId = p.Id;
 ```
 
-`INNER JOIN` and `LEFT JOIN` on integer equality keys run on DataVo's typed hash-join path across any number of tables. `RIGHT JOIN`, `FULL OUTER JOIN`, `CROSS JOIN`, self-joins, text/`GUID` join keys, and cross-table `OR` predicates are fully supported on the general evaluator.
+### RIGHT, FULL OUTER, and CROSS JOIN
 
-## CTEs (`WITH`), Subqueries, and `UNION`
+```sql
+-- Retain all match rows even if a player record is missing
+SELECT p.Name, m.Id AS MatchId, m.Points
+FROM players p
+RIGHT OUTER JOIN matches m ON m.PlayerId = p.Id;
 
-Non-recursive CTEs are materialized before the main query runs. `WITH RECURSIVE` is supported for [Live Reactive Views](/manual/fundamentals/reactive-views) only.
+-- Retain unmatched rows from both sides
+SELECT p.Name, m.Id AS MatchId
+FROM players p
+FULL OUTER JOIN matches m ON m.PlayerId = p.Id;
+
+-- Cartesian product (no ON clause)
+SELECT p.Name, d.Title
+FROM players p
+CROSS JOIN documents d;
+```
+
+::: tip Join Fast Paths
+`INNER JOIN` and `LEFT JOIN` on integer equality keys execute on DataVo's typed hash-join path across any number of joined tables. `RIGHT JOIN`, `FULL OUTER JOIN`, `CROSS JOIN`, self-joins, `VARCHAR`/`GUID` join keys, and cross-table `OR` predicates are fully supported via the general evaluator.
+:::
+
+## GROUP BY & HAVING
+
+`GROUP BY` partitions rows sharing identical values across one or more columns so aggregate functions (`COUNT`, `SUM`, `AVG`, `MIN`, `MAX`) compute one result per group. `HAVING` filters the resulting groups.
+
+```sql
+SELECT
+    p.Region,
+    COUNT(*) AS PlayerCount,
+    AVG(p.Score) AS AvgScore,
+    MAX(p.Score) AS TopScore
+FROM players p
+WHERE p.Score > 0
+GROUP BY p.Region
+HAVING COUNT(*) >= 5 AND AVG(p.Score) >= 600
+ORDER BY AvgScore DESC;
+```
+
+- `HAVING` can reference aggregates that are not projected in the `SELECT` list.
+- `HAVING` is also valid **without** `GROUP BY`; in that case, the filtered table is treated as a single group:
+
+```sql
+SELECT COUNT(*) AS ActivePlayers, SUM(Score) AS TotalScore
+FROM players
+WHERE Score >= 100
+HAVING COUNT(*) > 0;
+```
+
+## DISTINCT
+
+Add `DISTINCT` immediately after `SELECT` to deduplicate identical output rows.
+
+```sql
+SELECT DISTINCT Region
+FROM players
+ORDER BY Region ASC;
+```
+
+For per-aggregate deduplication rather than whole-row deduplication, pass `DISTINCT` inside an aggregate call (for example, `COUNT(DISTINCT Region)`). See [Functions & Operators](/manual/sql/functions) for details.
+
+## ORDER BY
+
+`ORDER BY` sorts the final result set by one or more columns, aliases, or expressions. Each sort key accepts `ASC` (default) or `DESC`.
+
+```sql
+SELECT Id, Name, Region, Score
+FROM players
+ORDER BY Region ASC, Score DESC, Name ASC;
+```
+
+### Vector Distance Ranking
+
+Combine `ORDER BY` with `<->` (L2) or `<=>` (Cosine) and `LIMIT` to run k-nearest-neighbor (k-NN) similarity search:
+
+```sql
+SELECT
+    Id,
+    Title,
+    Embedding <=> '[0.12, 0.85, 0.44]' AS Distance
+FROM documents
+WHERE Category = 'reference'
+ORDER BY Distance ASC
+LIMIT 5;
+```
+
+When an `HNSW` or `FLAT` index exists on `Embedding` with a matching distance metric, the planner accelerates `ORDER BY Embedding <=> ... LIMIT k` automatically.
+
+## LIMIT & OFFSET
+
+`LIMIT` restricts how many rows are returned. Combine `LIMIT` with `OFFSET` to paginate through sorted results.
+
+```sql
+-- Page 2 (rows 11 through 20)
+SELECT Id, Name, Score
+FROM players
+ORDER BY Score DESC
+LIMIT 10 OFFSET 10;
+```
+
+::: tip Top-K Execution
+Queries of the form `ORDER BY ... LIMIT k` on typed scans and typed joins use a bounded top-k heap rather than sorting the entire table in memory.
+:::
+
+## Subqueries
+
+DataVo supports `IN`, `EXISTS`, and `NOT EXISTS` subqueries inside `WHERE` predicates.
+
+### `IN (SELECT ...)`
+
+```sql
+SELECT Id, Name, Score
+FROM players
+WHERE Id IN (
+    SELECT PlayerId
+    FROM matches
+    WHERE Points >= 100
+);
+```
+
+### `EXISTS` and `NOT EXISTS`
+
+```sql
+-- Players who have played at least one match
+SELECT p.Id, p.Name
+FROM players p
+WHERE EXISTS (
+    SELECT 1
+    FROM matches m
+    WHERE m.PlayerId = p.Id
+);
+
+-- Players with no recorded matches
+SELECT p.Id, p.Name
+FROM players p
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM matches m
+    WHERE m.PlayerId = p.Id
+);
+```
+
+## CTEs (`WITH`)
+
+Use `WITH` to define one or more named temporary result sets (Common Table Expressions) that simplify complex queries. Non-recursive CTEs are materialized once before the outer `SELECT` executes and can be joined or aggregated like base tables.
 
 ```sql
 WITH HighScorers AS (
-    SELECT Id, Name, Region FROM players WHERE Score >= 900
+    SELECT Id, Name, Region, Score
+    FROM players
+    WHERE Score >= 900
+),
+MatchTotals AS (
+    SELECT PlayerId, SUM(Points) AS TotalPoints
+    FROM matches
+    GROUP BY PlayerId
 )
-SELECT Region, COUNT(*) AS EliteCount
-FROM HighScorers
-GROUP BY Region;
+SELECT
+    h.Name,
+    h.Region,
+    m.TotalPoints
+FROM HighScorers h
+LEFT JOIN MatchTotals m ON m.PlayerId = h.Id
+ORDER BY h.Score DESC;
 ```
 
-- **Subqueries:** Use `col IN (SELECT ...)`, `EXISTS (SELECT ...)`, and `NOT EXISTS (SELECT ...)` in `WHERE`.
-- **Set operations:** Combine compatible `SELECT` branches with `UNION` (deduplicated) or `UNION ALL` (preserves duplicates). Parenthesized `UNION` branches, `INTERSECT`, and `EXCEPT` are not supported in `v0.4`.
+::: info DataVo Extension — `WITH RECURSIVE`
+Standard one-shot `SELECT` queries support non-recursive `WITH` CTEs. **`WITH RECURSIVE`** is supported specifically for [Live Reactive Views](/manual/fundamentals/reactive-views) created via `Subscribe` in C#.
+:::
 
-## `EXPLAIN`
+## Window Functions
 
-Prefix any `SELECT` statement with `EXPLAIN` to inspect how the planner executes it:
+DataVo v0.4 supports the `RANK()` window function to assign competition ranks (`1, 2, 2, 4, ...`) within optional partitions without collapsing rows.
 
 ```sql
-EXPLAIN SELECT Id, Name FROM players WHERE Score > 500 ORDER BY Score DESC LIMIT 10;
+SELECT
+    Name,
+    Region,
+    Score,
+    RANK() OVER (PARTITION BY Region ORDER BY Score DESC) AS RegionRank
+FROM players
+ORDER BY Region ASC, RegionRank ASC;
 ```
 
-`EXPLAIN` returns a single diagnostic row with four columns:
+- `ORDER BY <column> [ASC | DESC]` inside `OVER (...)` is **required** and accepts a single column reference.
+- `PARTITION BY <col1> [, <col2>, ...]` is **optional**; omitting it ranks across the entire result set.
 
-| Column | Description |
-| --- | --- |
-| `Plan` | High-level logical plan summary |
-| `Physical` | Selected physical operator or fast path (e.g., typed scan, columnar aggregate, HNSW search) |
-| `EstimatedCost` | Planner's estimated relative execution cost |
-| `Reason` | Why the planner chose (or fell back from) a fast path |
+::: warning Window Function Scope in v0.4
+Only `RANK() OVER ([PARTITION BY ...] ORDER BY <col> [ASC | DESC])` is supported in v0.4. `ROW_NUMBER()`, `DENSE_RANK()`, `LAG()`, `LEAD()`, `FIRST_VALUE()`, `LAST_VALUE()`, and window frame clauses (`ROWS BETWEEN ...`) are not implemented and throw a `ParserException`.
+:::
+
+## Set Operations
+
+Combine rows from two or more `SELECT` statements with matching column counts using `UNION` or `UNION ALL`.
+
+```sql
+-- Deduplicated union
+SELECT Id, Name FROM players WHERE Region = 'EU'
+UNION
+SELECT Id, Name FROM players WHERE Score >= 1200;
+
+-- Preserve all rows including duplicates
+SELECT Id, Name FROM players WHERE Region = 'EU'
+UNION ALL
+SELECT Id, Name FROM players WHERE Region = 'NA';
+```
+
+- `UNION` removes duplicate rows across branches.
+- `UNION ALL` concatenates all branch rows without deduplication and avoids the hashing cost.
+
+::: warning Unsupported Set Operations
+`INTERSECT`, `EXCEPT`, and parenthesized `UNION` sub-branches are not supported in v0.4.
+:::
 
 ## See Also
-- [Functions & Operators](/manual/sql/functions) — Aggregates, `RANK()`, `LOWER`/`UPPER`, and vector distance operators
-- [Query Planner](/manual/internals/query-planner) — Deep dive into DataVo's typed fast paths and fallback rules
-- [Streaming Queries](/manual/fundamentals/streaming-queries) — Lazy `StreamQuery` and zero-allocation `StreamRef` execution
+
+- [Functions & Operators](/manual/sql/functions) — Complete reference for aggregates, `RANK()`, `LOWER`/`UPPER`, and vector operators
+- [EXPLAIN](/manual/sql/statements/explain) — Inspecting query plans, physical operators, and fast-path choices
+- [Indexes](/manual/sql/statements/indexes) — Accelerating `WHERE`, `JOIN`, and vector `ORDER BY` queries with `BTREE`, `HNSW`, `FLAT`, and `COLUMNAR`
+- [Query Planner](/manual/internals/query-planner) — Typed fast paths, bounded top-k heaps, and general evaluator fallback rules
+- [Vector Search](/manual/fundamentals/vector-search) — Indexing and tuning `<->` and `<=>` similarity queries
+- [Live Reactive Views](/manual/fundamentals/reactive-views) — Continuous subscriptions and `WITH RECURSIVE` queries in C#
+- [SQL Compatibility](/manual/sql/compatibility) — Full dialect comparison against SQLite and PostgreSQL
 
 ---
 
-# DML Statements
+# INSERT
 
-> Source route: /manual/sql/statements/dml
-> Source file: manual/sql/statements/dml.md
+> Source route: /manual/sql/statements/insert
+> Source file: manual/sql/statements/insert.md
 
-Data Manipulation Language (DML) statements add, modify, remove, and compact rows in a table. All DML statements participate in explicit transactions when executed between `BEGIN` and `COMMIT`.
+The `INSERT` statement adds one or more new rows into a table, validating all schema constraints (`PRIMARY KEY`, `UNIQUE`, `NOT NULL`, and `FOREIGN KEY`) and updating all table indexes atomically.
+
+## Syntax
 
 ```sql
+INSERT INTO table_name [(column1, column2, ...)]
+VALUES (value1, value2, ...) [, (value1, value2, ...), ...];
+```
+
+## Parameters
+
+| Parameter | Description |
+| --- | --- |
+| `table_name` | Target table to receive the new rows. |
+| `(column1, column2, ...)` | Optional explicit list of target columns. Recommended for schema resilience; omitted columns receive their declared `DEFAULT` or `NULL`. |
+| `VALUES (...) [, ...]` | One or more parenthesized tuples of literal values or bound parameters (`@param`). Each tuple must match the column count. |
+
+## Single-Row Insert
+
+Provide an explicit column list (recommended) or omit it for a positional full-row insert whose values match the table's declared column order.
+
+```sql
+-- Column-targeted insert (recommended)
 INSERT INTO players (Id, Name, Score, Region)
 VALUES (1, 'Ada', 980, 'EU');
 
+-- Positional full-row insert (must match column order in CREATE TABLE)
+INSERT INTO players
+VALUES (2, 'Grace', 1120, 'NA');
+```
+
+## Explicit Column Lists & Defaults
+
+When you specify an explicit column list, any omitted column automatically receives its declared `DEFAULT` literal, or `NULL` if no default is defined and the column is nullable. Omitting a `NOT NULL` column without a default fails validation.
+
+```sql
+-- Region receives its DEFAULT value or NULL
+INSERT INTO players (Id, Name, Score)
+VALUES (3, 'Linus', 875);
+
+-- Inserting explicit NULL values
+INSERT INTO players (Id, Name, Score, Region)
+VALUES (4, 'Margaret', 1050, NULL);
+```
+
+## Multi-Row `VALUES`
+
+Insert multiple rows in a single statement by separating value tuples with commas. Multi-row inserts reduce parse overhead and execute under a single write lock in auto-commit mode.
+
+```sql
+INSERT INTO matches (Id, PlayerId, Points, PlayedOn)
+VALUES
+    (101, 1, 85, '2026-03-14'),
+    (102, 2, 92, '2026-03-15'),
+    (103, 1, 110, '2026-03-16');
+```
+
+## Inserting `VECTOR` Columns
+
+::: info DataVo Extension
+`VECTOR(n)` columns accept **single-quoted** bracketed float-array literals (such as `'[0.1, 0.2, 0.3]'`) or bound parameters (`@embedding`). The element count must exactly match the column's declared dimension `n`.
+:::
+
+```sql
+-- Quoted vector literal (shown with a 3-element shorthand; provide 384 floats for VECTOR(384))
+INSERT INTO documents (Id, Title, Category, Embedding)
+VALUES (1, 'Quickstart Guide', 'guide', '[0.12, 0.85, 0.44]');
+
+-- Bound parameter in parameterized SQL (recommended for high-dimensional VECTOR(384) embeddings)
+INSERT INTO documents (Id, Title, Category, Embedding)
+VALUES (@id, @title, @category, @embedding);
+```
+
+::: warning Literal & Expression Rules in `VALUES`
+- **Quoted vectors only:** Unquoted array syntax like `[0.1, 0.2, 0.3]` is **not** accepted by the SQL parser and raises a syntax error. Always quote vector literals (`'[0.1, 0.2, 0.3]'`) or pass a `float[]` parameter.
+- **No expressions in `VALUES`:** Arithmetic or function expressions inside `VALUES` (for example `VALUES (1, 'Ada', 100 + 50, 'EU')` or `UPPER('eu')`) are **not** parsed. Supply plain literals (`'text'`, `42`, `3.14`, `TRUE`, `NULL`) or bound `@parameters`.
+:::
+
+## Constraints, Indexes & Transactions
+
+- **Constraint enforcement:** Every row is checked against `PRIMARY KEY`, `UNIQUE`, `NOT NULL`, and `FOREIGN KEY` constraints before storage is modified. If any row in a multi-row batch fails validation, the statement aborts with an error.
+- **Index maintenance:** All B-Tree, `HNSW`, `FLAT`, and `COLUMNAR` indexes on the table are updated automatically.
+- **Transactions:** Inside an explicit `BEGIN` ... `COMMIT` block, inserted rows are buffered in `TransactionContext`, visible immediately to subsequent queries in the same transaction, and cleanly discarded on `ROLLBACK` or `ROLLBACK TO SAVEPOINT`.
+
+::: warning Unsupported `INSERT` Clauses in v0.4
+The following SQL extensions are **not** supported in DataVo v0.4:
+- `INSERT ... ON CONFLICT DO UPDATE / DO NOTHING` (upsert)
+- `INSERT OR REPLACE` / `REPLACE INTO`
+- `INSERT INTO ... SELECT ...`
+- `RETURNING` clauses
+
+To upsert rows in application code, check existence or handle the key conflict inside a transaction, then run `UPDATE` or `INSERT`.
+:::
+
+## See Also
+
+- [UPDATE](/manual/sql/statements/update) — Modifying existing rows with `SET` expressions
+- [DELETE](/manual/sql/statements/delete) — Removing rows and compacting storage with `VACUUM`
+- [CREATE TABLE](/manual/sql/statements/create-table) — Defining column types, `DEFAULT` values, and constraints
+- [Data Types](/manual/sql/data-types) — Supported SQL types including `DATE`, `GUID`, and `VECTOR(n)`
+- [Transactions](/manual/sql/statements/transactions) — Grouping writes with `BEGIN`, `SAVEPOINT`, `COMMIT`, and `ROLLBACK`
+- [Vector Search](/manual/fundamentals/vector-search) — Storing and querying `VECTOR(n)` embeddings
+
+---
+
+# UPDATE
+
+> Source route: /manual/sql/statements/update
+> Source file: manual/sql/statements/update.md
+
+The `UPDATE` statement modifies one or more column values on existing rows matching an optional `WHERE` predicate, re-validating constraints and keeping all table indexes synchronized.
+
+## Syntax
+
+```sql
+UPDATE table_name
+SET column1 = expression1 [, column2 = expression2, ...]
+[WHERE filter_condition];
+```
+
+## Parameters
+
+| Parameter | Description |
+| --- | --- |
+| `table_name` | Target table whose rows will be updated. |
+| `SET column = expression` | One or more comma-separated assignments. Supports literals, `@param` parameters, column references, binary arithmetic/string `+ - * /`, and scalar subqueries. |
+| `WHERE filter_condition` | Optional predicate selecting which rows to modify. When omitted, **every row** in the table is updated. |
+
+## Single & Multi-Column Updates
+
+Update a single column or assign multiple columns in one `SET` clause:
+
+```sql
+-- Update a single column on one row
 UPDATE players
 SET Score = 1050
 WHERE Id = 1;
 
-DELETE FROM players WHERE Score < 100;
-VACUUM players;
-```
-
-## `INSERT INTO`
-
-Insert rows using either a column-targeted list (recommended for schema resilience) or a positional full-row list:
-
-```sql
--- Column-targeted (recommended)
-INSERT INTO documents (id, title, category, embedding)
-VALUES (1, 'Quickstart', 'guide', '[1.0, 0.0, 0.0]');
-
--- Positional full-row (must match table column order)
-INSERT INTO documents
-VALUES (2, 'Vector Search', 'guide', '[0.9, 0.1, 0.0]');
-```
-
-- The number of values must match the number of target columns (or all table columns for positional inserts).
-- Omitted columns in a column-targeted insert receive their declared `DEFAULT` literal or `NULL` (if nullable).
-- Vector columns accept bracketed float array string literals such as `'[0.9, 0.1, 0.0]'` matching the column's fixed dimension.
-- `PRIMARY KEY`, `UNIQUE`, `NOT NULL`, and `FOREIGN KEY` constraints are enforced on every insert.
-
-## `UPDATE`
-
-Modify one or more columns on rows matching a `WHERE` predicate:
-
-```sql
+-- Update multiple columns at once
 UPDATE players
-SET Score = Score + 50,
+SET Score = 1200,
     Region = 'US'
+WHERE Id = 2;
+```
+
+To update a `VECTOR(n)` column, provide a single-quoted float-array literal or a bound parameter matching the column's dimension:
+
+```sql
+UPDATE documents
+SET Category = 'tutorial',
+    Embedding = @newEmbedding
 WHERE Id = 1;
 ```
 
-- Omitting `WHERE` updates every row in the table.
-- Updating a `PRIMARY KEY`, `UNIQUE`, or `FOREIGN KEY` column re-validates key constraints and updates secondary indexes atomically.
-- Narrow single-row updates on fixed-width schemas can also use compiled fast paths via [Compiled LINQ (`ExecuteUpdate`)](/manual/client-interfaces/compiled-linq) or [Source Generators](/manual/client-interfaces/source-generators).
+## Expressions & Subqueries in `SET`
 
-## `DELETE FROM`
-
-Remove rows matching a `WHERE` predicate:
+`SET` assignments evaluate column references, literals, bound parameters, binary operators (`+`, `-`, `*`, `/`), and scalar subqueries (`(SELECT ...)`).
 
 ```sql
-DELETE FROM players
-WHERE Region = 'Legacy' AND Score = 0;
+-- Arithmetic update referencing the current row
+UPDATE players
+SET Score = Score + 50
+WHERE Region = 'EU';
+
+-- String concatenation using '+'
+UPDATE players
+SET Name = Name + ' (VIP)'
+WHERE Score >= 1200;
+
+-- Scalar subquery assignment
+UPDATE players
+SET Score = (SELECT MAX(Points) FROM matches WHERE PlayerId = 1)
+WHERE Id = 1;
 ```
 
-- Omitting `WHERE` deletes all rows in the table.
-- Foreign-key `ON DELETE CASCADE` deletes dependent child rows; `ON DELETE RESTRICT` rejects the delete if child rows still reference the target key.
+- **NULL propagation:** In binary arithmetic expressions (`Score + 10`), if either operand is `NULL`, the expression evaluates to `NULL`.
+- **Unknown columns:** Referencing a column that does not exist in the target table fails immediately with an unknown-column binding error before any row is modified.
 
-## `VACUUM`
+::: warning No Scalar Functions in `SET`
+`UPDATE ... SET` does **not** evaluate scalar functions such as `LOWER(...)` or `UPPER(...)`. Compute string transformations in application code and bind the result as a literal or `@param` instead.
 
-Reclaim space from deleted rows and compact table storage:
+Additionally, `UPDATE ... FROM` joins and `RETURNING` clauses are not supported in DataVo v0.4.
+:::
+
+## Filtering & Full-Table Updates
+
+`WHERE` accepts the same predicates as `SELECT`, including comparisons, `AND`/`OR`/`NOT`, `IN`, `BETWEEN`, `LIKE`, `IS [NOT] NULL`, and subqueries.
+
+```sql
+UPDATE matches
+SET Points = Points + 10
+WHERE PlayedOn BETWEEN '2026-01-01' AND '2026-03-31'
+  AND Points < 100;
+```
+
+::: warning Omitting `WHERE` Updates Every Row
+If you omit the `WHERE` clause, DataVo applies the `SET` assignments to **all rows** in the table:
+
+```sql
+-- Resets Score to 0 for every player in the table
+UPDATE players
+SET Score = 0;
+```
+:::
+
+## Index Maintenance & Transactions
+
+- **Automatic index updates:** Every `UPDATE` automatically maintains all B-Tree, `HNSW`, `FLAT`, and `COLUMNAR` indexes on the table. Updating an indexed or `VECTOR(n)` column removes stale entries and indexes the new values atomically.
+- **Constraint checks:** Updating a `PRIMARY KEY`, `UNIQUE`, `NOT NULL`, or `FOREIGN KEY` column re-validates all constraints before the change takes effect.
+- **MVCC & transaction buffering:** Inside an explicit `BEGIN` ... `COMMIT` transaction, `UPDATE` reads through the transaction's snapshot and its own prior uncommitted writes, coalesces buffered updates in `TransactionContext`, and is completely reversible via `ROLLBACK` or `ROLLBACK TO SAVEPOINT`.
+
+## See Also
+
+- [INSERT](/manual/sql/statements/insert) — Adding new rows to a table
+- [DELETE](/manual/sql/statements/delete) — Removing rows and compacting storage with `VACUUM`
+- [SELECT](/manual/sql/statements/select) — Querying updated rows and `WHERE` predicate syntax
+- [Indexes](/manual/sql/statements/indexes) — How B-Tree, `HNSW`, `FLAT`, and `COLUMNAR` indexes behave on writes
+- [Transactions](/manual/sql/statements/transactions) — Atomic multi-statement updates with `BEGIN`, `SAVEPOINT`, `COMMIT`, and `ROLLBACK`
+- [Transactions & MVCC](/manual/fundamentals/transactions-and-mvcc) — Snapshot isolation and write-conflict rules
+
+---
+
+# DELETE
+
+> Source route: /manual/sql/statements/delete
+> Source file: manual/sql/statements/delete.md
+
+The `DELETE` statement removes rows matching an optional `WHERE` predicate from a table, enforcing foreign-key referential actions and updating all table indexes.
+
+## Syntax
+
+```sql
+DELETE FROM table_name
+[WHERE filter_condition];
+```
+
+## Parameters
+
+| Parameter | Description |
+| --- | --- |
+| `table_name` | Target table from which rows will be removed. |
+| `WHERE filter_condition` | Optional predicate selecting which rows to delete. When omitted, **all rows** in the table are deleted. |
+
+## Filtered `DELETE`
+
+Provide a `WHERE` clause to remove only rows matching your condition. `WHERE` supports comparisons, logical operators, `IN`, `BETWEEN`, `LIKE`/`NOT LIKE`, `IS [NOT] NULL`, subqueries, and vector distance predicates.
+
+```sql
+-- Delete a single row by primary key
+DELETE FROM players
+WHERE Id = 4;
+
+-- Delete with compound predicates
+DELETE FROM matches
+WHERE PlayedOn < '2025-01-01'
+  AND Points = 0;
+
+-- Delete using a subquery
+DELETE FROM players
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM matches m
+    WHERE m.PlayerId = players.Id
+);
+```
+
+## Full-Table `DELETE`
+
+Omitting the `WHERE` clause removes every row in the table while preserving the table schema, constraints, and index definitions.
+
+```sql
+DELETE FROM matches;
+```
+
+::: warning Destructive Operation
+DataVo v0.4 does not have a `TRUNCATE TABLE` statement; `DELETE FROM table_name;` removes every row and executes through normal constraint, index, and transaction paths. Wrap bulk deletes inside `BEGIN` ... `COMMIT` if you need an undo boundary.
+:::
+
+## Foreign Keys & Index Maintenance
+
+- **Referential actions:** Deleting a parent row checks all referencing child tables. `ON DELETE CASCADE` removes dependent child rows automatically; `ON DELETE RESTRICT` rejects the `DELETE` if any child row still references the target key.
+- **Automatic index cleanup:** Removed rows are purged from all B-Tree, `HNSW`, `FLAT`, and `COLUMNAR` indexes on the table.
+- **Unsupported clauses:** `DELETE ... USING` joins and `RETURNING` clauses are not supported in DataVo v0.4.
+
+## Transactions & Rollback Behavior
+
+Inside an explicit transaction (`BEGIN` ... `COMMIT`), `DELETE` does not immediately destroy committed rows on disk. Instead, deletes are buffered in `TransactionContext`:
+
+- **Read-your-own-writes:** Subsequent `SELECT`, `UPDATE`, and `DELETE` statements inside the same transaction immediately exclude the deleted rows.
+- **Buffered inserts:** If a row was inserted earlier in the same uncommitted transaction, `DELETE` drops it from the transaction's insert buffer.
+- **Full reversibility:** Executing `ROLLBACK` or `ROLLBACK TO SAVEPOINT` cleanly discards the buffered deletes so committed rows remain untouched.
+
+```sql
+BEGIN;
+
+DELETE FROM players WHERE Region = 'Legacy';
+SAVEPOINT after_cleanup;
+
+DELETE FROM players WHERE Score < 200;
+
+-- Undo only the second delete
+ROLLBACK TO SAVEPOINT after_cleanup;
+
+COMMIT;
+```
+
+## Reclaiming Space with `VACUUM`
+
+In legacy `Disk` storage mode (or when manually compacting table storage after heavy deletes), deleted rows remain as tombstones in the physical table file until compacted. Run `VACUUM` on a table to reclaim that space:
 
 ```sql
 VACUUM players;
 ```
 
-| Statement | Scope | Notes |
-| --- | --- | --- |
-| `INSERT INTO ... VALUES (...)` | Single table | Supports column lists, defaults, and vector literals. No `ON CONFLICT` / `MERGE`. |
-| `UPDATE ... SET ... [WHERE ...]` | Single table | Supports multi-column assignments and expressions. No `RETURNING`. |
-| `DELETE FROM ... [WHERE ...]` | Single table | Enforces `ON DELETE CASCADE` / `RESTRICT` foreign keys. |
-| `VACUUM <table>` | Single table | Compacts deleted slots and storage files after heavy deletes. |
+`VACUUM table_name` performs three steps:
+
+1. Scans the table and strips all tombstoned (soft-deleted) rows.
+2. Rewrites the surviving rows into a compacted table file with fresh, contiguous internal row IDs.
+3. Drops and rebuilds all B-Tree indexes on the table against the new row IDs.
+
+::: info When You Need `VACUUM`
+The default `Lsm` storage mode compacts deleted keys automatically during background/flush merges. `VACUUM <table>` is primarily intended for manual space reclamation in legacy `Disk` mode or after large one-time purges.
+:::
 
 ## See Also
-- [Transactions](/manual/sql/statements/transactions) — Grouping DML writes with `BEGIN`, `SAVEPOINT`, `COMMIT`, and `ROLLBACK`
-- [DataVoContext API](/manual/client-interfaces/datavo-context-api) — High-throughput C# `BulkInsert`, `InsertTypedBatch`, and `ApplyBatch`
-- [DDL Statements](/manual/sql/statements/ddl) — Defining primary keys, defaults, and foreign-key delete actions
+
+- [INSERT](/manual/sql/statements/insert) — Adding new rows to a table
+- [UPDATE](/manual/sql/statements/update) — Modifying existing rows
+- [CREATE TABLE](/manual/sql/statements/create-table) — Configuring `ON DELETE CASCADE` and `ON DELETE RESTRICT` foreign keys
+- [Transactions](/manual/sql/statements/transactions) — Using `BEGIN`, `SAVEPOINT`, `ROLLBACK TO SAVEPOINT`, and `COMMIT`
+- [Transactions & MVCC](/manual/fundamentals/transactions-and-mvcc) — How `TransactionContext` buffers uncommitted writes and deletes
+- [ALTER & DROP](/manual/sql/statements/alter-and-drop) — Dropping entire tables with `DROP TABLE`
 
 ---
 
-# DDL Statements
+# CREATE TABLE
 
-> Source route: /manual/sql/statements/ddl
-> Source file: manual/sql/statements/ddl.md
+> Source route: /manual/sql/statements/create-table
+> Source file: manual/sql/statements/create-table.md
 
-Data Definition Language (DDL) statements create, alter, and drop databases and tables. DataVo enforces declared primary keys, unique constraints, nullability, defaults, and foreign-key referential integrity at write time.
+`CREATE TABLE` defines a new table in the active database along with its columns, data types, default values, and integrity constraints. DataVo enforces `PRIMARY KEY`, `UNIQUE`, `NOT NULL`, `DEFAULT`, and `FOREIGN KEY` constraints at write time.
+
+## Syntax
+
+```sql
+CREATE TABLE [IF NOT EXISTS] <table_name> (
+    <column_name> <data_type>
+        [NOT NULL | NULL]
+        [DEFAULT <literal>]
+        [PRIMARY KEY]
+        [UNIQUE]
+        [REFERENCES <ref_table> (<ref_col>) [ON DELETE CASCADE | RESTRICT]],
+    ...,
+    [[CONSTRAINT <name>] PRIMARY KEY (<col1> [, <col2>, ...])],
+    [[CONSTRAINT <name>] UNIQUE (<col>)],
+    [[CONSTRAINT <name>] FOREIGN KEY (<col>) REFERENCES <ref_table> (<ref_col>) [ON DELETE CASCADE | RESTRICT]]
+);
+```
+
+## Parameters
+
+| Clause | Required | Description |
+| --- | --- | --- |
+| `IF NOT EXISTS` | No | Succeeds as a no-op if `<table_name>` already exists in the active database instead of throwing an error. |
+| `<table_name>` | Yes | Unique table identifier within the active database. |
+| `<column_name>` | Yes | Column identifier. Must be unique within the table and cannot be a reserved keyword such as `VECTOR`. |
+| `<data_type>` | Yes | Any supported DataVo SQL type (`INT`, `BIGINT`, `FLOAT`, `DOUBLE`, `BIT`, `DATE`, `GUID`, `VARCHAR(n)`, `VECTOR(n)`, and their aliases). See [Data Types](/manual/sql/data-types). |
+| `NOT NULL` / `NULL` | No | Controls whether `NULL` values are rejected on `INSERT` and `UPDATE`. Columns allow `NULL` by default unless `NOT NULL` or `PRIMARY KEY` is specified. |
+| `DEFAULT <literal>` | No | Constant fallback value used when a column is omitted from `INSERT`. Must be a literal (`NULL`, number, quoted string, `true`, or `false`). |
+| `PRIMARY KEY` | No | Uniquely identifies rows. May be declared on one column or as a composite table-level constraint. At most one `PRIMARY KEY` per table. |
+| `UNIQUE` | No | Enforces uniqueness across non-`NULL` values on a single column. Multiple `NULL` values are permitted. |
+| `REFERENCES <ref_table>(<ref_col>)` | No | Declares a foreign-key reference to `<ref_table>(<ref_col>)`, with optional `ON DELETE CASCADE` or `ON DELETE RESTRICT` (default). |
+| `CONSTRAINT <name>` | No | Optional SQL-standard prefix accepted before table-level constraints. The constraint name is parsed for compatibility and is not persisted in the catalog. |
+
+## Basic Table Creation
+
+Use `CREATE TABLE IF NOT EXISTS` in startup scripts so schema initialization is idempotent:
 
 ```sql
 CREATE DATABASE IF NOT EXISTS App;
 USE App;
 
-CREATE TABLE Departments (
-    Id INT PRIMARY KEY,
-    Name VARCHAR(80) NOT NULL UNIQUE
+CREATE TABLE IF NOT EXISTS departments (
+    id INT PRIMARY KEY,
+    name VARCHAR(80) NOT NULL UNIQUE
 );
 
-CREATE TABLE Employees (
-    Id INT PRIMARY KEY,
-    Name VARCHAR(120) NOT NULL,
-    DepartmentId INT REFERENCES Departments(Id) ON DELETE RESTRICT,
-    Active BIT DEFAULT true
-);
-```
-
-## Database Statements
-
-```sql
-CREATE DATABASE [IF NOT EXISTS] <db_name>;
-DROP DATABASE [IF EXISTS] <db_name>;
-```
-
-Use `USE <db_name>` to switch the active database for the current session.
-
-## `CREATE TABLE`
-
-```sql
-CREATE TABLE [IF NOT EXISTS] <table_name> (
-    <col_name> <type> [NOT NULL] [DEFAULT <literal>] [PRIMARY KEY] [UNIQUE]
-                      [REFERENCES <ref_table>(<ref_col>) [ON DELETE CASCADE | RESTRICT]],
-    ...,
-    [PRIMARY KEY (<col1>, ...)],
-    [UNIQUE (<col>)],
-    [FOREIGN KEY (<col>) REFERENCES <ref_table>(<ref_col>) [ON DELETE CASCADE | RESTRICT]]
+CREATE TABLE IF NOT EXISTS employees (
+    id INT PRIMARY KEY,
+    external_id GUID NOT NULL UNIQUE,
+    name VARCHAR(120) NOT NULL,
+    department_id INT REFERENCES departments(id) ON DELETE RESTRICT,
+    hired_on DATE,
+    active BIT NOT NULL DEFAULT true
 );
 ```
 
-### Supported Constraints
+## Primary Keys
 
-| Constraint | Scope | Rules in `v0.4` |
-| --- | --- | --- |
-| `PRIMARY KEY` | Column or table | Only one `PRIMARY KEY` per table. Single `INT` or `GUID` primary keys are clustered on `Lsm`. |
-| `UNIQUE` | Single column | Enforces uniqueness across non-NULL values; multiple `NULL`s are permitted. Multi-column `UNIQUE (a, b)` is not yet supported. |
-| `NOT NULL` | Column | Rejects `NULL` values on `INSERT` and `UPDATE`. |
-| `DEFAULT <literal>` | Column | Must be a constant literal (`NULL`, number, quoted string, `true`/`false`). Expressions like `NOW()` are rejected. |
-| `FOREIGN KEY ... REFERENCES` | Column or table | Validates parent existence on write. Supports `ON DELETE CASCADE` and `ON DELETE RESTRICT`. |
+Each table may declare at most one `PRIMARY KEY`—either inline on a single column or as a table-level constraint. Declaring both a column-level and a table-level `PRIMARY KEY` on the same table throws a `ParserException`.
 
-## `ALTER TABLE`
-
-DataVo supports three `ALTER TABLE` operations:
+- **Single-column `INT` or `GUID` primary keys** are clustered on the `Lsm` storage engine, enabling fast key seeks and range scans.
+- **Composite primary keys** are declared at the table level:
 
 ```sql
-ALTER TABLE Employees ADD COLUMN Role VARCHAR(60) DEFAULT 'member';
-ALTER TABLE Employees MODIFY COLUMN Name VARCHAR(200);
-ALTER TABLE Employees DROP COLUMN Role;
+CREATE TABLE project_members (
+    project_id INT NOT NULL,
+    employee_id INT NOT NULL,
+    role VARCHAR(40) NOT NULL DEFAULT 'contributor',
+    CONSTRAINT pk_project_members PRIMARY KEY (project_id, employee_id)
+);
 ```
 
-| Operation | Behavior & Restrictions |
-| --- | --- |
-| `ADD COLUMN` | Rewrites existing rows and backfills the new column with its `DEFAULT` literal or `NULL`. |
-| `DROP COLUMN` | Rejects columns that belong to a primary key, foreign key, referenced parent key, or index. |
-| `MODIFY COLUMN` | Rejects incompatible type changes or modifications to key, foreign-key, referenced, or indexed columns. |
+::: tip
+For optimal read and range-scan performance on `Lsm`, prefer a single `INT` or `GUID` `PRIMARY KEY` whenever your data model has a natural or surrogate key.
+:::
 
-## `DROP TABLE`
+## Nullability and Defaults
+
+Columns are nullable by default; you may write `NULL` explicitly for clarity or `NOT NULL` to reject `NULL` on writes. `DEFAULT` accepts only constant literals:
 
 ```sql
-DROP TABLE [IF EXISTS] <table_name>;
+CREATE TABLE settings (
+    key VARCHAR(64) PRIMARY KEY,
+    value VARCHAR(255) NULL,
+    retries INT NOT NULL DEFAULT 3,
+    ratio DOUBLE NOT NULL DEFAULT 0.5,
+    enabled BIT NOT NULL DEFAULT false,
+    label VARCHAR(32) DEFAULT 'default'
+);
 ```
 
-Drops the table definition, its rows, and its associated indexes from the active database.
+Expression defaults such as `DEFAULT NOW()` or `DEFAULT (1 + 1)` are rejected at parse/validation time.
+
+## Unique Constraints
+
+`UNIQUE` may be declared inline on a column or as a single-column table constraint. Multiple `NULL` values are allowed in a `UNIQUE` column because scalar indexes omit `NULL` keys.
+
+```sql
+CREATE TABLE users (
+    id INT PRIMARY KEY,
+    email VARCHAR(160) NOT NULL UNIQUE,
+    handle VARCHAR(60),
+    CONSTRAINT uq_users_handle UNIQUE (handle)
+);
+```
+
+Declaring a multi-column `UNIQUE (col1, col2)` constraint throws a `ParserException` in `v0.4`.
+
+## Foreign Keys
+
+Foreign keys validate parent row existence on `INSERT` and `UPDATE` and enforce referential actions on parent `DELETE`:
+
+- `ON DELETE RESTRICT` (default): Rejects deleting a parent row while any child row references it.
+- `ON DELETE CASCADE`: Automatically deletes referencing child rows when a parent row is deleted.
+
+Foreign keys can be declared inline or at the table level. Table-level `FOREIGN KEY (<col>)` must reference a column declared earlier in the `CREATE TABLE` column list.
+
+```sql
+CREATE TABLE orders (
+    id INT PRIMARY KEY,
+    customer_id INT NOT NULL,
+    total DOUBLE NOT NULL DEFAULT 0.0,
+    CONSTRAINT fk_orders_customer
+        FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE
+);
+```
+
+## Vector Columns
+
+::: info DataVo Extension
+`VECTOR(n)` and its shorthands (`VEC2`, `VEC3`, `VEC4`, `FLOAT[n]`, `REAL[n]`) are first-class DataVo extensions for storing fixed-dimension 32-bit float embeddings and spatial coordinates. `VECTOR` is a reserved keyword and cannot be used as a column name.
+:::
+
+```sql
+CREATE TABLE documents (
+    id INT PRIMARY KEY,
+    title VARCHAR(200) NOT NULL,
+    embedding VECTOR(384)
+);
+
+CREATE TABLE world_entities (
+    id INT PRIMARY KEY,
+    position VEC3 NOT NULL,
+    velocity FLOAT[3]
+);
+```
+
+After creating the table, attach an `HNSW` or `FLAT` index with [`CREATE INDEX`](/manual/sql/statements/indexes) to accelerate similarity search.
+
+## Unsupported Constraints in v0.4
+
+::: warning
+`CHECK` constraints are **not supported** in DataVo `v0.4` and will fail with a `ParserException`. Enforce domain checks in application logic before writing.
+
+Multi-column `UNIQUE (c1, c2)` constraints, expression-based `DEFAULT` clauses, and `ON UPDATE` foreign-key actions are also not supported in `v0.4`.
+:::
 
 ## See Also
-- [Data Types](/manual/sql/data-types) — Complete list of column types and aliases for `CREATE TABLE`
-- [Indexes](/manual/sql/statements/indexes) — Creating `BTREE`, `HNSW`, `FLAT`, and `COLUMNAR` indexes after table creation
-- [DML Statements](/manual/sql/statements/dml) — Inserting, updating, and deleting rows
+
+- [Data Types](/manual/sql/data-types) — Complete list of column types, aliases, and `.NET` CLR mappings
+- [ALTER TABLE & DROP](/manual/sql/statements/alter-and-drop) — Adding, modifying, and dropping columns or tables
+- [CREATE INDEX](/manual/sql/statements/indexes) — Creating `BTREE`, `HNSW`, `FLAT`, and `COLUMNAR` indexes
+- [INSERT](/manual/sql/statements/insert) — Populating tables and triggering constraint checks
+- [Vector Search](/manual/fundamentals/vector-search) — Indexing and querying `VECTOR(n)` columns
+- [SQL Compatibility](/manual/sql/compatibility) — Full dialect comparison against SQLite and PostgreSQL
 
 ---
 
-# Indexes
+# ALTER TABLE & DROP
+
+> Source route: /manual/sql/statements/alter-and-drop
+> Source file: manual/sql/statements/alter-and-drop.md
+
+Use `ALTER TABLE` to add, remove, or modify non-key columns on an existing table, and use `DROP TABLE` or `DROP INDEX` to remove schema objects from the active database.
+
+## Syntax
+
+```sql
+-- Add a column
+ALTER TABLE <table_name> ADD [COLUMN] <column_name> <data_type>
+    [DEFAULT <literal>] [NOT NULL | NULL];
+
+-- Drop a column
+ALTER TABLE <table_name> DROP [COLUMN] <column_name>;
+
+-- Modify a column
+ALTER TABLE <table_name> MODIFY [COLUMN] <column_name> <data_type>
+    [DEFAULT <literal>] [NOT NULL | NULL];
+
+-- Drop a table
+DROP TABLE [IF EXISTS] <table_name>;
+
+-- Drop an index
+DROP INDEX <index_name> ON <table_name>;
+```
+
+## Parameters
+
+| Clause | Statement | Description |
+| --- | --- | --- |
+| `ADD [COLUMN]` | `ALTER TABLE` | Appends a new column to `<table_name>` and backfills existing rows with its `DEFAULT` literal or `NULL`. The `COLUMN` keyword is optional. |
+| `DROP [COLUMN]` | `ALTER TABLE` | Removes `<column_name>` from `<table_name>` and rewrites stored rows. The `COLUMN` keyword is optional. |
+| `MODIFY [COLUMN]` | `ALTER TABLE` | Changes `<column_name>`'s data type, `VARCHAR(n)` length, nullability, or `DEFAULT` value, converting existing rows in place. The `COLUMN` keyword is optional. |
+| `IF EXISTS` | `DROP TABLE` | Succeeds as a no-op if `<table_name>` does not exist. Supported on `DROP TABLE` and `DROP DATABASE`, **not** on `DROP INDEX`. |
+| `ON <table_name>` | `DROP INDEX` | Required target table qualifier identifying which table owns `<index_name>`. |
+
+::: warning Unsupported ALTER TABLE Operations
+`RENAME COLUMN` and `RENAME TO` are **not yet supported** in DataVo `v0.4` and throw a `ParserException` (`Unknown ALTER TABLE operation`). To rename a table or column, create the new table or column, copy data over, and drop the old one.
+:::
+
+## `ALTER TABLE ... ADD COLUMN`
+
+`ADD COLUMN` acquires a table write lock, appends the column to the catalog, backfills all existing rows with the column's `DEFAULT` literal (or `NULL` if omitted), and rewrites the table and its existing indexes.
+
+```sql
+ALTER TABLE employees ADD COLUMN title VARCHAR(80) DEFAULT 'engineer';
+ALTER TABLE employees ADD bio VARCHAR(500) NULL;
+ALTER TABLE employees ADD COLUMN active BIT NOT NULL DEFAULT true;
+```
+
+### Restrictions
+
+- **No key or FK constraints:** Adding a column with `PRIMARY KEY`, `UNIQUE`, or `REFERENCES` fails at execution time with a `CatalogException`.
+- **`NOT NULL` on non-empty tables:** Adding a `NOT NULL` column without a `DEFAULT` literal on a table that already contains rows throws a `ConstraintViolationException` (`NotNullViolation`). Supply a `DEFAULT` literal so existing rows can be backfilled safely.
+
+## `ALTER TABLE ... DROP COLUMN`
+
+`DROP COLUMN` removes a column from the catalog, strips it from all existing rows, and rebuilds remaining table indexes.
+
+```sql
+ALTER TABLE employees DROP COLUMN bio;
+ALTER TABLE employees DROP title;
+```
+
+### Restrictions
+
+DataVo rejects `DROP COLUMN` with a `CatalogException` if the target column is:
+
+- The last remaining column in the table.
+- Part of the table's `PRIMARY KEY`.
+- Declared `UNIQUE`.
+- A `FOREIGN KEY` column.
+- Referenced by another table's `FOREIGN KEY` (parent column).
+- Part of any index (`BTREE`, `HNSW`, `FLAT`, or `COLUMNAR`). Drop the index first with `DROP INDEX`, then drop the column.
+
+## `ALTER TABLE ... MODIFY COLUMN`
+
+`MODIFY COLUMN` updates a column's type, maximum `VARCHAR(n)` length, nullability, or `DEFAULT` literal. Existing row values are validated and converted before the table is rewritten; if any existing row fails validation, the schema remains unchanged.
+
+```sql
+-- Widen a VARCHAR column
+ALTER TABLE employees MODIFY COLUMN name VARCHAR(200) NOT NULL;
+
+-- Change default and nullability
+ALTER TABLE employees MODIFY active BIT NOT NULL DEFAULT false;
+
+-- Widen INT to BIGINT
+ALTER TABLE metrics MODIFY COLUMN count BIGINT NOT NULL DEFAULT 0;
+```
+
+### Restrictions
+
+- **Existing data validation:**
+  - Switching a column to `NOT NULL` fails with `ConstraintViolationException` (`NotNullViolation`) if any existing row contains `NULL`.
+  - Shrinking `VARCHAR(n)` fails with `ConstraintViolationException` (`ValueTooLong`) if any existing string exceeds the new length `n`—DataVo never silently truncates data.
+  - Incompatible type conversions for existing values fail and leave the table untouched.
+- **Protected columns:** You cannot modify a column that is a `PRIMARY KEY`, `UNIQUE`, `FOREIGN KEY`, referenced parent column, or part of any index.
+- **No constraint additions:** You cannot add `PRIMARY KEY`, `UNIQUE`, or `FOREIGN KEY` constraints via `MODIFY COLUMN`.
+
+::: tip
+Because `ALTER TABLE` rewrites the table under a write lock, group schema design choices into `CREATE TABLE` when possible and drop secondary indexes before altering indexed columns.
+:::
+
+## `DROP TABLE`
+
+`DROP TABLE` removes the table definition, all stored rows, and all indexes attached to that table from the active database.
+
+```sql
+DROP TABLE temp_imports;
+DROP TABLE IF EXISTS staging_events;
+```
+
+Use `IF EXISTS` in cleanup or migration scripts so dropping an already-absent table succeeds without error.
+
+## `DROP INDEX`
+
+`DROP INDEX` removes an index from the catalog and deletes its physical index structure (B-Tree, HNSW/FLAT vector index, or Columnar segment registration) while keeping the underlying table data intact.
+
+```sql
+DROP INDEX ix_players_score ON players;
+DROP INDEX ix_documents_emb ON documents;
+DROP INDEX cx_players_stats ON players;
+```
+
+::: warning `ON <table>` Required & No `IF EXISTS`
+In DataVo `v0.4`, `DROP INDEX` **requires** the `ON <table_name>` clause and does **not** support `IF EXISTS`. Running `DROP INDEX ix_foo;` or `DROP INDEX IF EXISTS ix_foo ON bar;` throws a `ParserException`.
+:::
+
+## See Also
+
+- [CREATE TABLE](/manual/sql/statements/create-table) — Declaring tables, primary keys, unique constraints, and foreign keys
+- [CREATE INDEX](/manual/sql/statements/indexes) — Creating B-Tree, HNSW, FLAT, and Columnar indexes
+- [Databases & Security](/manual/sql/statements/databases-and-security) — `DROP DATABASE`, `DESCRIBE`, and `SHOW TABLES`
+- [Data Types](/manual/sql/data-types) — Supported column types and length rules
+- [SQL Compatibility](/manual/sql/compatibility) — Dialect differences from SQLite and PostgreSQL
+
+---
+
+# CREATE INDEX
 
 > Source route: /manual/sql/statements/indexes
 > Source file: manual/sql/statements/indexes.md
 
-DataVo supports four index methods via `CREATE INDEX`: B-Tree for scalar lookups and ranges, `HNSW` and `FLAT` for vector similarity search, and `COLUMNAR` for vectorized analytical aggregations.
+`CREATE INDEX` builds a secondary index on an existing table in the active database and populates it immediately from current rows. DataVo supports four index methods: `BTREE` for scalar lookups and ranges, `HNSW` and `FLAT` for vector similarity search, and `COLUMNAR` for vectorized analytical aggregations.
+
+## Syntax
 
 ```sql
--- Scalar B-Tree index (default)
-CREATE INDEX ix_players_score ON players (Score);
-
--- Approximate vector index
-CREATE INDEX ix_documents_emb ON documents (embedding)
-USING HNSW WITH (metric = 'cosine', m = 16, ef_construction = 64, ef_search = 64);
-
--- Analytical columnar index
-CREATE INDEX cx_players_stats ON players (Score, Id) USING COLUMNAR;
-
--- Drop an index
-DROP INDEX ix_players_score ON players;
+CREATE INDEX <index_name> ON <table_name> (<column_name> [, <column_name>, ...])
+    [USING BTREE | HNSW | FLAT | COLUMNAR]
+    [WITH (<option_name> = <value> [, ...])];
 ```
 
-## Index Types Overview
+::: info DataVo Extension
+`USING HNSW`, `USING FLAT`, `USING COLUMNAR`, and the `WITH (...)` index-tuning clause are DataVo extensions beyond standard SQLite and ANSI SQL.
+:::
+
+## Parameters
+
+| Clause | Required | Description |
+| --- | --- | --- |
+| `<index_name>` | Yes | Unique index name for `<table_name>`. |
+| `ON <table_name>` | Yes | Existing table in the active database to index. |
+| `(<column_name>, ...)` | Yes | One or more target columns. `HNSW` and `FLAT` require exactly one `VECTOR(n)` column; `BTREE` and `COLUMNAR` accept one or more columns. |
+| `USING <method>` | No | Index implementation: `BTREE` (default when omitted), `HNSW`, `FLAT`, or `COLUMNAR`. |
+| `WITH (<opt> = <val>, ...)` | No | Key-value tuning options for vector indexes (`HNSW` and `FLAT`). Option names ignore case and underscores. |
+
+::: warning Syntax Notes in v0.4
+`CREATE INDEX` does **not** support `UNIQUE` or `IF NOT EXISTS` in DataVo `v0.4`. To enforce uniqueness on a column, declare `UNIQUE` inside [`CREATE TABLE`](/manual/sql/statements/create-table).
+:::
+
+## Index Methods Overview
 
 | Method | Syntax | Target Columns | Best For |
 | --- | --- | --- | --- |
-| `BTREE` (default) | `USING BTREE` (or omit `USING`) | Single or composite scalar columns | Point lookups, range scans, and `ORDER BY` on scalar columns. |
-| `HNSW` | `USING HNSW [WITH (...)]` | Single `VECTOR(n)` column | Fast approximate nearest-neighbor search on medium/large embedding tables. |
+| `BTREE` (default) | `USING BTREE` (or omit `USING`) | Single or composite scalar columns | Equality lookups, range scans, selective join probes, and single-key integer `GROUP BY COUNT`. |
+| `HNSW` | `USING HNSW [WITH (...)]` | Single `VECTOR(n)` column | Fast approximate nearest-neighbor (ANN) search on medium and large embedding tables. |
 | `FLAT` | `USING FLAT [WITH (metric = ...)]` | Single `VECTOR(n)` column | Exact exhaustive vector search on small tables and recall benchmarks. |
-| `COLUMNAR` | `USING COLUMNAR` | Numeric, `BIT`, and `DATE` columns | High-speed `COUNT`, `SUM`, `AVG`, `MIN`, `MAX` without reading full rows. |
+| `COLUMNAR` | `USING COLUMNAR` | Numeric (`INT`, `BIGINT`, `FLOAT`, `DOUBLE`), `BIT`, and `DATE` columns | High-speed `COUNT`, `SUM`, `AVG`, `MIN`, and `MAX` aggregations without decoding full rows. |
 
-::: info DataVo Extension
-`USING HNSW`, `USING FLAT`, and `USING COLUMNAR` (along with the `WITH (...)` tuning clause) are DataVo extensions beyond standard SQLite/ANSI SQL.
-:::
+## Scalar B-Tree Indexes (`USING BTREE`)
 
-## Scalar B-Tree Indexes
+B-Tree is the default index method when `USING` is omitted. You can index a single scalar column or a composite list of columns:
 
 ```sql
-CREATE INDEX ix_players_region_score ON players (Region, Score);
+-- Single-column B-Tree index
+CREATE INDEX ix_players_score ON players (score);
+
+-- Explicit USING BTREE on a composite key
+CREATE INDEX ix_players_region_score ON players (region, score) USING BTREE;
 ```
 
-- A scalar index stores only rows where **all** indexed columns are non-`NULL`. Rows with a `NULL` key receive no index entry, so `IS NULL` predicates scan rows and multiple `NULL`s may coexist in a `UNIQUE` column.
+### Behavior & Query Acceleration
 
-## Vector Indexes (`HNSW` & `FLAT`)
+- **Non-`NULL` indexing:** A B-Tree index stores entries only for rows where **all** indexed columns are non-`NULL`. Rows containing a `NULL` key receive no index entry, so `IS NULL` predicates scan table rows and multiple `NULL`s may coexist in a `UNIQUE` column.
+- **When B-Tree accelerates queries:**
+  - Single-column equality predicates (`WHERE score = 500`) use an index point lookup.
+  - Selective `INNER JOIN` probes on indexed integer keys probe the B-Tree instead of streaming the full table.
+  - Whole-table `GROUP BY <indexed_int_col>` with `COUNT(*)` or `COUNT(col)` streams groups directly in key order from the index.
+  - Secondary B-Tree indexes are **not** used to satisfy general `ORDER BY` clauses or non-counting `GROUP BY` shapes (see [Query Planner](/manual/internals/query-planner)).
 
-Both `HNSW` and `FLAT` accept `metric` in `WITH (...)`. Passing graph options (`m`, `ef_construction`, `ef_search`, `enable_diversity_heuristic`) to `FLAT` or `BTREE`, or passing out-of-range values, throws an error and creates no index. Option names ignore case and underscores.
+## Vector Indexes (`USING HNSW` & `USING FLAT`)
+
+Vector indexes require **exactly one** `VECTOR(n)` column (`VECTOR(n)`, `VEC2`, `VEC3`, `VEC4`, `FLOAT[n]`, or `REAL[n]`). Rows where the vector column is `NULL` are skipped.
+
+```sql
+-- Approximate HNSW index for text embeddings
+CREATE INDEX ix_documents_emb ON documents (embedding)
+USING HNSW WITH (
+    metric = 'cosine',
+    m = 16,
+    ef_construction = 64,
+    ef_search = 64,
+    enable_diversity_heuristic = true
+);
+
+-- Exact FLAT index for 3D spatial coordinates
+CREATE INDEX ix_entities_pos ON world_entities (position)
+USING FLAT WITH (metric = 'euclidean');
+```
+
+### Vector `WITH (...)` Options
+
+Passing HNSW graph options (`m`, `ef_construction`, `ef_search`, `enable_diversity_heuristic`) to `FLAT` or `BTREE`, passing `metric` to `BTREE`, or specifying out-of-range values throws a `BindingException` and creates no index. Option names ignore case and underscores (for example, `efConstruction` and `ef_construction` are equivalent).
 
 | Option | Default | Valid Range | Applies To | Description |
 | --- | --- | --- | --- | --- |
-| `metric` | `'cosine'` | `'cosine'`, `'euclidean'` (or `'l2'`) | `HNSW`, `FLAT` | Distance metric persisted in the catalog. Use `'euclidean'` for 3D positions. |
-| `m` | `16` | `2` – `128` | `HNSW` | Bi-directional links per graph layer (doubled on layer 0). |
-| `ef_construction` | `64` | `1` – `4096` | `HNSW` | Candidate beam width during index build. |
-| `ef_search` | `64` | `1` – `4096` | `HNSW` | Minimum candidate beam width during search. |
-| `enable_diversity_heuristic` | `true` | `true`, `false` | `HNSW` | Keeps cross-cluster links; disable only for faster builds on uniform data. |
+| `metric` | `'cosine'` | `'cosine'`, `'euclidean'` (alias `'l2'`) | `HNSW`, `FLAT` | Distance metric persisted in the catalog. Use `'cosine'` for normalized embeddings and `'euclidean'`/`'l2'` for spatial positions. |
+| `m` | `16` | `2` – `128` | `HNSW` | Maximum bi-directional links per graph layer (doubled on layer 0). Higher values improve recall at higher memory and build cost. |
+| `ef_construction` | `64` | `1` – `4096` | `HNSW` | Candidate beam width during graph construction. Higher values yield better graph quality at slower build speed. |
+| `ef_search` | `64` | `1` – `4096` | `HNSW` | Minimum candidate beam width during nearest-neighbor search. |
+| `enable_diversity_heuristic` | `true` | `true`, `false` | `HNSW` | Preserves cross-cluster links during neighbor selection; disable only for faster builds on uniform data. |
 
-For filtered vector searches, DataVo widens the candidate beam automatically and switches to an exact scan when graph traversal would cost more than scanning stored vectors—ensuring filtered `LIMIT k` queries return the full `k` rows when enough rows match.
+### Filtered Vector Search Behavior
+
+For hybrid queries combining `WHERE` predicates with `ORDER BY embedding <=> @q LIMIT k` (or `<->`), DataVo automatically widens the candidate beam and switches to an exact SIMD scan when graph traversal would cost more than scanning stored vectors—ensuring filtered `LIMIT k` queries return all `k` matching rows whenever enough rows qualify.
 
 ## Columnar Indexes (`USING COLUMNAR`)
 
-```sql
-CREATE INDEX cx_players ON players (Score, Id) USING COLUMNAR;
-```
-
-- **Allowed types:** `INT`, `BIGINT`, `FLOAT`, `DOUBLE`, `BIT`, and `DATE` only. Any other type is rejected.
-- **Storage modes:** Accelerates `InMemory` (4–8 bytes/row/column in RAM) and `Lsm` (persisted as format-v8 columnar segments inside `.sst` files). Legacy `Disk` mode records the index but falls back to row scans.
-- **Query eligibility:** Used for aggregates without `GROUP BY` whose `WHERE` clause is an `AND` of column-to-literal comparisons or `IS NULL` checks over indexed columns. Queries inside explicit transactions, queries with `GROUP BY`, or comparisons where precision could differ (e.g., fractional literal vs. `INT`, `BIT`/`DATE` predicates, or `NaN` floats) fall back to row scans.
-- **Scope:** Never serves point lookups and does not replace a B-Tree index. Multiple columnar indexes on the same table are consolidated internally.
-
-## `DROP INDEX`
+Columnar indexes store selected columns in compact typed column chunks so analytical aggregates avoid reading full row payloads.
 
 ```sql
-DROP INDEX <index_name> ON <table_name>;
+CREATE INDEX cx_players_stats ON players (score, id) USING COLUMNAR;
 ```
 
-DataVo requires the `ON <table_name>` clause when dropping an index.
+### Eligibility & Storage Rules
+
+- **Allowed column types:** `INT`, `BIGINT`, `FLOAT`, `DOUBLE`, `BIT`, and `DATE` only. Any other type (such as `VARCHAR`, `GUID`, or `VECTOR`) is rejected at `CREATE INDEX` time.
+- **Storage modes:**
+  - `InMemory`: Stores 4–8 bytes per row per indexed column in RAM for SIMD-accelerated scans.
+  - `Lsm`: Persists format-v8 columnar segments inside `.sst` files with `min`/`max`/`NULL`/`NaN` zone maps for chunk skipping.
+  - Legacy `Disk`: Records the index in the catalog but falls back to row scans.
+- **Query eligibility:** Accelerates `COUNT`, `SUM`, `AVG`, `MIN`, and `MAX` queries **without `GROUP BY`** whose `WHERE` clause is an `AND` of column-to-literal comparisons or `IS NULL` checks over indexed columns. Queries fall back cleanly to row scans when:
+  - Running inside an explicit `BEGIN` ... `COMMIT` transaction.
+  - Using `GROUP BY`.
+  - Filtering on comparisons where precision could differ (such as a fractional literal against an `INT` column), `BIT`/`DATE` predicates, or `NaN` floats.
+  - Computing `SUM` or `AVG` over `FLOAT`/`DOUBLE` on an `Lsm` table with an unflushed memtable tail (to preserve deterministic floating-point addition order).
+- **Consolidation & scope:** Columnar indexes never serve point lookups and do not replace B-Tree indexes. Multiple `USING COLUMNAR` indexes on the same table are consolidated internally.
+
+::: tip Choosing the Right Index
+- Use **`BTREE`** for selective `WHERE col = ...` filters and join keys.
+- Use **`HNSW`** for `VECTOR(n)` tables with thousands or millions of rows; use **`FLAT`** for small tables or exact recall baselines.
+- Use **`COLUMNAR`** for dashboard rollups (`COUNT`, `SUM`, `AVG`, `MIN`, `MAX`) over numeric columns.
+:::
+
+## Dropping an Index
+
+Remove any index using [`DROP INDEX`](/manual/sql/statements/alter-and-drop#drop-index):
+
+```sql
+DROP INDEX ix_players_score ON players;
+```
 
 ## See Also
-- [Vector Search](/manual/fundamentals/vector-search) — End-to-end guide to embeddings, `SearchNearest`, and spatial queries
-- [Data Types](/manual/sql/data-types) — `VECTOR(n)`, `VEC2`/`VEC3`/`VEC4`, and `FLOAT[n]` declarations
-- [Query Planner](/manual/internals/query-planner) — When the planner selects B-Tree, HNSW, FLAT, or Columnar fast paths
+
+- [ALTER TABLE & DROP](/manual/sql/statements/alter-and-drop) — Dropping indexes (`DROP INDEX ... ON <table>`) and altering indexed columns
+- [Vector Search](/manual/fundamentals/vector-search) — End-to-end guide to embeddings, `<=>` / `<->` distance operators, and hybrid vector queries
+- [Query Planner](/manual/internals/query-planner) — How DataVo routes queries to B-Tree, HNSW, FLAT, and Columnar fast paths
+- [EXPLAIN](/manual/sql/statements/explain) — Inspecting logical and physical execution plans
+- [Data Types](/manual/sql/data-types) — Supported scalar and `VECTOR(n)` column types
 
 ---
 
-# Transactions & Savepoints
+# EXPLAIN
+
+> Source route: /manual/sql/statements/explain
+> Source file: manual/sql/statements/explain.md
+
+`EXPLAIN` validates a `SELECT` query against the active catalog and returns a single diagnostic row describing which logical plan and physical execution path the planner selects, along with its estimated cost and decision rationale—without executing the query or returning table rows.
+
+## Syntax
+
+```sql
+EXPLAIN SELECT ...;
+```
+
+::: warning Supported Statements
+In DataVo `v0.4`, `EXPLAIN` accepts **only a single `SELECT` statement**. Queries using `UNION`, common table expressions (`WITH ...`), or DML statements (`INSERT`, `UPDATE`, `DELETE`) are not supported by `EXPLAIN` and throw a `ParserException`.
+:::
+
+## Output Columns
+
+`EXPLAIN` always returns **1 row** with the following **4 columns** (produced by `SelectPlannerDiagnostics`):
+
+| Column | .NET Type | Description |
+| --- | --- | --- |
+| `Plan` | `string` | Logical plan variant chosen by the planner (`VolcanoNoJoin`, `VolcanoInnerJoin`, `LegacyNoJoinScan`, `LegacyWhereExpression`, `LegacyWhereJoin`, or `LegacyJoinOnly`). |
+| `Physical` | `string` | Physical execution strategy selected: `"Volcano"` or `"Legacy"`. |
+| `EstimatedCost` | `int` | Heuristic relative cost estimate (integer `>= 1`) combining startup cost, selectivity-weighted row cost, predicate complexity, and pipeline features (`ORDER BY`, `DISTINCT`, `GROUP BY`, `LIMIT`/`OFFSET`). |
+| `Reason` | `string` | Human-readable explanation of why the plan was selected, including the competing plan's cost when Volcano and Legacy were both eligible. |
+
+## Usage Examples
+
+### SQL
+
+```sql
+-- Single-table filtered query
+EXPLAIN SELECT id, name, score
+FROM players
+WHERE region = 'EU' AND score >= 500
+ORDER BY score DESC
+LIMIT 10;
+
+-- Multi-table INNER JOIN query
+EXPLAIN SELECT p.name, d.name
+FROM players p
+INNER JOIN departments d ON p.department_id = d.id
+WHERE p.score > 100;
+```
+
+### Inspecting `EXPLAIN` Output in C#
+
+```csharp
+using DataVo.Core;
+using DataVo.Core.StorageEngine.Config;
+
+using var db = new DataVoContext(new DataVoConfig
+{
+    StorageMode = StorageMode.InMemory
+});
+
+db.Execute("CREATE DATABASE App; USE App;");
+db.Execute("CREATE TABLE players (id INT PRIMARY KEY, name VARCHAR(80), region VARCHAR(16), score INT)");
+
+var result = db.Execute(
+    "EXPLAIN SELECT id, name FROM players WHERE region = 'EU' AND score >= 500");
+
+var row = result.Data[0];
+Console.WriteLine($"Plan:          {row["Plan"]}");
+Console.WriteLine($"Physical:      {row["Physical"]}");
+Console.WriteLine($"EstimatedCost: {row["EstimatedCost"]}");
+Console.WriteLine($"Reason:        {row["Reason"]}");
+```
+
+## Logical Plans & Physical Paths
+
+| `Plan` | `Physical` | When Selected |
+| --- | --- | --- |
+| `VolcanoNoJoin` | `Volcano` | Single-table query with `EnableVolcanoExecution = true`, no `HAVING`, and no `WHERE` subquery, when Volcano's estimated cost is lower than Legacy's. |
+| `VolcanoInnerJoin` | `Volcano` | Query with a connected all-`INNER JOIN` graph, `EnableVolcanoExecution = true`, and no `WHERE` subquery, when Volcano's estimated cost is lower than Legacy's (or when join-cardinality feedback persistence is enabled). |
+| `LegacyNoJoinScan` | `Legacy` | Single-table query without `WHERE` when Legacy is cheaper than Volcano, or when Volcano is disabled or ineligible (for example, `HAVING` is present). |
+| `LegacyWhereExpression` | `Legacy` | Filtered query whose `WHERE` predicate includes arithmetic (`+`, `-`, `*`, `/`), scalar functions, or aggregate arguments requiring expression evaluation, when Legacy is chosen or Volcano is ineligible. |
+| `LegacyWhereJoin` | `Legacy` | Filtered join query (or single-table simple `WHERE` query) where Legacy is estimated cheaper, or where the query uses non-`INNER` joins, disconnected joins, subqueries, or `HAVING`. |
+| `LegacyJoinOnly` | `Legacy` | Join query without a `WHERE` clause when Legacy is cheaper or when Volcano cannot handle the join shape (such as `LEFT`, `RIGHT`, `FULL`, or `CROSS` joins). |
+
+## Common `Reason` Messages & Fallbacks
+
+| `Reason` Pattern | Meaning |
+| --- | --- |
+| `single-table filter with no subquery; compared to <LegacyPlan> cost <N>` | Volcano won the cost comparison for a filtered single-table scan. |
+| `JOIN graph is fully INNER and connected; compared to LegacyWhereJoin cost <N>` | Volcano won the cost comparison for a connected `INNER JOIN` with `WHERE`. |
+| `join-only query has connected INNER JOIN graph; compared to LegacyJoinOnly cost <N>` | Volcano won the cost comparison for a connected `INNER JOIN` without `WHERE`. |
+| `join feedback persistence enabled; ...; compared to <LegacyPlan> cost <N>` | `EnableVolcanoJoinCardinalityFeedbackPersistence` forced the Volcano join pipeline so learned join statistics can be persisted. |
+| `legacy filter path estimated cheaper for current predicate; compared to VolcanoNoJoin cost <N>` | Both paths were eligible, but Legacy had lower startup/estimated cost. |
+| `legacy join path estimated cheaper for current predicate; compared to VolcanoInnerJoin cost <N>` | Both join paths were eligible, but Legacy had lower estimated cost. |
+| `legacy no-join scan estimated cheaper; compared to VolcanoNoJoin cost <N>` | Simple full scan without `WHERE` had lower estimated cost on Legacy. |
+| `expression predicate requires legacy evaluator` | Volcano was ineligible (disabled, `HAVING`, or subquery) and the `WHERE` clause uses arithmetic or scalar functions. |
+| `fallback where/join evaluation` | Volcano was ineligible for a filtered query (for example, `LEFT JOIN`, disconnected join, or `WHERE` subquery). |
+| `join without where uses legacy join strategy` | Join without `WHERE` uses a non-`INNER` or disconnected join, or Volcano is disabled. |
+| `volcano disabled or unsupported` | Single-table query without `WHERE` could not use Volcano (disabled in config or `HAVING` present). |
+
+::: tip Diagnostic Estimates vs. Runtime Fast Paths
+- `EXPLAIN` intentionally avoids materializing table rows when estimating costs, so small or diagnostic row counts often favor `Legacy` due to its lower startup overhead (`7–10`) compared to `Volcano` (`20–30`).
+- During actual query execution, DataVo also runs its **typed fast-path cascade** (B-Tree point lookup, PK range seek, SIMD columnar aggregate, typed hash/index join, and hybrid vector search) ahead of the general evaluator. See [Query Planner & Fast Paths](/manual/internals/query-planner) for runtime routing rules.
+:::
+
+## See Also
+
+- [SELECT](/manual/sql/statements/select) — Full `SELECT` syntax, joins, grouping, and subqueries
+- [Query Planner & Fast Paths](/manual/internals/query-planner) — Runtime dispatch cascade for typed single-table, join, and vector fast paths
+- [CREATE INDEX](/manual/sql/statements/indexes) — Adding B-Tree, HNSW, FLAT, and Columnar indexes to speed up queries
+- [Configuration Reference](/manual/reference/configuration) — `EnableVolcanoExecution` and join-cardinality feedback settings
+
+---
+
+# Transactions
 
 > Source route: /manual/sql/statements/transactions
 > Source file: manual/sql/statements/transactions.md
 
-DataVo provides multi-statement atomic transactions with MVCC snapshot isolation and nested savepoints. Transaction boundaries are controlled directly through SQL statements (or `DataVoConnection.BeginTransaction()` when using ADO.NET).
+DataVo supports multi-statement atomic transactions with **MVCC snapshot isolation**, **read-your-own-writes**, **first-committer-wins** write-conflict detection, and **nested savepoints**. Statements executed outside an explicit `BEGIN` block run in autocommit mode.
+
+## Syntax
+
+```sql
+-- Start an explicit transaction
+BEGIN [TRANSACTION];
+
+-- Publish all buffered writes atomically
+COMMIT;
+
+-- Discard all uncommitted writes and close the transaction
+ROLLBACK;
+
+-- Define a named savepoint inside an active transaction
+SAVEPOINT <savepoint_name>;
+
+-- Rewind changes made after a savepoint without closing the transaction
+ROLLBACK TO [SAVEPOINT] <savepoint_name>;
+
+-- Remove a savepoint (and any newer savepoints) while keeping its changes
+RELEASE [SAVEPOINT] <savepoint_name>;
+```
+
+## Statements Reference
+
+| Statement | Optional Form | Description |
+| --- | --- | --- |
+| `BEGIN` | `BEGIN TRANSACTION` | Starts an explicit transaction for the current session and pins a commit-ordered MVCC read snapshot. |
+| `COMMIT` | — | Re-validates constraints, checks for write conflicts, and atomically publishes all buffered writes to the storage engine and WAL. |
+| `ROLLBACK` | — | Discards all buffered writes for the current session and closes the active transaction. |
+| `SAVEPOINT <name>` | — | Records a named rollback point within the open transaction. |
+| `ROLLBACK TO <name>` | `ROLLBACK TO SAVEPOINT <name>` | Undoes all writes made after `<name>` while keeping earlier writes and the outer transaction open. |
+| `RELEASE <name>` | `RELEASE SAVEPOINT <name>` | Drops `<name>` (and any savepoints created after it) while keeping all writes made since `<name>`. |
+
+## Basic Transaction Flow
+
+Group related writes inside `BEGIN` ... `COMMIT` so either all changes become visible together or none do:
 
 ```sql
 BEGIN TRANSACTION;
 
-INSERT INTO players (Id, Name, Score, Region) VALUES (10, 'Ada', 900, 'EU');
+UPDATE accounts SET balance = balance - 100 WHERE id = 1;
+UPDATE accounts SET balance = balance + 100 WHERE id = 2;
+
+COMMIT;
+```
+
+If an error occurs or an application check fails before committing, issue `ROLLBACK` to discard every buffered change cleanly:
+
+```sql
+BEGIN;
+
+DELETE FROM orders WHERE status = 'draft';
+-- Abort instead of publishing the delete
+ROLLBACK;
+```
+
+## Nested Savepoints
+
+Savepoints let you partially undo work inside a long transaction without aborting earlier changes:
+
+```sql
+BEGIN TRANSACTION;
+
+INSERT INTO players (id, name, score, region) VALUES (10, 'Ada', 900, 'EU');
 SAVEPOINT after_insert;
 
-UPDATE players SET Score = 50 WHERE Id = 10;
+UPDATE players SET score = 50 WHERE id = 10;
+SAVEPOINT after_penalty;
+
+DELETE FROM players WHERE id = 10;
+
+-- Undo the delete and penalty, keeping the initial insert
 ROLLBACK TO SAVEPOINT after_insert;
 
+-- Clean up the savepoint and commit Ada with score = 900
 RELEASE SAVEPOINT after_insert;
 COMMIT;
 ```
 
-## Statement Reference
+## Snapshot Isolation & Read-Your-Own-Writes
 
-| Statement | Optional Syntax | Behavior |
-| --- | --- | --- |
-| `BEGIN` | `BEGIN TRANSACTION` | Starts an explicit transaction and captures an MVCC read snapshot for the current session. |
-| `COMMIT` | — | Atomically publishes all buffered writes in the transaction to the storage engine and WAL (if enabled). |
-| `ROLLBACK` | — | Discards all uncommitted writes in the current transaction and closes the transaction. |
-| `SAVEPOINT <name>` | — | Marks a named rollback point within the active transaction. |
-| `ROLLBACK TO <name>` | `ROLLBACK TO SAVEPOINT <name>` | Undoes all writes made after `<name>` while keeping the transaction open and earlier writes intact. |
-| `RELEASE <name>` | `RELEASE SAVEPOINT <name>` | Removes the named savepoint (and any newer savepoints) without rolling back its changes. |
+When a session runs `BEGIN`, DataVo captures an **MVCC snapshot ordered by commit**:
 
-## MVCC Snapshot Behavior
+- **Consistent reads:** The transaction sees only commits that finished before its `BEGIN`. Concurrent readers never block writers, and writers never block readers.
+- **Read-your-own-writes:** Every `SELECT`, `UPDATE`, `DELETE`, join, subquery, and index lookup inside the transaction sees the pinned snapshot overlaid with the session's own uncommitted writes. Multiple updates to the same row coalesce into a single pending version.
 
-- **Snapshot isolation (not serializable):** A transaction sees a consistent snapshot of rows committed before it began, plus its own uncommitted writes. Concurrent readers never block writers, and writers never block readers.
-- **Autocommit outside `BEGIN`:** Statements executed outside an explicit `BEGIN` ... `COMMIT` block commit automatically.
-- **Query path note:** Queries executed inside an explicit transaction evaluate against the transaction's write buffer on the general evaluator rather than bypassing it via storage-only fast paths (such as `COLUMNAR` aggregates).
-- **C# usage:** `DataVoContext` does not expose a `BeginTransaction()` C# method—execute `db.Execute("BEGIN")` / `db.Execute("COMMIT")` / `db.Execute("ROLLBACK")` directly. If you use ADO.NET (`DataVo.Data`), `DataVoConnection.BeginTransaction()` wraps these SQL statements for you.
+```sql
+BEGIN;
+
+INSERT INTO players (id, name, score, region) VALUES (11, 'Grace', 50, 'US');
+UPDATE players SET score = 120 WHERE name = 'Grace';  -- sees buffered insert
+SELECT score FROM players WHERE id = 11;              -- returns 120
+DELETE FROM players WHERE id = 11 AND score = 120;    -- removes buffered row
+
+COMMIT;                                               -- net no-op for id = 11
+```
+
+::: tip Fast-Path Note Inside Explicit Transactions
+Queries inside an explicit transaction evaluate against the transaction's write buffer rather than storage-only shortcuts such as `COLUMNAR` aggregates, guaranteeing read-your-own-writes consistency.
+:::
+
+## Write Conflicts (First-Committer-Wins)
+
+DataVo enforces **first-committer-wins** under snapshot isolation:
+
+- If two concurrent transactions update or delete the same row, the first transaction to `COMMIT` succeeds.
+- The second transaction fails with a write-conflict error—either immediately during `UPDATE`/`DELETE` if the competing commit has already finished, or at `COMMIT`.
+- At `COMMIT`, DataVo also re-validates `PRIMARY KEY`, `UNIQUE`, and `FOREIGN KEY` constraints against concurrent commits.
+- On `Lsm`, `COMMIT` publishes as a single atomic batch and is discarded on failure. On `InMemory`, applied steps are journaled and rolled back on failure.
+
+::: warning Snapshot Isolation & Retries
+- A failed `COMMIT` terminates the transaction; catch the conflict error and retry the unit of work starting from a new `BEGIN`.
+- Snapshot isolation prevents dirty reads, non-repeatable reads, lost updates, and read skew, but is **not serializable** (write skew across disjoint rows is possible unless transactions synchronize on a shared row).
+:::
+
+## Session Transactions in C#
+
+Transactions are scoped to a session ID. `DataVoContext` does not expose a `BeginTransaction()` C# method—execute transaction SQL statements directly and pass a `Guid sessionId` when running concurrent transactions on a shared context:
+
+```csharp
+Guid txSession = Guid.NewGuid();
+
+db.Execute("BEGIN", txSession);
+db.Execute("INSERT INTO players (id, name, score, region) VALUES (12, 'Lin', 200, 'APAC')", txSession);
+db.Execute("COMMIT", txSession);
+```
+
+When using the ADO.NET provider (`DataVo.Data`), `DataVoConnection.BeginTransaction()` wraps these SQL statements in a standard `DbTransaction`.
 
 ## See Also
-- [Transactions & MVCC](/manual/fundamentals/transactions-and-mvcc) — Architecture of MVCC snapshots, write-conflict semantics, and WAL durability
-- [DML Statements](/manual/sql/statements/dml) — `INSERT`, `UPDATE`, and `DELETE` statements that participate in transactions
-- [ADO.NET Provider](/manual/client-interfaces/ado-net) — Using `DataVoTransaction` with `DataVoConnection`
+
+- [Transactions & MVCC](/manual/fundamentals/transactions-and-mvcc) — Architecture of MVCC snapshots, conflict semantics, and ADO.NET examples
+- [LSM & Durability](/manual/fundamentals/lsm-and-durability) — WAL crash atomicity and fsync guarantees on `COMMIT`
+- [INSERT](/manual/sql/statements/insert) — Inserting rows inside transactions
+- [UPDATE](/manual/sql/statements/update) — Modifying rows and triggering conflict detection
+- [DELETE](/manual/sql/statements/delete) — Deleting rows atomically within transactions
+- [Databases & Security](/manual/sql/statements/databases-and-security) — `TRANSACTION` permission required when RBAC is enabled
 
 ---
 
-# Admin & Security Statements
+# Databases & Security
 
-> Source route: /manual/sql/statements/admin-and-security
-> Source file: manual/sql/statements/admin-and-security.md
+> Source route: /manual/sql/statements/databases-and-security
+> Source file: manual/sql/statements/databases-and-security.md
 
-DataVo includes session and schema-inspection commands (`USE`, `GO`, `SHOW`, `DESCRIBE`) alongside a lightweight built-in role-based access control (RBAC) system for managing users, roles, and permissions.
+DataVo provides SQL statements for managing databases, switching session context, inspecting catalog metadata, and administering its built-in role-based access control (RBAC) system.
+
+## Syntax
+
+### Databases & Catalog Inspection
 
 ```sql
--- Session & inspection
-USE App;
-SHOW TABLES;
-DESCRIBE players;
+CREATE DATABASE [IF NOT EXISTS] <database_name>;
+USE <database_name>;
+DROP DATABASE [IF EXISTS] <database_name>;
 
--- RBAC setup
-CREATE ROLE analyst;
-GRANT READ TO ROLE analyst;
-CREATE USER alice IDENTIFIED BY 's3cr3t' ROLE analyst;
-LOGIN alice IDENTIFIED BY 's3cr3t';
+SHOW DATABASES;
+SHOW TABLES;
+DESCRIBE <table_name>;
 ```
 
-## Session & Schema Inspection
+### Users, Roles, Grants & Sessions
+
+```sql
+CREATE USER <username> IDENTIFIED [BY | PASSWORD] '<password>' [ROLE <role_name>];
+DROP USER <username>;
+
+CREATE ROLE <role_name>;
+DROP ROLE <role_name>;
+
+GRANT <perm1> [, <perm2>, ...] TO [ROLE] <user_or_role>;
+GRANT ROLE <role_name> TO <username>;
+
+REVOKE <perm1> [, <perm2>, ...] FROM [ROLE] <user_or_role>;
+REVOKE ROLE <role_name> FROM <username>;
+
+LOGIN <username> IDENTIFIED [BY | PASSWORD] '<password>';
+LOGOUT;
+
+SHOW USERS;
+SHOW ROLES;
+SHOW GRANTS [FOR USER <username> | FOR ROLE <role_name>];
+```
+
+::: info DataVo Extension
+DataVo's built-in RBAC statements (`LOGIN`, `LOGOUT`, `CREATE USER ... ROLE ...`, and engine-scoped `GRANT <perm> TO [ROLE] <target>`) form a lightweight embedded security model rather than a PostgreSQL role hierarchy.
+:::
+
+## Database & Session Statements
 
 | Statement | Description |
 | --- | --- |
-| `USE <database>` | Switches the active database for the current session. |
-| `GO` | Batch separator (no-op statement accepted for SQL script compatibility). |
+| `CREATE DATABASE [IF NOT EXISTS] <db>` | Creates a new database in the engine catalog. With `IF NOT EXISTS`, succeeds as a no-op if `<db>` already exists. |
+| `USE <db>` | Switches the active database for the current session. |
+| `DROP DATABASE [IF EXISTS] <db>` | Permanently deletes `<db>`, all of its tables, and all of its indexes. With `IF EXISTS`, succeeds as a no-op if `<db>` does not exist. |
 | `SHOW DATABASES` | Lists all databases registered in the engine catalog. |
 | `SHOW TABLES` | Lists all tables in the active database. |
-| `DESCRIBE <table>` | Displays column names, types, lengths, keys, and defaults for `<table>`. |
+| `DESCRIBE <table>` | Displays column names, types, lengths, key flags, and defaults for `<table>` in the active database. |
+| `GO` | Batch separator accepted as a no-op for SQL script compatibility. |
 
-## RBAC & Security Statements
+### Database Lifecycle & Inspection Example
 
-DataVo's security model is a standalone embedded RBAC system (not a PostgreSQL role hierarchy).
+```sql
+CREATE DATABASE IF NOT EXISTS Analytics;
+USE Analytics;
 
-| Statement | Syntax |
-| --- | --- |
-| `CREATE USER` | `CREATE USER <user> IDENTIFIED [BY \| PASSWORD] '<password>' [ROLE <role>]` |
-| `DROP USER` | `DROP USER <user>` |
-| `CREATE ROLE` | `CREATE ROLE <role>` |
-| `DROP ROLE` | `DROP ROLE <role>` |
-| `GRANT` (permissions) | `GRANT <perm1> [, <perm2>, ...] TO [ROLE] <user_or_role>` |
-| `GRANT` (role) | `GRANT ROLE <role> TO <user>` |
-| `REVOKE` (permissions) | `REVOKE <perm1> [, <perm2>, ...] FROM [ROLE] <user_or_role>` |
-| `REVOKE` (role) | `REVOKE ROLE <role> FROM <user>` |
-| `LOGIN` | `LOGIN <user> IDENTIFIED [BY \| PASSWORD] '<password>'` |
-| `LOGOUT` | `LOGOUT` |
-| `SHOW USERS` | `SHOW USERS` |
-| `SHOW ROLES` | `SHOW ROLES` |
-| `SHOW GRANTS` | `SHOW GRANTS [FOR USER <user> \| FOR ROLE <role>]` |
+CREATE TABLE events (
+    id INT PRIMARY KEY,
+    kind VARCHAR(40) NOT NULL,
+    occurred_on DATE
+);
+
+SHOW DATABASES;
+SHOW TABLES;
+DESCRIBE events;
+
+DROP DATABASE IF EXISTS Analytics;
+```
+
+## Users & Roles
+
+Create roles to group permissions, then assign roles when creating users or later via `GRANT ROLE`:
+
+```sql
+CREATE ROLE analyst;
+CREATE ROLE writer;
+
+CREATE USER alice IDENTIFIED BY 's3cr3t' ROLE analyst;
+CREATE USER bob IDENTIFIED PASSWORD 'another_secret';
+
+SHOW ROLES;
+SHOW USERS;
+```
+
+Both `IDENTIFIED BY '<password>'` and `IDENTIFIED PASSWORD '<password>'` (or `IDENTIFIED '<password>'`) are accepted by the parser.
+
+To remove users or roles:
+
+```sql
+DROP USER bob;
+DROP ROLE writer;
+```
+
+## Permissions (`GRANT` & `REVOKE`)
+
+DataVo authorizes operations using six engine-level permission tokens. Permissions can be granted directly to a user or to a role (with the `ROLE` keyword before the target).
 
 ### Supported Permission Tokens
 
-| Permission | Accepted Aliases | Scope |
+| Permission | Accepted Aliases | Operations Covered |
 | --- | --- | --- |
-| `READ` | `READDATA` | `SELECT`, `EXPLAIN`, and read-only inspection queries |
-| `WRITE` | `WRITEDATA` | `INSERT`, `UPDATE`, `DELETE`, `VACUUM` |
-| `SCHEMA` | `MANAGESCHEMA` | `CREATE`/`ALTER`/`DROP` for databases, tables, and indexes |
-| `TRANSACTION` | `TRANSACTIONS`, `MANAGETRANSACTIONS` | `BEGIN`, `COMMIT`, `ROLLBACK`, and savepoints |
-| `SECURITY` | `MANAGESECURITY` | User, role, and grant management |
-| `ADMIN` | — | Full administrative privileges across all operations |
+| `READ` | `READDATA` | `SELECT`, `EXPLAIN`, and read-only inspection queries (`SHOW`, `DESCRIBE`) |
+| `WRITE` | `WRITEDATA` | `INSERT`, `UPDATE`, `DELETE`, and `VACUUM` |
+| `SCHEMA` | `MANAGESCHEMA` | `CREATE`, `ALTER`, and `DROP` for databases, tables, and indexes |
+| `TRANSACTION` | `TRANSACTIONS`, `MANAGETRANSACTIONS` | `BEGIN`, `COMMIT`, `ROLLBACK`, `SAVEPOINT`, `ROLLBACK TO`, `RELEASE` |
+| `SECURITY` | `MANAGESECURITY` | `CREATE`/`DROP` for users and roles, `GRANT`, `REVOKE`, `SHOW USERS`/`ROLES`/`GRANTS` |
+| `ADMIN` | — | Full administrative privileges across every operation |
+
+::: warning No Object-Level `ON <table>` Clause
+DataVo permissions are granted at the engine/principal level—there is **no `ON <table>` or `ON <database>.*` clause** in `GRANT` or `REVOKE`. Adding an `ON ...` clause produces a `ParserException`.
+:::
+
+### Granting, Revoking & Inspecting Privileges
+
+```sql
+-- Grant permissions to a role
+GRANT READ TO ROLE analyst;
+GRANT READ, WRITE, TRANSACTION TO ROLE writer;
+
+-- Grant a role or direct permissions to a user
+GRANT ROLE writer TO bob;
+GRANT SCHEMA TO alice;
+
+-- Inspect grants globally or for a specific principal
+SHOW GRANTS;
+SHOW GRANTS FOR USER alice;
+SHOW GRANTS FOR ROLE analyst;
+
+-- Revoke permissions or a role
+REVOKE SCHEMA FROM alice;
+REVOKE ROLE writer FROM bob;
+REVOKE WRITE FROM ROLE writer;
+```
+
+## Session Authentication (`LOGIN` & `LOGOUT`)
+
+Switch the authenticated user bound to the current session using `LOGIN`, and clear the session's authenticated principal using `LOGOUT`:
+
+```sql
+LOGIN alice IDENTIFIED BY 's3cr3t';
+
+SELECT id, kind FROM events;
+
+LOGOUT;
+```
+
+::: tip
+Unauthorized statements throw an `AuthorizationException` when engine authentication is enabled. Configure default authentication and RBAC behavior via `DataVoConfig` (see [Configuration Reference](/manual/reference/configuration)).
+:::
 
 ## See Also
-- [DDL Statements](/manual/sql/statements/ddl) — Creating and dropping databases and tables
+
+- [CREATE TABLE](/manual/sql/statements/create-table) — Defining tables inside a database
+- [ALTER TABLE & DROP](/manual/sql/statements/alter-and-drop) — Altering and dropping tables and indexes
+- [Transactions](/manual/sql/statements/transactions) — Transaction control statements covered by the `TRANSACTION` permission
 - [Configuration Reference](/manual/reference/configuration) — Engine authentication and security configuration options
-- [Error Handling](/manual/reference/error-handling) — `AuthorizationException` and DataVo error codes
+- [SQL Compatibility](/manual/sql/compatibility) — Dialect comparison and DataVo-specific extensions
 
 ---
 
@@ -2440,72 +3585,268 @@ DataVo's security model is a standalone embedded RBAC system (not a PostgreSQL r
 > Source route: /manual/sql/functions
 > Source file: manual/sql/functions.md
 
-DataVo v0.4 ships a focused set of SQL aggregates, one window function (`RANK()`), two string scalar functions, standard comparison/logical/arithmetic operators, and native vector distance operators.
+DataVo v0.4 provides a focused, zero-ambiguity set of SQL aggregate functions, the `RANK()` window function, `LOWER`/`UPPER` string scalar functions, standard relational and arithmetic operators, and native vector distance operators (`<->`, `<=>`).
 
 ```sql
 SELECT
     UPPER(Region) AS RegionCode,
     COUNT(*) AS Players,
     AVG(Score) AS AvgScore,
-    RANK() OVER (PARTITION BY Region ORDER BY Score DESC) AS RegionRank
+    MAX(Score) AS TopScore
 FROM players
-WHERE Score BETWEEN 100 AND 1000 AND Name LIKE 'A%';
+WHERE Score BETWEEN 100 AND 2000
+  AND Name LIKE 'A%'
+GROUP BY Region
+HAVING COUNT(*) >= 2
+ORDER BY AvgScore DESC;
 ```
 
 ## Aggregate Functions
 
-| Function | Return / Behavior | Notes |
-| --- | --- | --- |
-| `COUNT(*)` / `COUNT(col)` | `BIGINT` (`long`) | `COUNT(*)` counts all rows; `COUNT(col)` ignores `NULL`s. |
-| `COUNT(DISTINCT col)` | `BIGINT` (`long`) | Counts distinct non-`NULL` values (general evaluator). `COUNT(DISTINCT *)` is a parse error. |
-| `SUM([DISTINCT] col)` | Numeric sum | Ignores `NULL` values. |
-| `AVG([DISTINCT] col)` | Floating-point average | Ignores `NULL` values. |
-| `MIN([DISTINCT] col)` | Minimum value | Works on numeric, text, and date columns. |
-| `MAX([DISTINCT] col)` | Maximum value | Works on numeric, text, and date columns. |
+Aggregate functions compute a single summary value over each `GROUP BY` group, or over the entire filtered table when `GROUP BY` is omitted. Every aggregate ignores `NULL` inputs except `COUNT(*)`.
 
-`HAVING` can evaluate aggregates that are not present in the `SELECT` list, and works both with and without `GROUP BY`.
+| Function | Syntax | Input Types | Return Type | `NULL` / Empty Group Behavior |
+| --- | --- | --- | --- | --- |
+| `COUNT` | `COUNT(*)`, `COUNT([DISTINCT] expr)` | Any (`*` or column/expr) | `BIGINT` (`long`) | `COUNT(*)` counts all rows including `NULL`s; `COUNT(expr)` ignores `NULL`s. Returns `0` for empty input. |
+| `SUM` | `SUM([DISTINCT] expr)` | Numeric (`INT`, `BIGINT`, `FLOAT`, `DOUBLE`) | Numeric (`BIGINT` for integers, `DOUBLE` for floats) | Ignores `NULL`s. Returns `NULL` when the group is empty or all values are `NULL`. |
+| `AVG` | `AVG([DISTINCT] expr)` | Numeric (`INT`, `BIGINT`, `FLOAT`, `DOUBLE`) | `DOUBLE` (`double`) | Ignores `NULL`s. Returns `NULL` when the group is empty or all values are `NULL`. |
+| `MIN` | `MIN([DISTINCT] expr)` | Numeric, `VARCHAR`, `DATE` | Matches column type | Ignores `NULL`s. Returns `NULL` when the group is empty or all values are `NULL`. |
+| `MAX` | `MAX([DISTINCT] expr)` | Numeric, `VARCHAR`, `DATE` | Matches column type | Ignores `NULL`s. Returns `NULL` when the group is empty or all values are `NULL`. |
+
+### `COUNT`
+
+Counts rows or non-`NULL` values. Pass `DISTINCT` to count unique non-`NULL` values (`COUNT(DISTINCT *)` is a syntax error).
+
+```sql
+SELECT
+    COUNT(*) AS TotalPlayers,
+    COUNT(Region) AS PlayersWithRegion,
+    COUNT(DISTINCT Region) AS ActiveRegions
+FROM players;
+```
+
+### `SUM` & `AVG`
+
+Compute the sum and arithmetic mean of numeric columns. Passing a non-numeric column raises an evaluation error.
+
+```sql
+SELECT
+    PlayerId,
+    SUM(Points) AS TotalPoints,
+    AVG(Points) AS AvgPoints
+FROM matches
+GROUP BY PlayerId
+HAVING SUM(Points) >= 200;
+```
+
+### `MIN` & `MAX`
+
+Return the smallest or largest non-`NULL` value across numeric, `VARCHAR` (ordinal UTF-8 order), or `DATE` columns while preserving the input column's type.
+
+```sql
+SELECT
+    PlayerId,
+    MIN(PlayedOn) AS FirstMatch,
+    MAX(PlayedOn) AS LatestMatch,
+    MAX(Points) AS BestMatchPoints
+FROM matches
+GROUP BY PlayerId;
+```
+
+::: tip `HAVING` Without `GROUP BY`
+`HAVING` can evaluate aggregates that do not appear in the `SELECT` list, and can be used without `GROUP BY` to filter a whole-table aggregation as a single group.
+:::
 
 ## Window Functions
 
-DataVo v0.4 supports a single window function:
+DataVo v0.4 implements a single window function: `RANK()`. Unlike aggregates, `RANK()` preserves every input row and computes a `BIGINT` (`long`) rank over each partition.
+
+### Syntax
 
 ```sql
-RANK() OVER ([PARTITION BY <col>, ...] ORDER BY <col> [ASC | DESC], ...)
+RANK() OVER ([PARTITION BY col1 [, col2, ...]] ORDER BY sort_col [ASC | DESC])
 ```
 
-- `ORDER BY` inside `OVER (...)` is required; `PARTITION BY` is optional.
-- **Not implemented in v0.4:** `ROW_NUMBER()`, `DENSE_RANK()`, `LAG()`, `LEAD()`, `FIRST_VALUE()`, `LAST_VALUE()`, and window frame clauses (`ROWS BETWEEN ...`) throw a `ParserException`.
+### Parameters
+
+| Parameter | Required | Description |
+| --- | --- | --- |
+| `PARTITION BY col1, ...` | Optional | Splits rows into independent ranking groups. When omitted, all rows form a single partition. `NULL` partition keys group together. |
+| `ORDER BY sort_col [ASC \| DESC]` | Required | Single column reference that determines rank order (`ASC` by default). |
+
+### Behavior & Example
+
+- Returns a 1-based `BIGINT` (`long`) using standard competition ranking: equal sort values receive the same rank, and the next distinct value skips ahead (`1, 2, 2, 4`).
+
+```sql
+SELECT
+    Id,
+    Name,
+    Region,
+    Score,
+    RANK() OVER (PARTITION BY Region ORDER BY Score DESC) AS RegionRank
+FROM players
+ORDER BY Region ASC, RegionRank ASC;
+```
+
+::: warning Supported Window Functions in v0.4
+Only `RANK() OVER ([PARTITION BY ...] ORDER BY <col> [ASC | DESC])` is supported in v0.4. `ROW_NUMBER()`, `DENSE_RANK()`, `LAG()`, `LEAD()`, `FIRST_VALUE()`, `LAST_VALUE()`, and window frame clauses (`ROWS BETWEEN ...`) are not implemented and throw a `ParserException`.
+:::
 
 ## Scalar Functions
 
-| Function | Signature | Behavior |
-| --- | --- | --- |
-| `LOWER` | `LOWER(expr)` | Converts text to lowercase. |
-| `UPPER` | `UPPER(expr)` | Converts text to uppercase. |
+DataVo v0.4 supports two single-argument string case-conversion scalar functions in `SELECT`, `WHERE`, and `ORDER BY` expressions:
 
-::: warning Not Supported in v0.4
-DataVo core SQL does **not** include `CASE WHEN`, `COALESCE`, `CAST`, `LEN`/`LENGTH`, `SUBSTRING`, `TRIM`, date/time functions, math functions, or SQL `COSINE_DISTANCE()`/`L2_DISTANCE()` scalar functions (the latter exist only as EF Core preview shims in `DataVoVectorDbFunctions`).
+| Function | Syntax | Input | Return Type | `NULL` Behavior |
+| --- | --- | --- | --- | --- |
+| `LOWER` | `LOWER(expr)` | Text or convertible scalar | `VARCHAR` (`string`) | Returns `NULL` when `expr` evaluates to `NULL`. |
+| `UPPER` | `UPPER(expr)` | Text or convertible scalar | `VARCHAR` (`string`) | Returns `NULL` when `expr` evaluates to `NULL`. |
+
+Both functions convert strings using invariant-culture casing and require exactly one argument.
+
+```sql
+SELECT
+    Id,
+    LOWER(Name) AS NormalizedName,
+    UPPER(Region) AS RegionCode
+FROM players
+WHERE LOWER(Region) = 'eu'
+ORDER BY NormalizedName ASC;
+```
+
+::: warning Not Evaluated in `UPDATE SET`
+`LOWER(...)` and `UPPER(...)` are supported in query (`SELECT`, `WHERE`, `ORDER BY`) expressions, but `UPDATE ... SET` does **not** evaluate scalar functions. Normalize strings in application code before binding parameters to `UPDATE`.
 :::
 
 ## Operators
 
-| Category | Operators | Notes |
-| --- | --- | --- |
-| Comparison | `=`, `!=`, `<>`, `<`, `<=`, `>`, `>=` | Text comparisons are ordinal (UTF-8 code-point order). |
-| Logical | `AND`, `OR`, `NOT` | Standard three-valued boolean logic. |
-| Membership & Range | `IN (v1, v2, ...)`, `IN (SELECT ...)`, `BETWEEN a AND b` | `BETWEEN` on a clustered primary key performs a key-range seek. |
-| Pattern & Null | `LIKE`, `NOT LIKE`, `IS NULL`, `IS NOT NULL` | `%` matches any sequence; `_` matches a single character. |
-| Arithmetic | `+`, `-`, `*`, `/` | Supported in `SELECT`, `WHERE`, and `UPDATE SET` expressions. |
-| Vector Distance | `<->` (L2 / Euclidean), `<=>` (Cosine) | Lower distance means closer. Valid in `SELECT`, `WHERE`, and `ORDER BY`. |
+### Arithmetic Operators
 
-::: info Vector Operator Scope
-Only `<->` (L2 / Euclidean) and `<=>` (Cosine) are supported in `v0.4`. There is **no** `<#>` inner-product operator.
+| Operator | Meaning | Operands & Behavior |
+| --- | --- | --- |
+| `+` | Addition / String concatenation | Adds numeric operands; concatenates when either operand is a string (`Name + ' (EU)'`). |
+| `-` | Subtraction | Subtracts numeric operands. |
+| `*` | Multiplication | Multiplies numeric operands. |
+| `/` | Division | Divides numeric operands. Dividing by `0` throws a `DivisionByZero` evaluation error. |
+
+- **NULL propagation:** If either operand is `NULL`, all arithmetic operators evaluate to `NULL`.
+- **Supported contexts:** Valid in `SELECT`, `WHERE`, `ORDER BY`, and `UPDATE SET` expressions (not inside `INSERT ... VALUES`).
+
+```sql
+SELECT
+    Name + ' [' + Region + ']' AS Label,
+    Score * 2 AS DoubleScore,
+    (Score + 100) / 10 AS Tier
+FROM players
+WHERE Score - 50 >= 500;
+```
+
+### Comparison Operators
+
+| Operator | Meaning | Notes |
+| --- | --- | --- |
+| `=` | Equal | Compares values across compatible numeric widths; `VARCHAR` uses ordinal UTF-8 comparison. |
+| `!=`, `<>` | Not equal | Both spellings are accepted and equivalent. |
+| `<` | Less than | Valid on numeric, `VARCHAR` (ordinal), and `DATE` values. |
+| `<=` | Less than or equal | Valid on numeric, `VARCHAR`, and `DATE` values. |
+| `>` | Greater than | Valid on numeric, `VARCHAR`, and `DATE` values. |
+| `>=` | Greater than or equal | Valid on numeric, `VARCHAR`, and `DATE` values. |
+
+Any comparison where either side is `NULL` evaluates to unknown (`NULL`), which `WHERE` and `HAVING` filters treat as false. Use `IS NULL` / `IS NOT NULL` to test for nulls.
+
+### Logical Operators
+
+| Operator | Syntax | Description |
+| --- | --- | --- |
+| `AND` | `cond1 AND cond2` | True when both conditions are true. |
+| `OR` | `cond1 OR cond2` | True when either condition is true. |
+| `NOT` | `NOT cond` | Negates a condition (`NOT`, `NOT LIKE`, `NOT IN`, `NOT BETWEEN`, `NOT EXISTS`). |
+
+Use parentheses `(...)` to control precedence when mixing `AND` and `OR`.
+
+### Membership, Range, Pattern & Null Operators
+
+| Operator | Syntax | Description |
+| --- | --- | --- |
+| `IN` / `NOT IN` | `expr [NOT] IN (v1, v2, ...)` or `expr IN (SELECT ...)` | Tests membership against a literal list or a single-column subquery. |
+| `BETWEEN` / `NOT BETWEEN` | `expr [NOT] BETWEEN low AND high` | Inclusive range test (`expr >= low AND expr <= high`). Performs a key-range seek on clustered primary keys. |
+| `LIKE` / `NOT LIKE` | `expr [NOT] LIKE pattern` | Wildcard pattern matching where `%` matches zero or more characters and `_` matches any single character. |
+| `IS NULL` / `IS NOT NULL` | `expr IS [NOT] NULL` | Tests whether an expression evaluates to `NULL`. |
+
+```sql
+SELECT Id, Name, Region, Score
+FROM players
+WHERE Region IN ('EU', 'NA')
+  AND Score BETWEEN 500 AND 1200
+  AND Name LIKE 'A%'
+  AND Region IS NOT NULL;
+```
+
+### Vector Distance Operators
+
+::: info DataVo Extension
+DataVo extends SQL with two native distance operators for `VECTOR(n)` columns (`float[]`). Both return a `DOUBLE` (`double`) distance where **smaller values mean closer / more similar vectors**.
+:::
+
+| Operator | Metric | Formula / Range | Indexed By |
+| --- | --- | --- | --- |
+| `<->` | L2 / Euclidean distance | `sqrt(sum((a[i] - b[i])^2))`, range `[0, +∞)` | `HNSW`, `FLAT` |
+| `<=>` | Cosine distance | `1 - (a · b) / (‖a‖ · ‖b‖)`, range `[0, 2]` | `HNSW`, `FLAT` |
+
+- **Operands:** Each side must be a `VECTOR(n)` column, a single-quoted float-array literal (e.g., `'[0.12, 0.85, 0.44]'`), or a bound vector parameter (`@queryVec`). Both vectors must have the exact same dimension or an evaluation error is raised.
+- **Supported clauses:** Valid in `SELECT` projections, `WHERE` distance thresholds, and `ORDER BY ... LIMIT k` nearest-neighbor ranking.
+
+```sql
+-- Top-5 nearest documents by Cosine distance with metadata filter
+SELECT
+    Id,
+    Title,
+    Category,
+    Embedding <=> '[0.12, 0.85, 0.44]' AS CosineDist
+FROM documents
+WHERE Category = 'guide'
+  AND Embedding <=> '[0.12, 0.85, 0.44]' < 0.35
+ORDER BY CosineDist ASC
+LIMIT 5;
+
+-- L2 / Euclidean distance ranking
+SELECT
+    Id,
+    Title,
+    Embedding <-> @queryVec AS L2Dist
+FROM documents
+ORDER BY L2Dist ASC
+LIMIT 10;
+```
+
+::: warning No `<#>` Operator or Core SQL Distance Functions
+DataVo v0.4 supports **only** `<->` (L2) and `<=>` (Cosine). There is **no** `<#>` inner-product operator, and there are **no** core SQL `COSINE_DISTANCE()` or `L2_DISTANCE()` scalar functions — always use the infix `<=>` and `<->` operators in SQL queries.
+:::
+
+## Excluded Functions & Expressions in v0.4
+
+::: info Intentionally Excluded in DataVo v0.4
+To keep the embedded parser and execution engine compact and predictable, the following SQL functions and constructs are **not** included in DataVo v0.4 core SQL:
+
+- **Conditional & null helpers:** `CASE WHEN ... THEN ... ELSE ... END`, `COALESCE`, `NULLIF`, `IFNULL`, `IIF`
+- **Type casting & pragmas:** `CAST(... AS ...)`, `CONVERT`, `::type`, `PRAGMA`
+- **String functions:** `LENGTH` / `LEN`, `SUBSTRING` / `SUBSTR`, `TRIM` / `LTRIM` / `RTRIM`, `REPLACE`, `CONCAT`, `INSTR`, `LEFT`, `RIGHT`
+- **Date & time functions:** `NOW()`, `CURRENT_DATE`, `CURRENT_TIMESTAMP`, `DATEADD`, `DATEDIFF`, `STRFTIME`, `EXTRACT`
+- **Math functions:** `ABS`, `ROUND`, `FLOOR`, `CEIL` / `CEILING`, `POWER`, `SQRT`, `MOD`
+- **Vector helper functions & inner product:** `COSINE_DISTANCE()`, `L2_DISTANCE()`, and the `<#>` operator
+- **Additional window functions:** `ROW_NUMBER()`, `DENSE_RANK()`, `LAG()`, `LEAD()`, `FIRST_VALUE()`, `LAST_VALUE()`
+
+Perform formatting, date arithmetic, conditional projections, or type conversions in C# on query results or bound parameters.
 :::
 
 ## See Also
-- [SELECT & EXPLAIN](/manual/sql/statements/select) — Combining operators, aggregates, `GROUP BY`, `HAVING`, and `ORDER BY`
-- [Vector Search](/manual/fundamentals/vector-search) — Indexing `<->` and `<=>` queries with `HNSW` and `FLAT`
-- [SQL Compatibility](/manual/sql/compatibility) — Full dialect feature matrix
+
+- [SELECT](/manual/sql/statements/select) — Using functions and operators in `SELECT`, `WHERE`, `GROUP BY`, `HAVING`, and `ORDER BY`
+- [Data Types](/manual/sql/data-types) — Numeric widths, `DATE` representation, `VARCHAR` ordinal rules, and `VECTOR(n)`
+- [Vector Search](/manual/fundamentals/vector-search) — Creating `HNSW` and `FLAT` indexes for `<->` and `<=>` queries
+- [Indexes](/manual/sql/statements/indexes) — Index types and operator acceleration
+- [SQL Compatibility](/manual/sql/compatibility) — Side-by-side dialect matrix against SQLite and PostgreSQL
+- [Query Planner](/manual/internals/query-planner) — Columnar aggregates, typed scans, and general evaluator rules
 
 ---
 

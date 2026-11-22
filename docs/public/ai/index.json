@@ -1,6 +1,6 @@
 {
   "name": "DataVo Documentation",
-  "generatedAt": "2026-11-22T07:30:52.401Z",
+  "generatedAt": "2026-11-22T14:51:20.221Z",
   "pages": [
     {
       "title": "Introduction",
@@ -129,40 +129,64 @@
       "aiPath": "/ai/pages/manual/sql/data-types.md"
     },
     {
-      "title": "SELECT & EXPLAIN",
+      "title": "SELECT",
       "route": "/manual/sql/statements/select",
       "source": "manual/sql/statements/select.md",
       "aiPath": "/ai/pages/manual/sql/statements/select.md"
     },
     {
-      "title": "DML Statements",
-      "route": "/manual/sql/statements/dml",
-      "source": "manual/sql/statements/dml.md",
-      "aiPath": "/ai/pages/manual/sql/statements/dml.md"
+      "title": "INSERT",
+      "route": "/manual/sql/statements/insert",
+      "source": "manual/sql/statements/insert.md",
+      "aiPath": "/ai/pages/manual/sql/statements/insert.md"
     },
     {
-      "title": "DDL Statements",
-      "route": "/manual/sql/statements/ddl",
-      "source": "manual/sql/statements/ddl.md",
-      "aiPath": "/ai/pages/manual/sql/statements/ddl.md"
+      "title": "UPDATE",
+      "route": "/manual/sql/statements/update",
+      "source": "manual/sql/statements/update.md",
+      "aiPath": "/ai/pages/manual/sql/statements/update.md"
     },
     {
-      "title": "Indexes",
+      "title": "DELETE",
+      "route": "/manual/sql/statements/delete",
+      "source": "manual/sql/statements/delete.md",
+      "aiPath": "/ai/pages/manual/sql/statements/delete.md"
+    },
+    {
+      "title": "CREATE TABLE",
+      "route": "/manual/sql/statements/create-table",
+      "source": "manual/sql/statements/create-table.md",
+      "aiPath": "/ai/pages/manual/sql/statements/create-table.md"
+    },
+    {
+      "title": "ALTER TABLE & DROP",
+      "route": "/manual/sql/statements/alter-and-drop",
+      "source": "manual/sql/statements/alter-and-drop.md",
+      "aiPath": "/ai/pages/manual/sql/statements/alter-and-drop.md"
+    },
+    {
+      "title": "CREATE INDEX",
       "route": "/manual/sql/statements/indexes",
       "source": "manual/sql/statements/indexes.md",
       "aiPath": "/ai/pages/manual/sql/statements/indexes.md"
     },
     {
-      "title": "Transactions & Savepoints",
+      "title": "EXPLAIN",
+      "route": "/manual/sql/statements/explain",
+      "source": "manual/sql/statements/explain.md",
+      "aiPath": "/ai/pages/manual/sql/statements/explain.md"
+    },
+    {
+      "title": "Transactions",
       "route": "/manual/sql/statements/transactions",
       "source": "manual/sql/statements/transactions.md",
       "aiPath": "/ai/pages/manual/sql/statements/transactions.md"
     },
     {
-      "title": "Admin & Security Statements",
-      "route": "/manual/sql/statements/admin-and-security",
-      "source": "manual/sql/statements/admin-and-security.md",
-      "aiPath": "/ai/pages/manual/sql/statements/admin-and-security.md"
+      "title": "Databases & Security",
+      "route": "/manual/sql/statements/databases-and-security",
+      "source": "manual/sql/statements/databases-and-security.md",
+      "aiPath": "/ai/pages/manual/sql/statements/databases-and-security.md"
     },
     {
       "title": "Functions & Operators",

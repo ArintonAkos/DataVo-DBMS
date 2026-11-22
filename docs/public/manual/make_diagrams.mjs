@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Generates paired light/dark monochrome Rough.js SVG diagrams for the
- * DataVo Manual (7 diagrams, 14 SVGs total).
+ * DataVo Manual (8 diagrams, 16 SVGs total).
  *
  * Matches the visual palette, stroke weights, hachure fills, 780px viewBox
  * width, and system sans/monospace typography of the blog diagrams.
@@ -707,6 +707,86 @@ function fig07StreamingModes(theme) {
   return c.render();
 }
 
+// ---------------------------------------------------------------------------
+// Fig 08 — Client Interfaces to DataVo.Core Engine & Storage (mobile-legible)
+// ---------------------------------------------------------------------------
+function fig08ClientInterfaces(theme) {
+  const c = createCanvas(
+    780,
+    380,
+    "Five .NET 10 client interfaces routing into the DataVo.Core engine and storage layers",
+    theme
+  );
+
+  // Top: Your .NET 10 App
+  c.box(170, 14, 440, 44, { hatch: true });
+  c.text(390, 41, "Your .NET 10 Application", { size: 15, weight: 600 });
+
+  // Fan-out arrows from app to interface layer
+  c.arrow(220, 58, 95, 92);
+  c.arrow(320, 58, 270, 92);
+  c.arrow(460, 58, 455, 92);
+  c.arrow(560, 58, 680, 92, { dashed: true, muted: true });
+
+  // Interface 1: Compiled LINQ (hatched to highlight zero-alloc fast path)
+  c.box(18, 96, 156, 76, { hatch: true });
+  c.text(96, 126, "Compiled LINQ", { size: 14, weight: 600 });
+  c.text(96, 146, "DataVo.Generators", { mono: true, size: 12.8, muted: true });
+  c.text(96, 164, "55 ns · 0 B scans", { mono: true, size: 12.5, weight: 600 });
+
+  // Interface 2: DataVoContext
+  c.box(192, 96, 156, 76);
+  c.text(270, 126, "DataVoContext", { size: 14, weight: 600 });
+  c.text(270, 146, "DataVo.Core", { mono: true, size: 12.8, muted: true });
+  c.text(270, 164, "SQL · Vector · IVM", { size: 12.8, muted: true });
+
+  // Interface 3 & 4: Dapper -> ADO.NET
+  c.box(366, 96, 212, 76);
+  c.text(472, 121, "Dapper  →  ADO.NET", { size: 14, weight: 600 });
+  c.text(472, 144, "DataVo.Data", { mono: true, size: 12.8, muted: true });
+  c.text(472, 164, "DbConnection / Reader", { size: 12.8, muted: true });
+
+  // Interface 5: EF Core Bridge (dashed preview)
+  c.box(596, 96, 166, 76, { dashed: true, muted: true });
+  c.text(679, 126, "EF Core Bridge", { size: 14, weight: 600, muted: true });
+  c.text(679, 146, "Preview · No AOT", { size: 12.8, muted: true });
+  c.text(679, 164, "DbContext queries", { size: 12.8, muted: true });
+
+  // Arrows into DataVo.Core Engine
+  c.arrow(96, 172, 140, 212);
+  c.arrow(270, 172, 290, 212);
+  c.arrow(472, 172, 472, 212);
+  c.arrow(679, 172, 640, 212, { dashed: true, muted: true });
+
+  // Core Engine box
+  c.box(46, 216, 688, 56);
+  c.text(390, 241, "DataVo.Core Engine", { size: 15, weight: 600 });
+  c.text(390, 261, "SQL Parser  ·  Typed Fast Paths  ·  MVCC  ·  HNSW & Columnar Indexes", {
+    size: 13.2,
+    muted: true,
+  });
+
+  // Arrows down to Storage Modes
+  c.arrow(170, 272, 150, 304);
+  c.arrow(390, 272, 390, 304);
+  c.arrow(610, 272, 630, 304, { dashed: true, muted: true });
+
+  // Storage row (3 clean cards)
+  c.box(46, 308, 210, 56);
+  c.text(151, 333, "InMemory", { size: 14, weight: 600 });
+  c.text(151, 353, "FlatRowStore buffers", { mono: true, size: 12.8, muted: true });
+
+  c.box(285, 308, 210, 56, { hatch: true });
+  c.text(390, 333, "LSM (Recommended)", { size: 14, weight: 600 });
+  c.text(390, 353, "WAL · SSTables · mmap", { mono: true, size: 12.8, muted: true });
+
+  c.box(524, 308, 210, 56, { dashed: true, muted: true });
+  c.text(629, 333, "Disk (Legacy)", { size: 14, weight: 600, muted: true });
+  c.text(629, 353, "v0.1 / v0.2 compat", { mono: true, size: 12.8, muted: true });
+
+  return c.render();
+}
+
 const FIGURES = [
   ["fig-01-architecture", fig01Architecture],
   ["fig-02-lsm-write-path", fig02LsmWritePath],
@@ -715,6 +795,7 @@ const FIGURES = [
   ["fig-05-planner-fast-paths", fig05PlannerFastPaths],
   ["fig-06-zero-alloc-rowref", fig06ZeroAllocRowRef],
   ["fig-07-streaming-modes", fig07StreamingModes],
+  ["fig-08-client-interfaces", fig08ClientInterfaces],
 ];
 
 for (const [name, fn] of FIGURES) {

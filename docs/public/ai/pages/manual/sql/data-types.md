@@ -55,6 +55,6 @@ DataVo throws a `ParserException` at `CREATE TABLE` or `ALTER TABLE` time for ty
 | `BLOB`, `BINARY`, `VARBINARY`, `JSON`, `JSONB` | Not supported as native column types in `v0.4`; encode as `VARCHAR` (e.g., Base64 or JSON text). |
 
 ## See Also
-- [DDL Statements](/manual/sql/statements/ddl) — Declaring columns, constraints, and defaults in `CREATE TABLE`
+- [CREATE TABLE](/manual/sql/statements/create-table) — Declaring columns, constraints, and defaults in `CREATE TABLE`
 - [Indexes](/manual/sql/statements/indexes) — Choosing B-Tree, HNSW, FLAT, or COLUMNAR indexes by column type
 - [SQL Compatibility](/manual/sql/compatibility) — Full dialect comparison against SQLite and PostgreSQL

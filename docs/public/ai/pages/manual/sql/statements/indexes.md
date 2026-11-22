@@ -1,80 +1,142 @@
-# Indexes
+# CREATE INDEX
 
 > Source route: /manual/sql/statements/indexes
 > Source file: manual/sql/statements/indexes.md
 
-DataVo supports four index methods via `CREATE INDEX`: B-Tree for scalar lookups and ranges, `HNSW` and `FLAT` for vector similarity search, and `COLUMNAR` for vectorized analytical aggregations.
+`CREATE INDEX` builds a secondary index on an existing table in the active database and populates it immediately from current rows. DataVo supports four index methods: `BTREE` for scalar lookups and ranges, `HNSW` and `FLAT` for vector similarity search, and `COLUMNAR` for vectorized analytical aggregations.
+
+## Syntax
 
 ```sql
--- Scalar B-Tree index (default)
-CREATE INDEX ix_players_score ON players (Score);
-
--- Approximate vector index
-CREATE INDEX ix_documents_emb ON documents (embedding)
-USING HNSW WITH (metric = 'cosine', m = 16, ef_construction = 64, ef_search = 64);
-
--- Analytical columnar index
-CREATE INDEX cx_players_stats ON players (Score, Id) USING COLUMNAR;
-
--- Drop an index
-DROP INDEX ix_players_score ON players;
+CREATE INDEX <index_name> ON <table_name> (<column_name> [, <column_name>, ...])
+    [USING BTREE | HNSW | FLAT | COLUMNAR]
+    [WITH (<option_name> = <value> [, ...])];
 ```
 
-## Index Types Overview
+::: info DataVo Extension
+`USING HNSW`, `USING FLAT`, `USING COLUMNAR`, and the `WITH (...)` index-tuning clause are DataVo extensions beyond standard SQLite and ANSI SQL.
+:::
+
+## Parameters
+
+| Clause | Required | Description |
+| --- | --- | --- |
+| `<index_name>` | Yes | Unique index name for `<table_name>`. |
+| `ON <table_name>` | Yes | Existing table in the active database to index. |
+| `(<column_name>, ...)` | Yes | One or more target columns. `HNSW` and `FLAT` require exactly one `VECTOR(n)` column; `BTREE` and `COLUMNAR` accept one or more columns. |
+| `USING <method>` | No | Index implementation: `BTREE` (default when omitted), `HNSW`, `FLAT`, or `COLUMNAR`. |
+| `WITH (<opt> = <val>, ...)` | No | Key-value tuning options for vector indexes (`HNSW` and `FLAT`). Option names ignore case and underscores. |
+
+::: warning Syntax Notes in v0.4
+`CREATE INDEX` does **not** support `UNIQUE` or `IF NOT EXISTS` in DataVo `v0.4`. To enforce uniqueness on a column, declare `UNIQUE` inside [`CREATE TABLE`](/manual/sql/statements/create-table).
+:::
+
+## Index Methods Overview
 
 | Method | Syntax | Target Columns | Best For |
 | --- | --- | --- | --- |
-| `BTREE` (default) | `USING BTREE` (or omit `USING`) | Single or composite scalar columns | Point lookups, range scans, and `ORDER BY` on scalar columns. |
-| `HNSW` | `USING HNSW [WITH (...)]` | Single `VECTOR(n)` column | Fast approximate nearest-neighbor search on medium/large embedding tables. |
+| `BTREE` (default) | `USING BTREE` (or omit `USING`) | Single or composite scalar columns | Equality lookups, range scans, selective join probes, and single-key integer `GROUP BY COUNT`. |
+| `HNSW` | `USING HNSW [WITH (...)]` | Single `VECTOR(n)` column | Fast approximate nearest-neighbor (ANN) search on medium and large embedding tables. |
 | `FLAT` | `USING FLAT [WITH (metric = ...)]` | Single `VECTOR(n)` column | Exact exhaustive vector search on small tables and recall benchmarks. |
-| `COLUMNAR` | `USING COLUMNAR` | Numeric, `BIT`, and `DATE` columns | High-speed `COUNT`, `SUM`, `AVG`, `MIN`, `MAX` without reading full rows. |
+| `COLUMNAR` | `USING COLUMNAR` | Numeric (`INT`, `BIGINT`, `FLOAT`, `DOUBLE`), `BIT`, and `DATE` columns | High-speed `COUNT`, `SUM`, `AVG`, `MIN`, and `MAX` aggregations without decoding full rows. |
 
-::: info DataVo Extension
-`USING HNSW`, `USING FLAT`, and `USING COLUMNAR` (along with the `WITH (...)` tuning clause) are DataVo extensions beyond standard SQLite/ANSI SQL.
-:::
+## Scalar B-Tree Indexes (`USING BTREE`)
 
-## Scalar B-Tree Indexes
+B-Tree is the default index method when `USING` is omitted. You can index a single scalar column or a composite list of columns:
 
 ```sql
-CREATE INDEX ix_players_region_score ON players (Region, Score);
+-- Single-column B-Tree index
+CREATE INDEX ix_players_score ON players (score);
+
+-- Explicit USING BTREE on a composite key
+CREATE INDEX ix_players_region_score ON players (region, score) USING BTREE;
 ```
 
-- A scalar index stores only rows where **all** indexed columns are non-`NULL`. Rows with a `NULL` key receive no index entry, so `IS NULL` predicates scan rows and multiple `NULL`s may coexist in a `UNIQUE` column.
+### Behavior & Query Acceleration
 
-## Vector Indexes (`HNSW` & `FLAT`)
+- **Non-`NULL` indexing:** A B-Tree index stores entries only for rows where **all** indexed columns are non-`NULL`. Rows containing a `NULL` key receive no index entry, so `IS NULL` predicates scan table rows and multiple `NULL`s may coexist in a `UNIQUE` column.
+- **When B-Tree accelerates queries:**
+  - Single-column equality predicates (`WHERE score = 500`) use an index point lookup.
+  - Selective `INNER JOIN` probes on indexed integer keys probe the B-Tree instead of streaming the full table.
+  - Whole-table `GROUP BY <indexed_int_col>` with `COUNT(*)` or `COUNT(col)` streams groups directly in key order from the index.
+  - Secondary B-Tree indexes are **not** used to satisfy general `ORDER BY` clauses or non-counting `GROUP BY` shapes (see [Query Planner](/manual/internals/query-planner)).
 
-Both `HNSW` and `FLAT` accept `metric` in `WITH (...)`. Passing graph options (`m`, `ef_construction`, `ef_search`, `enable_diversity_heuristic`) to `FLAT` or `BTREE`, or passing out-of-range values, throws an error and creates no index. Option names ignore case and underscores.
+## Vector Indexes (`USING HNSW` & `USING FLAT`)
+
+Vector indexes require **exactly one** `VECTOR(n)` column (`VECTOR(n)`, `VEC2`, `VEC3`, `VEC4`, `FLOAT[n]`, or `REAL[n]`). Rows where the vector column is `NULL` are skipped.
+
+```sql
+-- Approximate HNSW index for text embeddings
+CREATE INDEX ix_documents_emb ON documents (embedding)
+USING HNSW WITH (
+    metric = 'cosine',
+    m = 16,
+    ef_construction = 64,
+    ef_search = 64,
+    enable_diversity_heuristic = true
+);
+
+-- Exact FLAT index for 3D spatial coordinates
+CREATE INDEX ix_entities_pos ON world_entities (position)
+USING FLAT WITH (metric = 'euclidean');
+```
+
+### Vector `WITH (...)` Options
+
+Passing HNSW graph options (`m`, `ef_construction`, `ef_search`, `enable_diversity_heuristic`) to `FLAT` or `BTREE`, passing `metric` to `BTREE`, or specifying out-of-range values throws a `BindingException` and creates no index. Option names ignore case and underscores (for example, `efConstruction` and `ef_construction` are equivalent).
 
 | Option | Default | Valid Range | Applies To | Description |
 | --- | --- | --- | --- | --- |
-| `metric` | `'cosine'` | `'cosine'`, `'euclidean'` (or `'l2'`) | `HNSW`, `FLAT` | Distance metric persisted in the catalog. Use `'euclidean'` for 3D positions. |
-| `m` | `16` | `2` – `128` | `HNSW` | Bi-directional links per graph layer (doubled on layer 0). |
-| `ef_construction` | `64` | `1` – `4096` | `HNSW` | Candidate beam width during index build. |
-| `ef_search` | `64` | `1` – `4096` | `HNSW` | Minimum candidate beam width during search. |
-| `enable_diversity_heuristic` | `true` | `true`, `false` | `HNSW` | Keeps cross-cluster links; disable only for faster builds on uniform data. |
+| `metric` | `'cosine'` | `'cosine'`, `'euclidean'` (alias `'l2'`) | `HNSW`, `FLAT` | Distance metric persisted in the catalog. Use `'cosine'` for normalized embeddings and `'euclidean'`/`'l2'` for spatial positions. |
+| `m` | `16` | `2` – `128` | `HNSW` | Maximum bi-directional links per graph layer (doubled on layer 0). Higher values improve recall at higher memory and build cost. |
+| `ef_construction` | `64` | `1` – `4096` | `HNSW` | Candidate beam width during graph construction. Higher values yield better graph quality at slower build speed. |
+| `ef_search` | `64` | `1` – `4096` | `HNSW` | Minimum candidate beam width during nearest-neighbor search. |
+| `enable_diversity_heuristic` | `true` | `true`, `false` | `HNSW` | Preserves cross-cluster links during neighbor selection; disable only for faster builds on uniform data. |
 
-For filtered vector searches, DataVo widens the candidate beam automatically and switches to an exact scan when graph traversal would cost more than scanning stored vectors—ensuring filtered `LIMIT k` queries return the full `k` rows when enough rows match.
+### Filtered Vector Search Behavior
+
+For hybrid queries combining `WHERE` predicates with `ORDER BY embedding <=> @q LIMIT k` (or `<->`), DataVo automatically widens the candidate beam and switches to an exact SIMD scan when graph traversal would cost more than scanning stored vectors—ensuring filtered `LIMIT k` queries return all `k` matching rows whenever enough rows qualify.
 
 ## Columnar Indexes (`USING COLUMNAR`)
 
-```sql
-CREATE INDEX cx_players ON players (Score, Id) USING COLUMNAR;
-```
-
-- **Allowed types:** `INT`, `BIGINT`, `FLOAT`, `DOUBLE`, `BIT`, and `DATE` only. Any other type is rejected.
-- **Storage modes:** Accelerates `InMemory` (4–8 bytes/row/column in RAM) and `Lsm` (persisted as format-v8 columnar segments inside `.sst` files). Legacy `Disk` mode records the index but falls back to row scans.
-- **Query eligibility:** Used for aggregates without `GROUP BY` whose `WHERE` clause is an `AND` of column-to-literal comparisons or `IS NULL` checks over indexed columns. Queries inside explicit transactions, queries with `GROUP BY`, or comparisons where precision could differ (e.g., fractional literal vs. `INT`, `BIT`/`DATE` predicates, or `NaN` floats) fall back to row scans.
-- **Scope:** Never serves point lookups and does not replace a B-Tree index. Multiple columnar indexes on the same table are consolidated internally.
-
-## `DROP INDEX`
+Columnar indexes store selected columns in compact typed column chunks so analytical aggregates avoid reading full row payloads.
 
 ```sql
-DROP INDEX <index_name> ON <table_name>;
+CREATE INDEX cx_players_stats ON players (score, id) USING COLUMNAR;
 ```
 
-DataVo requires the `ON <table_name>` clause when dropping an index.
+### Eligibility & Storage Rules
+
+- **Allowed column types:** `INT`, `BIGINT`, `FLOAT`, `DOUBLE`, `BIT`, and `DATE` only. Any other type (such as `VARCHAR`, `GUID`, or `VECTOR`) is rejected at `CREATE INDEX` time.
+- **Storage modes:**
+  - `InMemory`: Stores 4–8 bytes per row per indexed column in RAM for SIMD-accelerated scans.
+  - `Lsm`: Persists format-v8 columnar segments inside `.sst` files with `min`/`max`/`NULL`/`NaN` zone maps for chunk skipping.
+  - Legacy `Disk`: Records the index in the catalog but falls back to row scans.
+- **Query eligibility:** Accelerates `COUNT`, `SUM`, `AVG`, `MIN`, and `MAX` queries **without `GROUP BY`** whose `WHERE` clause is an `AND` of column-to-literal comparisons or `IS NULL` checks over indexed columns. Queries fall back cleanly to row scans when:
+  - Running inside an explicit `BEGIN` ... `COMMIT` transaction.
+  - Using `GROUP BY`.
+  - Filtering on comparisons where precision could differ (such as a fractional literal against an `INT` column), `BIT`/`DATE` predicates, or `NaN` floats.
+  - Computing `SUM` or `AVG` over `FLOAT`/`DOUBLE` on an `Lsm` table with an unflushed memtable tail (to preserve deterministic floating-point addition order).
+- **Consolidation & scope:** Columnar indexes never serve point lookups and do not replace B-Tree indexes. Multiple `USING COLUMNAR` indexes on the same table are consolidated internally.
+
+::: tip Choosing the Right Index
+- Use **`BTREE`** for selective `WHERE col = ...` filters and join keys.
+- Use **`HNSW`** for `VECTOR(n)` tables with thousands or millions of rows; use **`FLAT`** for small tables or exact recall baselines.
+- Use **`COLUMNAR`** for dashboard rollups (`COUNT`, `SUM`, `AVG`, `MIN`, `MAX`) over numeric columns.
+:::
+
+## Dropping an Index
+
+Remove any index using [`DROP INDEX`](/manual/sql/statements/alter-and-drop#drop-index):
+
+```sql
+DROP INDEX ix_players_score ON players;
+```
 
 ## See Also
-- [Vector Search](/manual/fundamentals/vector-search) — End-to-end guide to embeddings, `SearchNearest`, and spatial queries
-- [Data Types](/manual/sql/data-types) — `VECTOR(n)`, `VEC2`/`VEC3`/`VEC4`, and `FLOAT[n]` declarations
-- [Query Planner](/manual/internals/query-planner) — When the planner selects B-Tree, HNSW, FLAT, or Columnar fast paths
+
+- [ALTER TABLE & DROP](/manual/sql/statements/alter-and-drop) — Dropping indexes (`DROP INDEX ... ON <table>`) and altering indexed columns
+- [Vector Search](/manual/fundamentals/vector-search) — End-to-end guide to embeddings, `<=>` / `<->` distance operators, and hybrid vector queries
+- [Query Planner](/manual/internals/query-planner) — How DataVo routes queries to B-Tree, HNSW, FLAT, and Columnar fast paths
+- [EXPLAIN](/manual/sql/statements/explain) — Inspecting logical and physical execution plans
+- [Data Types](/manual/sql/data-types) — Supported scalar and `VECTOR(n)` column types
