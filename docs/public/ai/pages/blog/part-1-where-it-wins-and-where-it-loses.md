@@ -395,7 +395,7 @@ db.Execute("CREATE TABLE Notes (Id INT PRIMARY KEY, Tag VARCHAR(32), Embedding V
 ```
 
 - **Open-source engine and documentation:** [github.com/ArintonAkos/DataVo-DBMS](https://github.com/ArintonAkos/DataVo-DBMS) · [Full Manual](https://arintonakos.github.io/DataVo-DBMS/)
-- **Commercial `DataVo-Sync` add-on:** For early access or licensing for offline-first PostgreSQL sync, reach out via `@ArintonAkos` on GitHub.
+- **Commercial `DataVo-Sync` add-on:** Supports PostgreSQL and Supabase today (with SQL Server available on request). For evaluation builds or licensing, [request Early Access](https://tally.so/r/RWD8G9) or email `datavodb@proton.me`.
 
 ::: tip Source Code
 The source code, benchmark harnesses, and raw CI logs for this series are in [`ArintonAkos/DataVo-DBMS`](https://github.com/ArintonAkos/DataVo-DBMS).

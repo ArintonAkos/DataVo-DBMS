@@ -5,8 +5,9 @@
   "main": "index.js",
   "scripts": {
     "docs:ai": "node scripts/generate-ai-docs.cjs",
+    "docs:og": "node scripts/generate-og-images.cjs",
     "docs:dev": "npm run docs:ai && vitepress dev",
-    "docs:build": "npm run docs:ai && node scripts/clean-docs-dist.cjs && vitepress build",
+    "docs:build": "npm run docs:ai && npm run docs:og && node scripts/clean-docs-dist.cjs && vitepress build",
     "benchmarks:ci-plots": "python3 scripts/generate-ci-benchmark-plots.py",
     "mcp": "node mcp/datavo-docs-server.cjs",
     "test:browser:generate": "bash ../scripts/generate-wasm-browser-scenarios.sh",

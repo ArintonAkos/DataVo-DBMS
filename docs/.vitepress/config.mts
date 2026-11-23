@@ -1,8 +1,53 @@
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { defineConfig, type HeadConfig } from "vitepress";
 import { withMermaid } from "vitepress-plugin-mermaid";
 
 const isProdBuild =
   process.env.NODE_ENV === "production" || process.argv.includes("build");
+
+const SITE_URL = "https://arintonakos.github.io/DataVo-DBMS";
+const SITE_TITLE = "DataVo-DBMS";
+const SITE_DESCRIPTION =
+  "C#-native embedded database documentation for DataVo v0.4 (0.4.0-rc.1).";
+
+const configDir = path.dirname(fileURLToPath(import.meta.url));
+const ogPublicDir = path.resolve(configDir, "../public/og");
+
+function ogSlugForRelativePath(relativePath: string): string {
+  const normalized = relativePath.replaceAll("\\", "/").replace(/^\/+/u, "");
+  const stripped = normalized
+    .replace(/(^|\/)index\.md$/u, "")
+    .replace(/\.md$/u, "")
+    .replace(/\/+$/u, "");
+  return stripped ? stripped.replaceAll("/", "-") : "index";
+}
+
+function canonicalUrlForRelativePath(relativePath: string): string {
+  const normalized = relativePath.replaceAll("\\", "/").replace(/^\/+/u, "");
+  if (normalized === "index.md") {
+    return `${SITE_URL}/`;
+  }
+  if (normalized.endsWith("/index.md")) {
+    return `${SITE_URL}/${normalized.slice(0, -"index.md".length)}`;
+  }
+  return `${SITE_URL}/${normalized.replace(/\.md$/u, "")}`;
+}
+
+function appendMetaIfMissing(
+  headList: HeadConfig[],
+  attr: "property" | "name",
+  key: string,
+  content: string,
+): void {
+  const exists = headList.some(
+    ([tag, attrs]) => tag === "meta" && attrs?.[attr] === key,
+  );
+  if (!exists) {
+    headList.push(["meta", { [attr]: key, content }]);
+  }
+}
 
 const head: HeadConfig[] = [
   ["link", { rel: "icon", type: "image/svg+xml", href: "/DataVo-DBMS/favicon.svg" }],
@@ -24,10 +69,57 @@ export default withMermaid(
   defineConfig({
     title: "DataVo",
     base: "/DataVo-DBMS/",
-    description:
-      "C#-native embedded database documentation for DataVo v0.4 (0.4.0-rc.1).",
+    description: SITE_DESCRIPTION,
     cleanUrls: true,
     head,
+    transformPageData(pageData) {
+      const frontmatter = pageData.frontmatter ?? {};
+      const pageHead: HeadConfig[] = Array.isArray(frontmatter.head)
+        ? [...frontmatter.head]
+        : [];
+
+      const slug = ogSlugForRelativePath(pageData.relativePath);
+      const ogFileName = fs.existsSync(path.join(ogPublicDir, `${slug}.png`))
+        ? `${slug}.png`
+        : "default.png";
+      const ogImageUrl = `${SITE_URL}/og/${ogFileName}`;
+      const ogUrl = canonicalUrlForRelativePath(pageData.relativePath);
+
+      const ogTitle =
+        typeof frontmatter.title === "string" && frontmatter.title.trim()
+          ? frontmatter.title.trim()
+          : frontmatter.layout === "home" && frontmatter.hero?.text
+            ? `${SITE_TITLE} — ${frontmatter.hero.text}`
+            : pageData.title || SITE_TITLE;
+
+      const ogDescription =
+        (typeof frontmatter.description === "string" && frontmatter.description.trim()) ||
+        pageData.description ||
+        (typeof frontmatter.hero?.tagline === "string" && frontmatter.hero.tagline.trim()) ||
+        SITE_DESCRIPTION;
+
+      const ogType =
+        pageData.relativePath.startsWith("blog/") &&
+        pageData.relativePath !== "blog/index.md"
+          ? "article"
+          : "website";
+
+      appendMetaIfMissing(pageHead, "property", "og:type", ogType);
+      appendMetaIfMissing(pageHead, "property", "og:site_name", SITE_TITLE);
+      appendMetaIfMissing(pageHead, "property", "og:url", ogUrl);
+      appendMetaIfMissing(pageHead, "property", "og:title", ogTitle);
+      appendMetaIfMissing(pageHead, "property", "og:description", ogDescription);
+      appendMetaIfMissing(pageHead, "property", "og:image", ogImageUrl);
+      appendMetaIfMissing(pageHead, "property", "og:image:width", "1200");
+      appendMetaIfMissing(pageHead, "property", "og:image:height", "630");
+      appendMetaIfMissing(pageHead, "name", "twitter:card", "summary_large_image");
+      appendMetaIfMissing(pageHead, "name", "twitter:title", ogTitle);
+      appendMetaIfMissing(pageHead, "name", "twitter:description", ogDescription);
+      appendMetaIfMissing(pageHead, "name", "twitter:image", ogImageUrl);
+
+      frontmatter.head = pageHead;
+      pageData.frontmatter = frontmatter;
+    },
     srcExclude: [
       "public/**",
       "features/**",
