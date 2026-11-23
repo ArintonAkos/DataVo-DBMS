@@ -179,7 +179,7 @@ End-to-end benchmarks on Ubuntu x64 (2 vCPU, PostgreSQL 17.12, 20 November 2026)
 - **Local reads on synced 100k replica:** **4.06–5.19 µs/op** point lookups vs **8.27–8.86 µs/op** on SQLite WAL.
 - **Concurrent scaling:** **140,218 aggregate rows/s** fan-out across 50 clients; **12,754 rows/s** sustained at **1,000 concurrent WebSocket clients** on a 2-vCPU VM.
 
-For commercial licensing or early access, contact the repository maintainer (`@ArintonAkos`).
+Supports PostgreSQL (including Supabase over direct logical replication connections), with SQL Server Change Tracking / CDC available on request for Early Access partners. For commercial licensing or evaluation builds, [request Early Access](https://tally.so/r/RWD8G9) or email `datavodb@proton.me`.
 
 ## Documentation
 

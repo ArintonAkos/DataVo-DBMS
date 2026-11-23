@@ -40,3 +40,7 @@ DataVo is a managed C# embedded database engine that runs directly inside your `
 - [Choosing an Interface](/manual/getting-started/choosing-an-interface): Compare `DataVoContext`, Compiled LINQ, ADO.NET, Dapper, and EF Core.
 - [DataVo vs SQLite](/manual/performance/datavo-vs-sqlite): Oracle-verified benchmarks across 28 SQL shapes and filtered vector search.
 - [Status & Roadmap](/manual/getting-started/roadmap): Release candidate scope, durability guarantees, and the v0.5 plan.
+
+## DataVo-Sync (Commercial Add-On)
+
+For teams that need offline-first PostgreSQL or Supabase synchronization or in-process read replicas (with SQL Server support available on request), [DataVo-Sync](/manual/fundamentals/datavo-sync) is available separately. You can [request Early Access](https://tally.so/r/RWD8G9) or email `datavodb@proton.me`.

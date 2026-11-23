@@ -38,7 +38,9 @@ Measured in end-to-end Linux x64 CI benchmarks (20 November 2026, PostgreSQL 17.
 
 ## Licensing & Early Access
 
-For commercial licensing, evaluation builds, or architecture inquiries, reach out to `@ArintonAkos` on GitHub.
+DataVo Sync currently supports PostgreSQL (including Supabase over direct logical replication connections), with SQL Server Change Tracking / CDC support available on request for Early Access partners.
+
+For commercial licensing, evaluation builds, or architecture inquiries, [request Early Access](https://tally.so/r/RWD8G9) or email `datavodb@proton.me`.
 
 ## See Also
 
