@@ -125,11 +125,13 @@ internal partial class Select(SelectStatement ast) : BaseDbAction
     {
         long queryStartTick = DataVo.Core.Compat.MonotonicClock.GetMilliseconds();
         ResetQueryHybridTelemetry();
+        _trace = QueryExecutionTrace.Claim(this);
 
         try
         {
             if (ast.FromTable is null)
             {
+                _trace?.Choose(ExplainOperators.ConstantProjection, fastPath: true, rowsScanned: 0);
                 ProjectConstants();
                 return;
             }
@@ -150,6 +152,10 @@ internal partial class Select(SelectStatement ast) : BaseDbAction
             _activeDatabaseName = database;
 
             LockedReadResources lockedResources = AcquireReadLocks(database);
+            if (_trace is not null)
+            {
+                _trace.EstimatedRows = _model.FromTable?.EstimatedRowCount ?? -1;
+            }
 
             try
             {
@@ -460,12 +466,14 @@ internal partial class Select(SelectStatement ast) : BaseDbAction
         ListedTable? vectorPredicateFastPath = TryEvaluateVectorPredicateUsingVectorIndex();
         if (vectorPredicateFastPath != null)
         {
+            TraceVectorPath("distance-threshold predicate");
             return vectorPredicateFastPath;
         }
 
         ListedTable? nearestNeighborFastPath = TryEvaluateNearestNeighborUsingVectorIndex();
         if (nearestNeighborFastPath != null)
         {
+            TraceVectorPath("ORDER BY distance LIMIT k");
             return nearestNeighborFastPath;
         }
 
@@ -475,6 +483,10 @@ internal partial class Select(SelectStatement ast) : BaseDbAction
 
         PhysicalPlanDecision plan = BuildPhysicalPlan(whereExpression);
         Logger.Info($"Planner: logical={plan.LogicalPlan}, physical={(plan.UseVolcano ? "Volcano" : "Legacy")}, cost={plan.EstimatedCost}, reason={plan.Reason}");
+        _trace?.Choose(
+            ExplainOperators.GeneralDictionaryEvaluator,
+            fastPath: false,
+            $"{plan.LogicalPlan} ({(plan.UseVolcano ? "Volcano" : "Legacy")}): {plan.Reason}");
 
         return plan.LogicalPlan switch
         {
@@ -489,6 +501,32 @@ internal partial class Select(SelectStatement ast) : BaseDbAction
     }
 
     // Planner and fast-path decision logic extracted to Select.Planner.cs and Select.FastPathDecisions.cs partials.
+
+    /// <summary>The EXPLAIN trace this statement records into, or null (every statement but a traced root SELECT).</summary>
+    private QueryExecutionTrace? _trace;
+
+    /// <summary>Statement outcome for <see cref="Explain"/>, which runs a SELECT under a trace.</summary>
+    internal bool Failed => HasErrors;
+
+    /// <summary>The statement's messages (errors included).</summary>
+    internal IReadOnlyList<string> StatementMessages => Messages;
+
+    /// <summary>The rows the statement returned.</summary>
+    internal int ReturnedRowCount => Data.Count;
+
+    /// <summary>Records a vector-index path on the trace, with how the hybrid router sized and routed it.</summary>
+    private void TraceVectorPath(string shape)
+    {
+        if (_trace is null)
+        {
+            return;
+        }
+
+        string routing = _queryHybridRoutingCounters.Count == 0
+            ? string.Empty
+            : "; routing " + string.Join(", ", _queryHybridRoutingCounters.OrderBy(pair => pair.Key, StringComparer.Ordinal).Select(pair => $"{pair.Key}={pair.Value}"));
+        _trace.Choose(ExplainOperators.VectorHnswScan, fastPath: true, $"{shape}; expansion passes {_queryVectorExpansionPasses}{routing}");
+    }
 
     private ListedTable BuildLegacyNoJoinScan()
     {

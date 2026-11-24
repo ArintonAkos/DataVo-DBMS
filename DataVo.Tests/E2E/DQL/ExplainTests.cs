@@ -4,6 +4,12 @@ namespace DataVo.Tests.E2E.DQL;
 
 public abstract class ExplainTestsBase(DataVoConfig config, string testDbName) : SqlExecutionTestsBase(config, testDbName)
 {
+    private static readonly string[] ExplainColumns =
+    [
+        "Plan", "Physical", "EstimatedCost", "Reason", "Operator", "FastPath", "FallbackReason", "DeclinedPaths",
+        "EstimatedRows", "RowsScanned", "RowsReturned", "SegmentsRead", "SegmentsSkipped", "IndexesUsed", "Details",
+    ];
+
     [Fact]
     public void ExplainSelect_ReturnsPlannerDiagnosticsWithoutRows()
     {
@@ -13,7 +19,7 @@ public abstract class ExplainTestsBase(DataVoConfig config, string testDbName) :
         var result = ExecuteAndReturn("EXPLAIN SELECT * FROM Items WHERE Id = 1");
 
         Assert.False(result.IsError, string.Join(Environment.NewLine, result.Messages));
-        Assert.Equal(["Plan", "Physical", "EstimatedCost", "Reason"], result.Fields);
+        Assert.Equal(ExplainColumns, result.Fields);
         var row = Assert.Single(result.Data);
         Assert.True(row.ContainsKey("Plan"));
         Assert.True(row.ContainsKey("Physical"));
@@ -31,7 +37,7 @@ public abstract class ExplainTestsBase(DataVoConfig config, string testDbName) :
         var result = ExecuteAndReturn("EXPLAIN SELECT * FROM Items WHERE Id IN (SELECT Id FROM MissingItems)");
 
         Assert.False(result.IsError, string.Join(Environment.NewLine, result.Messages));
-        Assert.Equal(["Plan", "Physical", "EstimatedCost", "Reason"], result.Fields);
+        Assert.Equal(ExplainColumns, result.Fields);
         var row = Assert.Single(result.Data);
         Assert.True(row.ContainsKey("Plan"));
         Assert.True(row.ContainsKey("Physical"));

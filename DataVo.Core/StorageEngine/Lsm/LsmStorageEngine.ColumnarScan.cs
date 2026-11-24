@@ -312,6 +312,8 @@ public sealed partial class LsmStorageEngine
         ColumnarScanScratch scratch,
         ref int matched)
     {
+        // EXPLAIN counts chunk groups read and skipped; an ordinary scan reads null here once per file.
+        Runtime.Diagnostics.QueryExecutionTrace? trace = Runtime.Diagnostics.QueryExecutionTrace.Current;
         for (int chunk = 0; chunk < segment.ChunkCount; chunk++)
         {
             int rows = segment.Chunk(chunk).Rows;
@@ -324,9 +326,14 @@ public sealed partial class LsmStorageEngine
             else if (!SsTableColumnarZones.CanSkip(segment, chunk, steps))
             {
                 // A chunk whose zone maps rule the condition out is never read: no page fault, no copy.
+                trace?.CountSegment(skipped: false);
                 scratch.Chunk.Load(segment, chunk);
                 var chunks = new SegmentChunks(scratch.Chunk);
                 matched += ColumnarScan.ScanChunk(ref chunks, steps, folds, totals, rows, live, masks);
+            }
+            else
+            {
+                trace?.CountSegment(skipped: true);
             }
 
             if (limit > 0 && matched >= limit)

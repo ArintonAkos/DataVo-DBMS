@@ -110,6 +110,9 @@ internal partial class Select
         public List<Dictionary<string, object?>>? OutputRows { get; init; }
         public long Sequence;
 
+        /// <summary>Rows the scan visited (read from storage), matched or not; reported by EXPLAIN.</summary>
+        public long Visited;
+
         // Aggregates.
         public List<TypedAggregate>? Aggregates { get; init; }
         public int[]? GroupOrdinals { get; init; }
@@ -125,33 +128,30 @@ internal partial class Select
     /// <summary>Returns the matched rows, or null when the query needs the general path.</summary>
     private ListedTable? TryEvaluateTypedSingleTable()
     {
-        if (ast.Ctes.Count > 0
-            || _model.JoinStatement.ContainsJoin()
-            || _model.FromTable is null
-            || _model.FromTable.IsMaterialized
-            || _model.CteTables.ContainsKey(_model.FromTable.TableName)
-            || _model.IsDistinct
-            || _model.Database is null
-            || _model.GetComputedExpressionColumns().Count > 0
-            || _model.GetWindowFunctionColumns().Count > 0)
+        if (_model.JoinStatement.ContainsJoin() || _model.FromTable is null)
         {
-            return null;
+            return null; // a join has its own fast path (TryEvaluateTypedJoin)
+        }
+
+        if (SharedTypedRefusal() is { } refusal)
+        {
+            return DeclineTypedScan(refusal);
         }
 
         string tableName = _model.FromTable.TableName;
-        string databaseName = _model.Database;
+        string databaseName = _model.Database!;
         DataVoEngine engine = DataVoEngine.Current();
         IReadOnlyList<Column> columns = engine.Catalog.GetTableColumns(tableName, databaseName);
         if (columns.Count == 0)
         {
-            return null;
+            return DeclineTypedScan("the table has no catalog columns");
         }
 
         var predicates = new List<TypedPredicate>();
         ExpressionNode? where = _model.WhereStatement.IsEvaluatable() ? _model.WhereStatement.GetExpression() : null;
         if (where is not null && !TryCollectTypedPredicates(where, tableName, columns, predicates))
         {
-            return null;
+            return DeclineTypedScan(_predicateRefusal ?? "WHERE shape is not supported by the typed scan");
         }
 
         // An equality on the primary key or an indexed column reads only the rows the index names. When the
@@ -174,7 +174,7 @@ internal partial class Select
             {
                 if (primaryKeys.Contains(column, StringComparer.OrdinalIgnoreCase))
                 {
-                    return null; // part of a composite key: the general path's key lookup
+                    return DeclineTypedScan($"equality on {column}, one column of a composite primary key"); // the general path's key lookup
                 }
 
                 continue;
@@ -182,7 +182,7 @@ internal partial class Select
 
             if (!SqlIndexLookupKey.TryBuildAuthoritative(_model.FromTable, column, indexName, predicate.Literal, out string key, isBoundValue: predicate.Kind == TypedPredicateKind.ExactText))
             {
-                return null;
+                return DeclineTypedScan($"the key of index {indexName} cannot be built exactly from the literal compared with {column}");
             }
 
             if (indexLookup is null || isKey)
@@ -205,6 +205,7 @@ internal partial class Select
             : (null, null);
         if (lower is { } l && upper is { } u && l >= u)
         {
+            _trace?.Choose(ExplainOperators.PrimaryKeyRangeScan, fastPath: true, "empty clustered key range", rowsScanned: 0);
             return new ListedTable([]); // an empty range: nothing can match
         }
 
@@ -218,7 +219,9 @@ internal partial class Select
                 : BuildRowScan(tableName, columns, predicates, filterMask, clusteredOrdinal, clusteredIsGuid);
         if (state is null)
         {
-            return null;
+            return DeclineTypedScan(_model.GetComputedAggregateColumns().Count == 0
+                ? "GROUP BY without aggregates"
+                : "an aggregate or grouping shape the typed scan cannot fold");
         }
 
         if (_activeSnapshot is not null)
@@ -235,9 +238,10 @@ internal partial class Select
                 rowIds.Sort();
                 if (!engine.StorageContext.VisitVisibleRowsByKey(tableName, databaseName, rowIds, ref state, RowVisitorOf(state)))
                 {
-                    return null;
+                    return DeclineTypedScan("the storage engine cannot read snapshot rows by key");
                 }
 
+                TraceIndexLookup(snapshotLookup.IndexName, rowIds.Count, "inside a transaction snapshot");
                 return state.Aggregates is not null ? FinishAggregates(state) : FinishRows(state);
             }
 
@@ -248,9 +252,10 @@ internal partial class Select
             {
                 if (!engine.StorageContext.VisitVisibleRowsInKeyRange(tableName, databaseName, snapshotRange, ref state, RowVisitorOf(state), state.TypedReadMask))
                 {
-                    return null;
+                    return DeclineTypedScan("the storage engine cannot read a snapshot key range");
                 }
 
+                _trace?.Choose(ExplainOperators.PrimaryKeyRangeScan, fastPath: true, "integer primary key range inside a transaction snapshot", state.Visited);
                 return state.Aggregates is not null ? FinishAggregates(state) : FinishRows(state);
             }
 
@@ -263,6 +268,12 @@ internal partial class Select
             ListedTable? grouped = TryGroupCountsFromIndex(engine, tableName, databaseName, predicates, state, out IndexGroupOutcome outcome);
             if (outcome != IndexGroupOutcome.NotPlanned)
             {
+                if (grouped is null)
+                {
+                    return DeclineTypedScan("the index stopped answering the grouped count part way");
+                }
+
+                _trace?.Choose(ExplainOperators.IndexGroupCount, fastPath: true, "COUNT per group from index key counts", rowsScanned: 0);
                 return grouped; // null when the index stopped answering part way: the general path decides
             }
         }
@@ -277,8 +288,10 @@ internal partial class Select
             LockRowsForRead(databaseName, tableName, rowIds);
             if (!engine.StorageContext.VisitRowsByKey(tableName, databaseName, rowIds, ref state, RowVisitorOf(state)))
             {
-                return null;
+                return DeclineTypedScan("the storage engine cannot read rows by key");
             }
+
+            TraceIndexLookup(lookup.IndexName, rowIds.Count, detail: null);
         }
         else if (keyRangeRows is not null)
         {
@@ -286,16 +299,27 @@ internal partial class Select
             LockRowsForRead(databaseName, tableName, keyRangeRows);
             if (!engine.StorageContext.VisitRowsByKey(tableName, databaseName, keyRangeRows, ref state, RowVisitorOf(state)))
             {
-                return null;
+                return DeclineTypedScan("the storage engine cannot read rows by key");
             }
+
+            _trace?.Choose(ExplainOperators.PrimaryKeyRangeScan, fastPath: true, "integer primary key range from the key lane", keyRangeRows.Count);
         }
         else if (TryAggregateFromColumnarIndex(engine, databaseName, tableName, state))
         {
             // Answered from the table's columnar index; no row was read.
+            _trace?.Choose(ExplainOperators.ColumnarSimdAggregate, fastPath: true, "aggregates folded over the table's columnar index", rowsScanned: 0);
         }
         else if (!engine.StorageContext.ScanTableRows(tableName, databaseName, lower, upper, ref state, RowVisitorOf(state), state.TypedReadMask))
         {
-            return null;
+            return DeclineTypedScan("the storage engine cannot stream typed rows");
+        }
+        else if (lower is not null || upper is not null)
+        {
+            _trace?.Choose(ExplainOperators.PrimaryKeyRangeScan, fastPath: true, "clustered primary key range", state.Visited);
+        }
+        else
+        {
+            _trace?.Choose(ExplainOperators.StreamingTableScan, fastPath: true, ScanDetail(state), state.Visited);
         }
 
         if (indexLookup is null && keyRangeRows is null && lower is null && upper is null)
@@ -307,6 +331,96 @@ internal partial class Select
     }
 
     /// <summary>
+    /// Why neither typed fast path (scan or join) can take this statement whatever its WHERE, or null. Shared by
+    /// both paths so EXPLAIN reports the same reason the dispatcher acted on.
+    /// </summary>
+    private string? SharedTypedRefusal()
+    {
+        if (ast.Ctes.Count > 0)
+        {
+            return "a common table expression (WITH)";
+        }
+
+        if (_model.FromTable is { } from && (from.IsMaterialized || _model.CteTables.ContainsKey(from.TableName)))
+        {
+            return "a derived table or CTE source";
+        }
+
+        if (_model.IsDistinct)
+        {
+            return "SELECT DISTINCT";
+        }
+
+        if (_model.Database is null)
+        {
+            return "no active database";
+        }
+
+        if (_model.GetComputedExpressionColumns().Count > 0)
+        {
+            return "a computed projection";
+        }
+
+        return _model.GetWindowFunctionColumns().Count > 0 ? "a window function" : null;
+    }
+
+    /// <summary>Records why the typed single-table scan declined; returns null so callers fall through.</summary>
+    private ListedTable? DeclineTypedScan(string reason)
+    {
+        _trace?.Decline("TypedScan", reason);
+        return null;
+    }
+
+    /// <summary>Records why a WHERE could not be collected as typed predicates; returns false.</summary>
+    private bool RefusePredicate(string reason)
+    {
+        _predicateRefusal = reason;
+        return false;
+    }
+
+    /// <summary>The first reason <see cref="TryCollectSidePredicates"/> refused the current WHERE.</summary>
+    private string? _predicateRefusal;
+
+    /// <summary>Records an index point lookup (primary key or secondary) on the trace.</summary>
+    private void TraceIndexLookup(string indexName, int rows, string? detail)
+    {
+        if (_trace is null)
+        {
+            return;
+        }
+
+        bool primaryKey = indexName.StartsWith("_PK_", StringComparison.OrdinalIgnoreCase);
+        _trace.Choose(primaryKey ? ExplainOperators.PrimaryKeyPointLookup : ExplainOperators.CompiledIndexLookup, fastPath: true, detail, rows);
+        _trace.UseIndex(indexName);
+    }
+
+    /// <summary>What a typed streaming scan did besides reading rows.</summary>
+    private static string ScanDetail(TypedScanState state) =>
+        state.Aggregates is not null ? "aggregates folded while streaming"
+        : state.Top is not null ? "bounded top-N while streaming"
+        : "rows decoded only in the columns the query reads";
+
+    /// <summary>A short name of an expression node for EXPLAIN, e.g. "function call".</summary>
+    private static string DescribeNode(ExpressionNode node)
+    {
+        string name = node.GetType().Name;
+        name = name.EndsWith("Node", StringComparison.Ordinal) ? name[..^4] : name;
+        name = name.EndsWith("Expression", StringComparison.Ordinal) && name.Length > 10 ? name[..^10] : name;
+        var words = new System.Text.StringBuilder();
+        foreach (char c in name)
+        {
+            if (char.IsUpper(c) && words.Length > 0)
+            {
+                words.Append(' ');
+            }
+
+            words.Append(char.ToLowerInvariant(c));
+        }
+
+        return words.Length == 0 ? "expression" : words.ToString() + " expression";
+    }
+
+    /// <summary>
     /// Answers the typed scan from the transaction's snapshot: committed rows it sees, retained images and its own
     /// writes, each decoded only in the columns the query reads. Null when the snapshot cannot be streamed here.
     /// </summary>
@@ -314,8 +428,10 @@ internal partial class Select
     {
         if (!engine.StorageContext.ScanVisibleRows(tableName, databaseName, lower, upper, ref state, RowVisitorOf(state), state.TypedReadMask))
         {
-            return null;
+            return DeclineTypedScan("the storage engine cannot stream snapshot rows");
         }
+
+        _trace?.Choose(ExplainOperators.MvccSnapshotScan, fastPath: true, "typed scan of the transaction snapshot", state.Visited);
 
         if (lower is null && upper is null)
         {
@@ -375,12 +491,15 @@ internal partial class Select
         if (node is LiteralNode constant && node is not NullLiteralNode)
         {
             // No WHERE is bound as an always-true literal. Anything else constant takes the general path.
-            return constant.Value is true || (constant.Value is string text && text == SqlLiterals.TrueExpression);
+            bool alwaysTrue = constant.Value is true || (constant.Value is string text && text == SqlLiterals.TrueExpression);
+            return alwaysTrue || RefusePredicate("a constant WHERE condition");
         }
 
         if (node is not BinaryExpressionNode binary)
         {
-            return false;
+            return RefusePredicate(ContainsSubqueryExpression(node)
+                ? "a subquery in WHERE"
+                : $"a {DescribeNode(node)} in WHERE");
         }
 
         if (binary.Operator == Operators.AND)
@@ -396,13 +515,16 @@ internal partial class Select
 
         if (binary.Operator == Operators.LIKE || binary.Operator == Operators.NOT_LIKE)
         {
-            return TryCollectLike(binary, resolve, columnsBySide, predicatesBySide);
+            return TryCollectLike(binary, resolve, columnsBySide, predicatesBySide)
+                || RefusePredicate("LIKE whose pattern is not a literal");
         }
 
         BinaryExpressionNode comparison = ExpressionNodeNormalizer.NormalizeComparisonNode(binary);
         if (resolve(comparison.Left) is not { } target || comparison.Right is not LiteralNode literal)
         {
-            return false;
+            return RefusePredicate(ContainsSubqueryExpression(binary)
+                ? "a subquery in WHERE"
+                : $"a comparison that is not column-versus-literal ({binary.Operator})");
         }
 
         IReadOnlyList<Column> columns = columnsBySide[target.Side];
@@ -410,7 +532,7 @@ internal partial class Select
         int ordinal = OrdinalOf(columns, target.Column);
         if (ordinal < 0)
         {
-            return false;
+            return RefusePredicate($"an unknown column {target.Column}");
         }
 
         string op = comparison.Operator;
@@ -423,12 +545,12 @@ internal partial class Select
         if (op != Operators.EQUALS && op != Operators.NOT_EQUALS && op != Operators.LESS_THAN && op != Operators.LESS_THAN_OR_EQUAL_TO
             && op != Operators.GREATER_THAN && op != Operators.GREATER_THAN_OR_EQUAL_TO)
         {
-            return false;
+            return RefusePredicate($"the operator {op}");
         }
 
         if (literal is NullLiteralNode || literal.Value is null)
         {
-            return false;
+            return RefusePredicate("a comparison with a NULL literal");
         }
 
         if (columns[ordinal].Type.Equals("BIGINT", StringComparison.OrdinalIgnoreCase) && literal.Value is int or long)
@@ -505,7 +627,7 @@ internal partial class Select
 
                 if (branchSide >= 0)
                 {
-                    return false; // one branch reads two tables
+                    return RefusePredicate("OR across joined tables"); // one branch reads two tables
                 }
 
                 branchSide = s;
@@ -514,7 +636,7 @@ internal partial class Select
             // A constant branch, or branches over different tables, take the general path.
             if (branchSide < 0 || (side >= 0 && side != branchSide))
             {
-                return false;
+                return RefusePredicate(branchSide < 0 ? "a constant OR branch" : "OR across joined tables");
             }
 
             side = branchSide;
@@ -938,6 +1060,7 @@ internal partial class Select
     [System.Runtime.CompilerServices.MethodImpl(DataVo.Core.Compat.MethodImplCompat.AggressiveOptimization)]
     private static bool VisitTypedRow(ref TypedScanState state, RowKey rowId, ReadOnlySpan<byte> rowBytes, ReadOnlySpan<CellValue> typedCells)
     {
+        state.Visited++;
         CellValue[] cells = state.Cells;
         if (state.RawText is { } rawText && typedCells.IsEmpty)
         {
@@ -997,6 +1120,8 @@ internal partial class Select
         {
             return VisitTypedRow(ref state, rowId, rowBytes, typedCells);
         }
+
+        state.Visited++;
 
         if (state.RawText is { } rawText)
         {

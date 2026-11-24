@@ -6,6 +6,7 @@ using DataVo.Core.Parser.AST;
 using DataVo.Core.Parser.Types;
 using DataVo.Core.Parser.Utils;
 using DataVo.Core.Runtime;
+using DataVo.Core.Runtime.Diagnostics;
 using DataVo.Core.Runtime.Reactive;
 using DataVo.Core.StorageEngine;
 using DataVo.Core.StorageEngine.Serialization;
@@ -136,18 +137,24 @@ internal partial class Select
     /// <summary>Returns the joined rows (aggregated, the top rows, or every row up to a LIMIT), or null when the query needs the general path.</summary>
     private ListedTable? TryEvaluateTypedJoin()
     {
-        if (_activeSnapshot is not null
-            || ast.Ctes.Count > 0
-            || !_model.JoinStatement.ContainsJoin()
-            || _model.JoinStatement.Model.JoinConditions.Count == 0
-            || _model.IsDistinct
-            || _model.Database is null
-            || _model.TableService is null
-            || _model.FromTable is null
-            || _model.GetComputedExpressionColumns().Count > 0
-            || _model.GetWindowFunctionColumns().Count > 0)
+        if (!_model.JoinStatement.ContainsJoin() || _model.FromTable is null)
         {
             return null;
+        }
+
+        if (_activeSnapshot is not null)
+        {
+            return DeclineTypedJoin("Explicit transaction MVCC scan");
+        }
+
+        if (SharedTypedRefusal() is { } refusal)
+        {
+            return DeclineTypedJoin(refusal);
+        }
+
+        if (_model.JoinStatement.Model.JoinConditions.Count == 0 || _model.TableService is null)
+        {
+            return DeclineTypedJoin("a join without equality conditions");
         }
 
         bool aggregated = _model.AggregateStatement.Model.Functions.Count > 0;
@@ -156,17 +163,23 @@ internal partial class Select
                 || _model.GetHavingExpression() is not null
                 || (_model.LimitTake.HasValue && _model.RowsNeededForLimit <= 0)))
         {
-            return null;
+            return DeclineTypedJoin(_model.LimitTake.HasValue && _model.RowsNeededForLimit <= 0
+                ? "LIMIT 0"
+                : "GROUP BY or HAVING without aggregates");
         }
 
         // Rows without a bounded top-N are returned in the order they are joined, streaming the FROM table.
         bool topRows = !aggregated && _model.GetOrderByExpression() is { Columns.Count: > 0 } && _model.LimitTake.HasValue;
         bool unordered = !aggregated && !topRows;
         DataVoEngine engine = DataVoEngine.Current();
-        if (!TryBuildJoinSides(engine, out JoinSide[] sides, out int fromIndex)
-            || !TryPlanJoinSteps(engine, sides, fromIndex, streamFrom: unordered, out int probeIndex, out JoinStep[] steps))
+        if (!TryBuildJoinSides(engine, out JoinSide[] sides, out int fromIndex))
         {
-            return null;
+            return DeclineTypedJoin("the join is not an INNER/LEFT equality of integer columns of distinct stored tables");
+        }
+
+        if (!TryPlanJoinSteps(engine, sides, fromIndex, streamFrom: unordered, out int probeIndex, out JoinStep[] steps))
+        {
+            return DeclineTypedJoin("the join conditions do not connect the tables as a tree");
         }
 
         ExpressionNode? where = _model.WhereStatement.IsEvaluatable() ? _model.WhereStatement.GetExpression() : null;
@@ -176,7 +189,7 @@ internal partial class Select
                 [.. sides.Select(side => side.Columns)],
                 [.. sides.Select(side => side.Predicates)]))
         {
-            return null;
+            return DeclineTypedJoin(_predicateRefusal ?? "WHERE shape is not supported by the typed join");
         }
 
         JoinSide probe = sides[probeIndex];
@@ -196,7 +209,7 @@ internal partial class Select
         {
             if (!TryResolveJoinAggregates(sides, out groupColumns, out aggregates))
             {
-                return null;
+                return DeclineTypedJoin("an aggregate or grouping shape the typed join cannot fold");
             }
 
             foreach ((int side, int ordinal) in groupColumns.Concat(aggregates.Where(a => a.Side >= 0).Select(a => (a.Side, a.Ordinal))))
@@ -211,7 +224,7 @@ internal partial class Select
         {
             if (!TryResolveJoinOrderKeys(sides, out orderKeys, out ascending))
             {
-                return null;
+                return DeclineTypedJoin("an ORDER BY key that is not a joined column");
             }
 
             foreach ((int side, int ordinal) in orderKeys.Where(key => key.Side == probeIndex))
@@ -228,7 +241,7 @@ internal partial class Select
         string databaseName = _model.Database;
         if (!TryBuildJoinTables(engine, sides, steps, databaseName))
         {
-            return null;
+            return DeclineTypedJoin("a build side could not be hashed");
         }
 
         var state = new JoinRunState
@@ -246,22 +259,42 @@ internal partial class Select
         };
         state.Current[probeIndex] = new CellValue[probe.Columns.Count];
         bool streamed;
+        string probeMode;
+        long probeRows;
         if (TryIndexDrivenProbeRows(engine, sides, steps, probeIndex, databaseName) is { } indexedRows)
         {
+            probeRows = indexedRows.Count;
             streamed = engine.StorageContext.VisitRowsByKey(probe.Detail.TableName, databaseName, indexedRows, ref state, VisitJoinProbeRow);
             ReleaseRowKeyList(indexedRows);
+            probeMode = "index-driven probe";
         }
         else
         {
+            probeRows = -1;
             streamed = engine.StorageContext.ScanTableRows(probe.Detail.TableName, databaseName, null, null, ref state, VisitJoinProbeRow);
+            probeMode = "streaming probe scan";
         }
 
         if (!streamed)
         {
-            return null;
+            return DeclineTypedJoin("the storage engine cannot stream the probe table");
         }
 
+        _trace?.Choose(
+            ExplainOperators.IntegerHashJoin,
+            fastPath: true,
+            $"probe {probe.Detail.TableName} ({probeMode}), {steps.Length} hash build step(s): "
+                + string.Join(", ", steps.Select(step => $"{(step.Outer ? "LEFT" : "INNER")} {sides[step.Side].Detail.TableName}")),
+            probeRows);
+
         return aggregated ? FinishJoinAggregates(state) : FinishJoinTop(state);
+    }
+
+    /// <summary>Records why the typed join declined; returns null so callers fall through.</summary>
+    private ListedTable? DeclineTypedJoin(string reason)
+    {
+        _trace?.Decline("TypedJoin", reason);
+        return null;
     }
 
     /// <summary>
