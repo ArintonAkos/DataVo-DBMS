@@ -56,5 +56,29 @@ What is left is not garbage per row:
   must be able to re-join every one of that player's events. Its steady-state cost per re-applied row went
   from about 3.2 KB to 256 B in the unit benchmark.
 
-Writes run at about 25,000 to 35,000 events per second (two statements per event). The views add no write-side
-cost, because change capture only appends deltas and the work happens at dispatch.
+## Write throughput
+
+Each event is two prepared statements inside the tick's transaction: an `INSERT` into `events` and
+`UPDATE standings SET Score = Score + @points WHERE PlayerId = @player`. The views add no write-side cost,
+because change capture only appends deltas and the work happens at dispatch.
+
+The `UPDATE` used to take the general statement path on every execution. It re-bound the WHERE clause and
+re-read the table's key and foreign-key metadata. It copied the row into a dictionary and evaluated
+`Score + @points` through the generic expression evaluator. That cost about 11 µs and 12 KB per statement.
+A prepared single-row primary-key update with simple assignments (`col = col + @p`, `col = col - @p`,
+`col = @p`) now has its own in-transaction fast path. It compiles that work once per schema, then per execution
+does an MVCC-aware primary-key lookup and the arithmetic. It buffers the new values into the transaction, in
+place when the row is already buffered. COMMIT still applies them through the normal pipeline (conflict checks,
+WAL, LSM batch, indexes, change capture), so durability and reactive behavior are unchanged. The statement now
+costs about 3 µs and 2.6 KB.
+
+Events per second over 200 ticks × 1,000 events, three alternating runs each:
+
+| Mode | Before | After |
+| --- | --- | --- |
+| InMemory, one transaction per tick | ~33,400 | **~44,400** (+33%) |
+| LSM, one transaction per tick | ~33,700 | **~46,600** (+38%) |
+| InMemory, `--autocommit` (60 ticks) | ~25,600 | ~26,900 (+5%) |
+
+The fast path applies inside explicit transactions. Auto-commit statements gain only from the shared MVCC and
+catalog fixes. The remaining write cost is now mostly the `INSERT` and the commit of the inserted rows.
