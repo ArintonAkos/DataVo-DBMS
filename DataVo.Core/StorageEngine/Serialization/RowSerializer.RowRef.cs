@@ -151,8 +151,10 @@ public static partial class RowSerializer
                 value[0] = cell.AsBoolean() ? (byte)1 : (byte)0;
                 return 1 + sizeof(bool);
             case StorageColumnType.Date:
+                BinaryPrimitives.WriteInt64LittleEndian(value, DateOf(cell).ToDateTime().ToBinary());
+                return 1 + sizeof(long);
             case StorageColumnType.DateTime:
-                BinaryPrimitives.WriteInt64LittleEndian(value, cell.AsDate().ToDateTime().ToBinary());
+                BinaryPrimitives.WriteInt64LittleEndian(value, UtcTicksOf(cell));
                 return 1 + sizeof(long);
             case StorageColumnType.Guid:
                 if (!cell.AsGuid().TryWriteBytes(value))
@@ -208,6 +210,7 @@ public static partial class RowSerializer
         CellType.Boolean => cell.AsBoolean() ? "True" : "False",
         CellType.Guid => cell.AsGuid().ToString(),
         CellType.Date => cell.AsDate().ToString(),
+        CellType.DateTime => DataVoDateTime.Format(cell.AsUtcTicks()),
         _ => throw new InvalidDataException($"A {cell.Type} cell cannot be stored in a text column."),
     };
 

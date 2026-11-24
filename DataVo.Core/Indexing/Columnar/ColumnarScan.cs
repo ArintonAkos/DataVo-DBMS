@@ -78,7 +78,7 @@ internal static class ColumnarScan
             {
                 bool fits = (index.KindOf(slot), step.ValueKind) switch
                 {
-                    (StorageKind.Int, 'i') or (StorageKind.BigInt, 'l') or (StorageKind.Float, 'f') or (StorageKind.Double, 'd') => true,
+                    (StorageKind.Int, 'i') or (StorageKind.BigInt, 'l') or (StorageKind.DateTime, 'l') or (StorageKind.Float, 'f') or (StorageKind.Double, 'd') => true,
                     (StorageKind.Bit, 'b') => step.Test is ColumnarTest.Equal or ColumnarTest.NotEqual,
                     _ => false,
                 };

@@ -398,6 +398,37 @@ public class DataVoQueryGeneratorTests
         Assert.Contains("reader.GetDateOnlyOrNull(\"OptionalModernDay\")", generated);
     }
 
+    [Fact]
+    public void Generator_DateTimeParams_EmitDateTimeAndOffsetGetters()
+    {
+        string source = """
+            using System;
+            using System.Collections.Generic;
+            using DataVo.Core;
+            using DataVo.Core.CompiledQueries;
+
+            public sealed record Moments(
+                DateTime At,
+                DateTime? Closed,
+                DateTimeOffset Logged,
+                DateTimeOffset? Acknowledged);
+
+            public static partial class MomentQueries
+            {
+                [DataVoQuery("SELECT At, Closed, Logged, Acknowledged FROM Events WHERE At = @after")]
+                public static partial IReadOnlyList<Moments> Get(DataVoContext db, DateTime after);
+            }
+            """;
+
+        GeneratorDriverRunResult result = RunGenerator(source);
+        string generated = Assert.Single(result.Results.Single().GeneratedSources).SourceText.ToString();
+
+        Assert.Contains("reader.GetDateTime(\"At\")", generated);
+        Assert.Contains("reader.GetDateTimeOrNull(\"Closed\")", generated);
+        Assert.Contains("reader.GetDateTimeOffset(\"Logged\")", generated);
+        Assert.Contains("reader.GetDateTimeOffsetOrNull(\"Acknowledged\")", generated);
+    }
+
     private static GeneratorDriverRunResult RunGenerator(string source, string? manifest = null, bool markAsManifest = true)
     {
         CSharpCompilation compilation = CSharpCompilation.Create(

@@ -618,6 +618,7 @@ internal sealed class RowRefPage
             StorageKind.Bit => CellType.Boolean,
             StorageKind.Guid => CellType.Guid,
             StorageKind.Date => CellType.Date,
+            StorageKind.DateTime => CellType.DateTime,
             StorageKind.String => CellType.String,
             _ => null,
         };

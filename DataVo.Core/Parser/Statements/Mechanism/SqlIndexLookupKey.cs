@@ -80,6 +80,19 @@ internal static class SqlIndexLookupKey
             return TryBuildGuidKey(literal, out key);
         }
 
+        if (DataVoDateTime.IsDateTimeType(column.Type))
+        {
+            // Stored keys are the canonical UTC text of the instant (IndexKeyEncoder), so any spelling of the same
+            // instant finds them.
+            if (DataVoDateTime.TryConvert(literal, out long ticks))
+            {
+                key = DataVoDateTime.Format(ticks);
+                return true;
+            }
+
+            return false;
+        }
+
         // DATE, BIT and VECTOR keep the scan fallback.
         return false;
     }

@@ -90,11 +90,13 @@ internal struct RowAggregate
         (StorageKind.Float, 'f', RowFold.Min) => RowFoldKind.MinFloat,
         (StorageKind.Double, 'd', RowFold.Min) => RowFoldKind.MinDouble,
         (StorageKind.Date, 't', RowFold.Min) => RowFoldKind.MinDate,
+        (StorageKind.DateTime, 'l', RowFold.Min) => RowFoldKind.MinInt64,
         (StorageKind.Int, 'i', RowFold.Max) => RowFoldKind.MaxInt32,
         (StorageKind.BigInt, 'l', RowFold.Max) => RowFoldKind.MaxInt64,
         (StorageKind.Float, 'f', RowFold.Max) => RowFoldKind.MaxFloat,
         (StorageKind.Double, 'd', RowFold.Max) => RowFoldKind.MaxDouble,
         (StorageKind.Date, 't', RowFold.Max) => RowFoldKind.MaxDate,
+        (StorageKind.DateTime, 'l', RowFold.Max) => RowFoldKind.MaxInt64,
         _ => RowFoldKind.None,
     };
 

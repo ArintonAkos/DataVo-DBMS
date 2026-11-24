@@ -209,6 +209,7 @@ public static class IndexKeyEncoder
         CellType.Boolean => cell.AsBoolean().ToString(),
         CellType.String => NormalizeStringCell(cell.AsString()),
         CellType.Date => cell.AsDate().ToString(),
+        CellType.DateTime => DataVoDateTime.Format(cell.AsUtcTicks()),
         CellType.Vector => SerializeVector(cell.AsVectorReadOnlySpan()),
         CellType.Guid => cell.AsGuid().ToString("D"),
         _ => string.Empty
@@ -273,6 +274,17 @@ public static class IndexKeyEncoder
         if (value is Guid guid)
         {
             return guid.ToString("D");
+        }
+
+        // A DATETIME keys on its canonical UTC text (fixed width, so key order is time order), as NormalizeCell does.
+        if (value is DateTime dateTime)
+        {
+            return DataVoDateTime.Format(dateTime);
+        }
+
+        if (value is DateTimeOffset offset)
+        {
+            return DataVoDateTime.Format(offset.UtcTicks);
         }
 
         // Numbers are formatted exactly like the typed path (NormalizeCell), culture-invariantly. Going

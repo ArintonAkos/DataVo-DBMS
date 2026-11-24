@@ -217,6 +217,33 @@ public readonly ref struct RowRef
     public DataVoDate? ReadNullableDate(int ordinal, string name) =>
         _values[ordinal].IsNull ? null : ReadDate(ordinal, name);
 
+    /// <summary>Reads a required <c>DATETIME</c> cell at <paramref name="ordinal"/> as a UTC <see cref="DateTime"/>. Used by generated code.</summary>
+    [EditorBrowsable(EditorBrowsableState.Never)]
+    public DateTime ReadDateTime(int ordinal, string name)
+    {
+        CellValue cell = _values[ordinal];
+        return cell.Type switch
+        {
+            CellType.DateTime => cell.AsDateTime(),
+            CellType.Null => throw DataVoGeneratedTableSupport.NullColumn(name),
+            _ => DataVoGeneratedTableSupport.ReadDateTime(cell.ToObject(), name),
+        };
+    }
+
+    /// <summary>Reads a nullable <c>DATETIME</c> cell at <paramref name="ordinal"/>. Used by generated code.</summary>
+    [EditorBrowsable(EditorBrowsableState.Never)]
+    public DateTime? ReadNullableDateTime(int ordinal, string name) =>
+        _values[ordinal].IsNull ? null : ReadDateTime(ordinal, name);
+
+    /// <summary>Reads a required <c>DATETIME</c> cell at <paramref name="ordinal"/> as a <see cref="DateTimeOffset"/> (offset zero). Used by generated code.</summary>
+    [EditorBrowsable(EditorBrowsableState.Never)]
+    public DateTimeOffset ReadDateTimeOffset(int ordinal, string name) => new(ReadDateTime(ordinal, name));
+
+    /// <summary>Reads a nullable <c>DATETIME</c> cell at <paramref name="ordinal"/> as a <see cref="DateTimeOffset"/>. Used by generated code.</summary>
+    [EditorBrowsable(EditorBrowsableState.Never)]
+    public DateTimeOffset? ReadNullableDateTimeOffset(int ordinal, string name) =>
+        _values[ordinal].IsNull ? null : ReadDateTimeOffset(ordinal, name);
+
     /// <summary>Reads a required <c>VECTOR(3)</c> cell at <paramref name="ordinal"/> as a <see cref="Vector3"/> without cloning. Used by generated code.</summary>
     [EditorBrowsable(EditorBrowsableState.Never)]
     public Vector3 ReadVector3(int ordinal, string name)

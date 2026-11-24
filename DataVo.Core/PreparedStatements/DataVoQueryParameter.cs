@@ -42,6 +42,12 @@ public enum DataVoQueryParameterKind : byte
     /// Represents an arbitrary boxed CLR object parameter value.
     /// </summary>
     Object = 6,
+
+    /// <summary>
+    /// Represents an unboxed <see cref="System.DateTime"/> (or a <see cref="DateTimeOffset"/> as its UTC instant).
+    /// A DATETIME column stores its UTC instant; a DATE column its date as given.
+    /// </summary>
+    DateTime = 7,
 }
 
 /// <summary>
@@ -170,6 +176,32 @@ public readonly struct DataVoQueryParameter
     }
 
     /// <summary>
+    /// Initializes a new parameter bound to a point in time. A DATETIME column stores its UTC instant (a local time is
+    /// converted, an unspecified one is taken as UTC); a DATE column stores its date as given.
+    /// </summary>
+    /// <param name="name">The parameter name.</param>
+    /// <param name="value">The date and time.</param>
+    public DataVoQueryParameter(string name, DateTime value)
+    {
+        Name = name;
+        Kind = DataVoQueryParameterKind.DateTime;
+        _bits = value.ToBinary();
+        _guid = default;
+        _object = null;
+    }
+
+    /// <summary>Initializes a new parameter bound to the instant of <paramref name="value"/>.</summary>
+    /// <param name="name">The parameter name.</param>
+    /// <param name="value">The date, time and offset.</param>
+    public DataVoQueryParameter(string name, DateTimeOffset value)
+        : this(name, DataVoDateTime.FromUtcTicks(value.UtcTicks))
+    {
+    }
+
+    /// <summary>The value of a <see cref="DataVoQueryParameterKind.DateTime"/> parameter.</summary>
+    public DateTime AsDateTime() => DateTime.FromBinary(_bits);
+
+    /// <summary>
     /// Initializes a new parameter bound to a string value (or <c>null</c>).
     /// </summary>
     /// <param name="name">The parameter name.</param>
@@ -256,7 +288,8 @@ public readonly struct DataVoQueryParameter
 #if NET6_0_OR_GREATER
             DateOnly dateOnly => new DataVoQueryParameter(name, dateOnly.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)),
 #endif
-            DateTime dateTime => new DataVoQueryParameter(name, dateTime.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)),
+            DateTime dateTime => new DataVoQueryParameter(name, dateTime),
+            DateTimeOffset offset => new DataVoQueryParameter(name, offset),
             _ => new DataVoQueryParameter(name, DataVoQueryParameterKind.Object, 0, default, value),
         };
     }
@@ -314,6 +347,7 @@ public readonly struct DataVoQueryParameter
             DataVoQueryParameterKind.Guid => _guid.ToString(),
             DataVoQueryParameterKind.String => _object,
             DataVoQueryParameterKind.Object => _object?.ToString(),
+            DataVoQueryParameterKind.DateTime => DateTime.FromBinary(_bits),
             _ => null,
         };
     }

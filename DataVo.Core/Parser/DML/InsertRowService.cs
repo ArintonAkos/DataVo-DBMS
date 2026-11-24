@@ -1393,6 +1393,17 @@ internal sealed partial class InsertRowService(
             return DataVoDate.FromDateTime(dateTime).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
         }
 
+        // A point in time, for a DATETIME column or any other: the canonical UTC text, which parses back exactly.
+        if (rawValue is DateTime instant)
+        {
+            return DataVoDateTime.Format(instant);
+        }
+
+        if (rawValue is DateTimeOffset offset)
+        {
+            return DataVoDateTime.Format(offset.UtcTicks);
+        }
+
         if (rawValue is IFormattable formattable)
         {
             return formattable.ToString(null, CultureInfo.InvariantCulture);
@@ -1416,6 +1427,7 @@ internal sealed partial class InsertRowService(
             "DOUBLE" => parsedValue is double,
             "BIT" => parsedValue is bool,
             "DATE" => parsedValue is DataVoDate,
+            "DATETIME" => parsedValue is DateTime,
             "GUID" => parsedValue is Guid,
             "VECTOR" => parsedValue is float[] vector && (column.Length <= 0 || vector.Length == column.Length),
             _ => true

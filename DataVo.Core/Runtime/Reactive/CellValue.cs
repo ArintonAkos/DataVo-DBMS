@@ -26,6 +26,8 @@ public enum CellType : byte
     Vector = 8,
     /// <summary>A 128-bit <see cref="Guid"/>.</summary>
     Guid = 9,
+    /// <summary>A point in time (the SQL DATETIME / TIMESTAMP type), stored inline as UTC ticks.</summary>
+    DateTime = 10,
 }
 
 /// <summary>
@@ -125,6 +127,8 @@ public readonly partial struct CellValue
         DataVoDate d => From(d),
         Guid g => From(g),
         float[] v => From(v),
+        DateTime t => From(t),
+        DateTimeOffset o => From(o),
         _ when DateObjectAdapter.TryConvert(value, out DataVoDate d) => From(d),
         _ => throw new NotSupportedException($"Unsupported cell value type '{value.GetType()}'."),
     };
@@ -238,6 +242,7 @@ public readonly partial struct CellValue
         CellType.Date => AsDate(),
         CellType.Vector => ((float[])_reference!).Clone(),
         CellType.Guid => AsGuid(),
+        CellType.DateTime => AsDateTime(),
         _ => null,
     };
 

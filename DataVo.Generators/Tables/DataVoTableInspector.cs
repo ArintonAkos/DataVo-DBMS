@@ -259,6 +259,9 @@ internal static class DataVoTableInspector
                 "System.Guid" => new ColumnType("GUID", prefix + "Guid", string.Empty, true, false),
                 "DataVo.Core.DataVoDate" => new ColumnType("DATE", prefix + "Date", string.Empty, true, true),
                 "System.DateOnly" => new ColumnType("DATE", prefix + "Date", nullable ? "?.ToDateOnly()" : ".ToDateOnly()", true, true),
+                // A point in time: stored as UTC ticks, read back as a UTC DateTime (or an offset-zero DateTimeOffset).
+                "System.DateTime" => new ColumnType("DATETIME", prefix + "DateTime", string.Empty, true, true),
+                "System.DateTimeOffset" => new ColumnType("DATETIME", prefix + "DateTimeOffset", string.Empty, true, true),
                 "System.Numerics.Vector3" => new ColumnType("VECTOR(3)", prefix + "Vector3", string.Empty, true, false, IsVector3: true),
                 _ => null,
             },

@@ -198,6 +198,23 @@ public static class DataVoGeneratedTableSupport
     /// <summary>Reads a nullable DATE column.</summary>
     public static DataVoDate? ReadNullableDate(object? value, string column) => value is null ? null : ReadDate(value, column);
 
+    /// <summary>Reads a required DATETIME column as a UTC <see cref="DateTime"/>.</summary>
+    public static DateTime ReadDateTime(object? value, string column) => value switch
+    {
+        null => throw NullColumn(column),
+        _ when DataVoDateTime.TryConvert(value, out long ticks) => DataVoDateTime.FromUtcTicks(ticks),
+        _ => throw new InvalidOperationException($"Column {column} does not hold a point in time."),
+    };
+
+    /// <summary>Reads a nullable DATETIME column.</summary>
+    public static DateTime? ReadNullableDateTime(object? value, string column) => value is null ? null : ReadDateTime(value, column);
+
+    /// <summary>Reads a required DATETIME column as a <see cref="DateTimeOffset"/> (offset zero).</summary>
+    public static DateTimeOffset ReadDateTimeOffset(object? value, string column) => new(ReadDateTime(value, column));
+
+    /// <summary>Reads a nullable DATETIME column as a <see cref="DateTimeOffset"/>.</summary>
+    public static DateTimeOffset? ReadNullableDateTimeOffset(object? value, string column) => value is null ? null : ReadDateTimeOffset(value, column);
+
     private static void VerifyColumns(DataVoContext context, string tableName, string databaseName, (string Name, string SqlType)[] columns)
     {
         IReadOnlyList<Column> actual = context.Engine.Catalog.GetTableColumns(tableName, databaseName);

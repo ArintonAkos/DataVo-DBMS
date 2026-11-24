@@ -14,13 +14,14 @@ namespace DataVo.Core.Indexing.Columnar;
 internal static class ColumnarCells
 {
     /// <summary>The bytes one value of a type takes in a run; a BIT takes one bit and has no width.</summary>
-    public static int WidthOf(StorageKind kind) => kind is StorageKind.BigInt or StorageKind.Double ? sizeof(long) : sizeof(int);
+    public static int WidthOf(StorageKind kind) => kind is StorageKind.BigInt or StorageKind.Double or StorageKind.DateTime ? sizeof(long) : sizeof(int);
 
     /// <summary>Reads the cell whose value starts at <paramref name="offset"/> of a stored row.</summary>
     public static long ReadBits(StorageKind kind, ReadOnlySpan<byte> stored, int offset) => kind switch
     {
         StorageKind.Int => RowBytes.Int32(stored, offset),
         StorageKind.BigInt => RowBytes.Int64(stored, offset),
+        StorageKind.DateTime => RowBytes.Int64(stored, offset), // UTC ticks
         StorageKind.Double => BitConverter.DoubleToInt64Bits(RowBytes.Double(stored, offset)),
         StorageKind.Float => BitConverter.SingleToInt32Bits(RowBytes.Single(stored, offset)),
         StorageKind.Date => RowBytes.DayNumber(stored, offset),

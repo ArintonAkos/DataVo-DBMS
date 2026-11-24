@@ -216,6 +216,8 @@ internal static class DataVoLinqAnalyzer
             ("DOUBLE", SpecialType.System_Double, _) => ('d', "totals.Real"),
             ("DATE", _, "DataVo.Core.DataVoDate") => ('t', "global::DataVo.Core.DataVoDate.FromDayNumber((int)totals.Whole)"),
             ("DATE", _, "System.DateOnly") => ('t', "global::System.DateOnly.FromDayNumber((int)totals.Whole)"),
+            ("DATETIME", _, "System.DateTime") => ('l', "new global::System.DateTime(totals.Whole, global::System.DateTimeKind.Utc)"),
+            ("DATETIME", _, "System.DateTimeOffset") => ('l', "new global::System.DateTimeOffset(totals.Whole, global::System.TimeSpan.Zero)"),
             _ => null,
         };
         if (shape is null || LocationOf(semantics, invocation, cancellation) is not { } location)

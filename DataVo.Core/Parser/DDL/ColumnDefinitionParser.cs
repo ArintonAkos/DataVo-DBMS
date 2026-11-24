@@ -23,6 +23,7 @@ internal static class ColumnDefinitionParser
             "DOUBLE" => DataTypes.Double,
             "BIT" or "BOOL" or "BOOLEAN" => DataTypes.Bit,
             "DATE" => DataTypes.Date,
+            "DATETIME" or "DATETIME2" or "TIMESTAMP" or "TIMESTAMPTZ" => DataTypes.DateTime,
             "GUID" or "UUID" or "UNIQUEIDENTIFIER" => DataTypes.Guid,
             "VARCHAR" or "NVARCHAR" or "CHAR" or "NCHAR" or "TEXT" or "STRING" => DataTypes.Varchar,
             "VECTOR" => DataTypes.Vector,
@@ -36,11 +37,11 @@ internal static class ColumnDefinitionParser
         {
             "LONG" => " Use BIGINT for a 64-bit integer.",
             "DECIMAL" or "NUMERIC" or "MONEY" => " Use DOUBLE for an approximate number, or VARCHAR to keep the exact digits.",
-            "DATETIME" or "TIMESTAMP" or "TIME" => " DATE keeps only the date; store a point in time in a BIGINT.",
+            "TIME" => " Use DATETIME (or TIMESTAMP) for a point in time, or DATE for a calendar date.",
             _ => string.Empty,
         };
 
-        return $"Column type '{name}' is not supported.{advice} Supported types: INT, BIGINT, FLOAT, DOUBLE, BIT, DATE, GUID, VARCHAR, VECTOR.";
+        return $"Column type '{name}' is not supported.{advice} Supported types: INT, BIGINT, FLOAT, DOUBLE, BIT, DATE, DATETIME, GUID, VARCHAR, VECTOR.";
     }
 
     public static int ParseLength(string typeStr)

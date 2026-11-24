@@ -53,6 +53,30 @@ public readonly ref partial struct CompiledRowReader
     /// <summary>Reads a <see cref="bool"/> column by ordinal; throws if the cell is not Boolean or is NULL.</summary>
     public bool GetBoolean(int ordinal) => _view[ordinal].AsBoolean();
 
+    /// <summary>Reads a DATETIME column as a UTC <see cref="DateTime"/>; throws if the cell is not DateTime or is NULL.</summary>
+    public DateTime GetDateTime(string column) => _view[column].AsDateTime();
+
+    /// <summary>Reads a DATETIME column by ordinal as a UTC <see cref="DateTime"/>.</summary>
+    public DateTime GetDateTime(int ordinal) => _view[ordinal].AsDateTime();
+
+    /// <summary>Reads a DATETIME column as a <see cref="DateTimeOffset"/> (offset zero).</summary>
+    public DateTimeOffset GetDateTimeOffset(string column) => _view[column].AsDateTimeOffset();
+
+    /// <summary>Reads a DATETIME column by ordinal as a <see cref="DateTimeOffset"/> (offset zero).</summary>
+    public DateTimeOffset GetDateTimeOffset(int ordinal) => _view[ordinal].AsDateTimeOffset();
+
+    /// <summary>Reads a nullable DATETIME column; SQL NULL returns <c>null</c>.</summary>
+    public DateTime? GetDateTimeOrNull(string column) { CellValue c = _view[column]; return c.IsNull ? null : c.AsDateTime(); }
+
+    /// <summary>Reads a nullable DATETIME column by ordinal; SQL NULL returns <c>null</c>.</summary>
+    public DateTime? GetDateTimeOrNull(int ordinal) { CellValue c = _view[ordinal]; return c.IsNull ? null : c.AsDateTime(); }
+
+    /// <summary>Reads a nullable DATETIME column as a <see cref="DateTimeOffset"/>; SQL NULL returns <c>null</c>.</summary>
+    public DateTimeOffset? GetDateTimeOffsetOrNull(string column) { CellValue c = _view[column]; return c.IsNull ? null : c.AsDateTimeOffset(); }
+
+    /// <summary>Reads a nullable DATETIME column by ordinal as a <see cref="DateTimeOffset"/>; SQL NULL returns <c>null</c>.</summary>
+    public DateTimeOffset? GetDateTimeOffsetOrNull(int ordinal) { CellValue c = _view[ordinal]; return c.IsNull ? null : c.AsDateTimeOffset(); }
+
     /// <summary>Reads a <see cref="DataVoDate"/> column; throws if the cell is not Date or is NULL.</summary>
     public DataVoDate GetDate(string column) => _view[column].AsDate();
 

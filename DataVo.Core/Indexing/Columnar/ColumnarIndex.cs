@@ -128,9 +128,10 @@ internal sealed class ColumnarIndex
         SchemaVersion = schemaVersion;
     }
 
-    /// <summary>Whether values of this stored type can be indexed: the fixed-width numeric types, BIT and DATE.</summary>
+    /// <summary>Whether values of this stored type can be indexed: the fixed-width numeric types, BIT, DATE and DATETIME.</summary>
+    /// <remarks>A DATETIME is kept as its UTC ticks and scanned with the 64-bit integer kernels.</remarks>
     public static bool Supports(StorageKind kind) =>
-        kind is StorageKind.Int or StorageKind.BigInt or StorageKind.Float or StorageKind.Double or StorageKind.Bit or StorageKind.Date;
+        kind is StorageKind.Int or StorageKind.BigInt or StorageKind.Float or StorageKind.Double or StorageKind.Bit or StorageKind.Date or StorageKind.DateTime;
 
     // A DATE is kept as its day number.
     private static int WidthOf(StorageKind kind) => ColumnarCells.WidthOf(kind);
@@ -487,6 +488,9 @@ internal sealed class ColumnarIndex
             case StorageKind.Float when cell.Type == CellType.Double:
                 column.AnyNaN |= double.IsNaN(cell.AsDouble());
                 column.Values!.ChunkOf(at).As<float>()[inChunk] = (float)cell.AsDouble(); // a FLOAT is widened in its cell
+                break;
+            case StorageKind.DateTime when cell.Type == CellType.DateTime:
+                column.Values!.ChunkOf(at).As<long>()[inChunk] = cell.AsUtcTicks();
                 break;
             case StorageKind.Date when cell.Type == CellType.Date:
                 column.Values!.ChunkOf(at).As<int>()[inChunk] = cell.AsDate().DayNumber;

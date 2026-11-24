@@ -181,7 +181,7 @@ internal partial class Select
         double number = predicate.Number;
         switch (predicate.Kind)
         {
-            case TypedPredicateKind.Integer when kind == StorageKind.BigInt:
+            case TypedPredicateKind.Integer when kind is StorageKind.BigInt or StorageKind.DateTime:
                 step.ValueKind = 'l';
                 step.Bits = predicate.Integer;
                 return true;
@@ -233,10 +233,16 @@ internal partial class Select
             return true; // RowFoldKind.None: only the values that are not NULL are counted
         }
 
+        if (index.KindOf(fold.Slot) == StorageKind.DateTime
+            && function is not (HashAggregateOperator.AggregateFunction.Min or HashAggregateOperator.AggregateFunction.Max))
+        {
+            return false; // a sum or average of instants has no meaning
+        }
+
         char type = index.KindOf(fold.Slot) switch
         {
             StorageKind.Int => 'i',
-            StorageKind.BigInt => 'l',
+            StorageKind.BigInt or StorageKind.DateTime => 'l',
             StorageKind.Float => 'f',
             StorageKind.Double => 'd',
             _ => '\0',
@@ -295,6 +301,7 @@ internal partial class Select
                 {
                     StorageKind.Int => (object)(int)total.Whole,
                     StorageKind.BigInt => (object)total.Whole,
+                    StorageKind.DateTime => (object)DataVoDateTime.FromUtcTicks(total.Whole),
                     StorageKind.Float => (object)(float)total.Real,
                     _ => (object)total.Real,
                 };

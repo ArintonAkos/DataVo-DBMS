@@ -131,6 +131,7 @@ internal static class FlatRowCodec
             CellType.Int64 => CellValue.From(ReadInt64(record, field.Position)),
             CellType.Double => CellValue.From(ReadDouble(record, field.Position)),
             CellType.Date => CellValue.From(ReadDate(record, field.Position)),
+            CellType.DateTime => CellValue.FromUtcTicks(ReadInt64(record, field.Position)),
             CellType.Decimal => CellValue.From(ReadDecimal(record, field.Position)),
             CellType.Guid => CellValue.From(ReadGuid(record, field.Position)),
             CellType.String => CellValue.From(ReadString(references, referenceBase, field.Position)),
@@ -247,7 +248,8 @@ internal static class FlatRowCodec
             case CellType.Int32: WriteInt32(record, field.Position, cell.AsInt32()); break;
             case CellType.Int64: WriteInt64(record, field.Position, cell.AsInt64()); break;
             case CellType.Double: WriteDouble(record, field.Position, cell.AsDouble()); break;
-            case CellType.Date: WriteDate(record, field.Position, cell.AsDate()); break;
+            case CellType.Date: WriteDate(record, field.Position, StorageEngine.Serialization.RowSerializer.DateOf(cell)); break;
+            case CellType.DateTime: WriteInt64(record, field.Position, StorageEngine.Serialization.RowSerializer.UtcTicksOf(cell)); break;
             case CellType.Decimal: WriteDecimal(record, field.Position, cell.AsDecimal()); break;
             case CellType.Guid: WriteGuid(record, field.Position, cell.AsGuid()); break;
             case CellType.String: WriteString(references, referenceBase, field.Position, cell.AsString()); break;

@@ -131,7 +131,13 @@ public class DataVoDataReader : DbDataReader
     public override DateTime GetDateTime(int ordinal)
     {
         object value = GetValue(ordinal);
-        return value is DataVoDate date ? date.ToDateTime() : Convert.ToDateTime(value);
+        return value switch
+        {
+            DataVoDate date => date.ToDateTime(),
+            DateTime dateTime => dateTime,
+            DateTimeOffset offset => offset.UtcDateTime,
+            _ => Convert.ToDateTime(value, System.Globalization.CultureInfo.InvariantCulture),
+        };
     }
 
     /// <inheritdoc />

@@ -33,13 +33,11 @@ Correctness does not depend on query shape, but allocation and latency do. Queri
 
 See [Query Planner](/manual/internals/query-planner) for how to stay on zero-allocation fast paths.
 
-## SQL `DATE` Contract
+## SQL `DATE` and `DATETIME` Contract
 
-DataVo provides a calendar `DATE` type (`YYYY-MM-DD`) and has **no** `DATETIME` or `TIMESTAMP` column type:
-
-- Store timestamps or points in time as `BIGINT` (UTC ticks or Unix milliseconds).
-- In C# models and source-generated projections, SQL `DATE` maps to `DataVo.Core.DataVoDate` across all targets, and additionally supports `System.DateOnly` on `.NET 10`.
-- `System.DateTime` properties are not mapped to SQL `DATE`.
+- `DATE` is a calendar date (`YYYY-MM-DD`). In C# models it maps to `DataVo.Core.DataVoDate` on every target, and to `System.DateOnly` on `net8.0` and later.
+- `DATETIME` / `TIMESTAMP` is a point in time stored as UTC ticks. In C# models it maps to `System.DateTime` (read back with `Kind = Utc`) and `System.DateTimeOffset` (read back at offset zero). See [Data Types](/manual/sql/data-types).
+- There is no `TIME` (time-of-day) or interval type.
 
 ## Unsupported Features
 

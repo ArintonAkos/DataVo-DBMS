@@ -524,6 +524,8 @@ public static partial class RowSerializer
                 return CellValue.From(reader.ReadBoolean());
             case StorageColumnType.Date:
                 return CellValue.From(DataVoDate.FromDateTime(DateTime.FromBinary(reader.ReadInt64())));
+            case StorageColumnType.DateTime:
+                return CellValue.FromUtcTicks(reader.ReadInt64());
             case StorageColumnType.Guid:
                 return CellValue.From(reader.ReadGuid());
             case StorageColumnType.Vector:
@@ -756,6 +758,7 @@ public static partial class RowSerializer
             case StorageColumnType.BigInt:
             case StorageColumnType.Double:
             case StorageColumnType.Date:
+            case StorageColumnType.DateTime:
                 reader.Skip(sizeof(long));
                 return;
             case StorageColumnType.Guid:
@@ -837,9 +840,15 @@ public static partial class RowSerializer
             return;
         }
 
-        if (type == StorageColumnType.Date || type == StorageColumnType.DateTime)
+        if (type == StorageColumnType.Date)
         {
             writer.Write(ToBinaryDateValue(boxed));
+            return;
+        }
+
+        if (type == StorageColumnType.DateTime)
+        {
+            writer.Write(ToUtcTicksValue(boxed, column));
             return;
         }
 
@@ -914,7 +923,7 @@ public static partial class RowSerializer
 
         if (type == StorageColumnType.DateTime)
         {
-            return DateTime.FromBinary(reader.ReadInt64());
+            return DataVoDateTime.FromUtcTicks(reader.ReadInt64());
         }
 
         if (type == StorageColumnType.Guid)
@@ -958,7 +967,10 @@ public static partial class RowSerializer
                 writer.Write(cell.AsBoolean());
                 return;
             case StorageColumnType.Date:
-                writer.Write(cell.AsDate().ToDateTime().ToBinary());
+                writer.Write(DateOf(cell).ToDateTime().ToBinary());
+                return;
+            case StorageColumnType.DateTime:
+                writer.Write(UtcTicksOf(cell));
                 return;
             case StorageColumnType.Guid:
             {
@@ -1001,6 +1013,8 @@ public static partial class RowSerializer
                 return CellValue.From(reader.ReadBoolean());
             case StorageColumnType.Date:
                 return CellValue.From(DataVoDate.FromDateTime(DateTime.FromBinary(reader.ReadInt64())));
+            case StorageColumnType.DateTime:
+                return CellValue.FromUtcTicks(reader.ReadInt64());
             case StorageColumnType.Guid:
                 return CellValue.From(new Guid(reader.ReadBytes(16)));
             case StorageColumnType.Vector:
@@ -1018,6 +1032,25 @@ public static partial class RowSerializer
                 return CellValue.From(reader.ReadString());
         }
     }
+
+    /// <summary>The UTC ticks a DATETIME column stores for a boxed value.</summary>
+    private static long ToUtcTicksValue(object value, Column column) =>
+        DataVoDateTime.TryConvert(value, out long ticks)
+            ? ticks
+            : throw new InvalidOperationException($"Column '{column.Name}' expects DATETIME data, not '{value}'.");
+
+    /// <summary>The UTC ticks a DATETIME column stores for a typed cell (a DATETIME, a DATE, or ISO 8601 text).</summary>
+    internal static long UtcTicksOf(CellValue cell) => cell.Type switch
+    {
+        CellType.DateTime => cell.AsUtcTicks(),
+        CellType.Date => (long)cell.AsDate().DayNumber * TimeSpan.TicksPerDay,
+        CellType.String when DataVoDateTime.TryParse(cell.AsString(), out long ticks) => ticks,
+        _ => throw new InvalidOperationException($"A {cell.Type} cell cannot be stored in a DATETIME column."),
+    };
+
+    /// <summary>The date a DATE column stores for a typed cell (a DATE, or the UTC date of a DATETIME).</summary>
+    internal static DataVoDate DateOf(CellValue cell) =>
+        cell.Type == CellType.DateTime ? DataVoDate.FromDateTime(cell.AsDateTime()) : cell.AsDate();
 
     /// <summary>
     /// Converts supported date representations to the binary format used by the serializer.

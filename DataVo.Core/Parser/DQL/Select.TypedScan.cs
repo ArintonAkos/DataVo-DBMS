@@ -559,6 +559,18 @@ internal partial class Select
             return true;
         }
 
+        // A DATETIME is stored as UTC ticks: the literal (ISO 8601 text, or a bound DateTime) is compared as one.
+        if (DataVoDateTime.IsDateTimeType(columns[ordinal].Type))
+        {
+            if (!DataVoDateTime.TryConvert(literal.Value, out long ticks))
+            {
+                return RefusePredicate($"a literal that is not a point in time compared with DATETIME column {columns[ordinal].Name}");
+            }
+
+            predicates.Add(new TypedPredicate(ordinal, op, literal.Value, TypedPredicateKind.Integer, 0, ticks));
+            return true;
+        }
+
         bool numericColumn = columns[ordinal].Type.Equals("INT", StringComparison.OrdinalIgnoreCase)
             || columns[ordinal].Type.Equals("BIGINT", StringComparison.OrdinalIgnoreCase)
             || columns[ordinal].Type.Equals("FLOAT", StringComparison.OrdinalIgnoreCase)
@@ -1233,7 +1245,12 @@ internal partial class Select
 
         if (predicate.Kind == TypedPredicateKind.Integer)
         {
-            long exact = cell.Type == CellType.Int32 ? cell.AsInt32() : cell.AsInt64();
+            long exact = cell.Type switch
+            {
+                CellType.Int32 => cell.AsInt32(),
+                CellType.DateTime => cell.AsUtcTicks(),
+                _ => cell.AsInt64(),
+            };
             return Satisfies(predicate.Operator, exact.CompareTo(predicate.Integer));
         }
 

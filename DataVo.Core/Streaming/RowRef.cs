@@ -97,7 +97,7 @@ public readonly ref struct RowRef
     public long GetInt64(int columnIndex)
     {
         StorageKind kind = KindOf(columnIndex);
-        if (kind != StorageKind.Int && kind != StorageKind.BigInt)
+        if (kind != StorageKind.Int && kind != StorageKind.BigInt && kind != StorageKind.DateTime)
         {
             throw Mismatch(columnIndex, "an integer");
         }
@@ -251,6 +251,32 @@ public readonly ref struct RowRef
         dayNumber = cell.IsEmpty ? 0 : RowBytes.DayNumber(cell, 0);
         return !cell.IsEmpty;
     }
+
+    /// <summary>Reads a <c>DATETIME</c> column as its UTC ticks unless it is NULL. Used by generated code.</summary>
+    /// <param name="columnIndex">The column's position in the table.</param>
+    /// <param name="utcTicks">The UTC ticks, or 0 when the cell is NULL.</param>
+    /// <returns><see langword="false"/> when the cell is NULL.</returns>
+    [System.ComponentModel.EditorBrowsable(System.ComponentModel.EditorBrowsableState.Never)]
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public bool TryGetDateTimeTicks(int columnIndex, out long utcTicks)
+    {
+        if (!TryFixed(columnIndex, StorageKind.DateTime, out ReadOnlySpan<byte> cell))
+        {
+            CheckIndex(columnIndex);
+            throw Mismatch(columnIndex, "a point in time");
+        }
+
+        utcTicks = cell.IsEmpty ? 0 : BinaryPrimitives.ReadInt64LittleEndian(cell);
+        return !cell.IsEmpty;
+    }
+
+    /// <summary>Reads a <c>DATETIME</c> column as a UTC <see cref="DateTime"/>; throws when it is NULL.</summary>
+    /// <param name="columnIndex">The column's position in the table.</param>
+    /// <returns>The value.</returns>
+    public DateTime GetDateTime(int columnIndex) =>
+        TryGetDateTimeTicks(columnIndex, out long ticks)
+            ? DataVoDateTime.FromUtcTicks(ticks)
+            : throw new InvalidOperationException($"Column {columnIndex} is NULL.");
 
     /// <summary>Reads a <c>GUID</c> column unless it is NULL. Used by generated code.</summary>
     /// <param name="columnIndex">The column's position in the table.</param>

@@ -32,4 +32,7 @@ public enum DataTypes
 
     /// <summary>A 64-bit floating-point number.</summary>
     Double,
+
+    /// <summary>A point in time (SQL DATETIME / TIMESTAMP), stored as 8-byte UTC ticks.</summary>
+    DateTime,
 }

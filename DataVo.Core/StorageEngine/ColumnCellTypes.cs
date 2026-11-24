@@ -23,6 +23,7 @@ internal static class ColumnCellTypes
             Is(columnType, "FLOAT") || Is(columnType, "DOUBLE") ? CellType.Double :
             Is(columnType, "BIT") ? CellType.Boolean :
             Is(columnType, "DATE") ? CellType.Date :
+            Is(columnType, "DATETIME") ? CellType.DateTime :
             Is(columnType, "GUID") ? CellType.Guid :
             Is(columnType, "VARCHAR") ? CellType.String :
             Is(columnType, "VECTOR") ? CellType.Vector :

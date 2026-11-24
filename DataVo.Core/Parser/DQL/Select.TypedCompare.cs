@@ -33,6 +33,8 @@ internal partial class Select
                     return left.AsInt32().CompareTo(right.AsInt32());
                 case CellType.Int64:
                     return left.AsInt64().CompareTo(right.AsInt64());
+                case CellType.DateTime:
+                    return left.AsUtcTicks().CompareTo(right.AsUtcTicks());
                 case CellType.Double:
                     // A FLOAT column boxes as float: compare at that precision, as the boxed values would.
                     return IsFloatColumn(column)
@@ -59,6 +61,9 @@ internal partial class Select
                 return true;
             case CellType.Int64 when boxed is long value:
                 order = cell.AsInt64().CompareTo(value);
+                return true;
+            case CellType.DateTime when boxed is DateTime value:
+                order = cell.AsUtcTicks().CompareTo(DataVoDateTime.ToUtcTicks(value));
                 return true;
             case CellType.Double when boxed is float value && IsFloatColumn(column):
                 order = ((float)cell.AsDouble()).CompareTo(value);

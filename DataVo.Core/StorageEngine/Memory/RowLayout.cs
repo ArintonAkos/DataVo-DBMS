@@ -120,7 +120,7 @@ internal sealed class RowLayout
     {
         CellType.Boolean => 1,
         CellType.Int32 or CellType.Date => 4,
-        CellType.Int64 or CellType.Double => 8,
+        CellType.Int64 or CellType.Double or CellType.DateTime => 8,
         CellType.Decimal or CellType.Guid => 16,
         CellType.String or CellType.Vector => 0,
         _ => throw new ArgumentException($"'{type}' is not a column type.", nameof(type)),

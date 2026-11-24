@@ -103,6 +103,21 @@ public readonly ref struct DataVoPackedRow
     public DataVoDate? ReadNullableDate(int column, string name) =>
         IsNull(column) ? null : FlatRowCodec.ReadDate(_record, _fields[column].Position);
 
+    /// <summary>Reads a required DATETIME column as a UTC <see cref="DateTime"/>.</summary>
+    public DateTime ReadDateTime(int column, string name) =>
+        IsNull(column) ? throw DataVoGeneratedTableSupport.NullColumn(name) : DataVoDateTime.FromUtcTicks(FlatRowCodec.ReadInt64(_record, _fields[column].Position));
+
+    /// <summary>Reads a nullable DATETIME column.</summary>
+    public DateTime? ReadNullableDateTime(int column, string name) =>
+        IsNull(column) ? null : DataVoDateTime.FromUtcTicks(FlatRowCodec.ReadInt64(_record, _fields[column].Position));
+
+    /// <summary>Reads a required DATETIME column as a <see cref="DateTimeOffset"/> (offset zero).</summary>
+    public DateTimeOffset ReadDateTimeOffset(int column, string name) => new(ReadDateTime(column, name));
+
+    /// <summary>Reads a nullable DATETIME column as a <see cref="DateTimeOffset"/>.</summary>
+    public DateTimeOffset? ReadNullableDateTimeOffset(int column, string name) =>
+        IsNull(column) ? null : new DateTimeOffset(ReadDateTime(column, name));
+
     /// <summary>Reads a required VECTOR(3) column as a 3D point.</summary>
     public System.Numerics.Vector3 ReadVector3(int column, string name) =>
         ReadNullableVector3(column, name) ?? throw DataVoGeneratedTableSupport.NullColumn(name);

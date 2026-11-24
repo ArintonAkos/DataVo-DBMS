@@ -53,7 +53,7 @@ Every construct marked **Supported** returns identical results across storage mo
 
 - **`FLOAT` is 32-bit** (`System.Single`), unlike SQLite `REAL` or SQL Server `FLOAT` (64-bit). Use `DOUBLE` for 64-bit floating-point values.
 - **`VARCHAR` comparisons are ordinal** (UTF-8 byte/code-point order), not collation-aware or case-insensitive.
-- **No silent type fallbacks:** Unsupported types such as `DECIMAL`, `NUMERIC`, `DATETIME`, and `TIMESTAMP` throw an explicit `ParserException` instead of silently storing text.
+- **No silent type fallbacks:** Unsupported types such as `DECIMAL`, `NUMERIC`, and `TIME` throw an explicit `ParserException` instead of silently storing text.
 
 ## See Also
 - [Data Types](/manual/sql/data-types): Supported SQL types, .NET CLR mappings, and unsupported type errors

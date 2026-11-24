@@ -60,6 +60,11 @@ internal static class ExpressionValueComparer
             return leftDate == rightDate;
         }
 
+        if (TryAsDateTimePair(leftValue, rightValue, out long leftTicks, out long rightTicks))
+        {
+            return leftTicks == rightTicks;
+        }
+
         if (TryConvertToInt64(leftValue, out long leftInteger) && TryConvertToInt64(rightValue, out long rightInteger))
         {
             return leftInteger == rightInteger; // a double cannot tell large integers apart
@@ -130,6 +135,11 @@ internal static class ExpressionValueComparer
         if (TryAsDatePair(leftValue, rightValue, out DataVoDate leftDate, out DataVoDate rightDate))
         {
             return leftDate.CompareTo(rightDate);
+        }
+
+        if (TryAsDateTimePair(leftValue, rightValue, out long leftTicks, out long rightTicks))
+        {
+            return leftTicks.CompareTo(rightTicks);
         }
 
         if (TryConvertToInt64(leftValue, out long leftInteger) && TryConvertToInt64(rightValue, out long rightInteger))
@@ -245,6 +255,22 @@ internal static class ExpressionValueComparer
         }
 
         return TryAsDate(leftValue, out left) && TryAsDate(rightValue, out right);
+    }
+
+    /// <summary>
+    /// Interprets a pair as two DATETIME instants (UTC ticks) when either operand is a <see cref="DateTime"/> or
+    /// <see cref="DateTimeOffset"/> and the other converts (a point in time, a DATE at midnight UTC, or ISO 8601 text).
+    /// </summary>
+    private static bool TryAsDateTimePair(object leftValue, object rightValue, out long left, out long right)
+    {
+        left = 0;
+        right = 0;
+        if (leftValue is not (DateTime or DateTimeOffset) && rightValue is not (DateTime or DateTimeOffset))
+        {
+            return false;
+        }
+
+        return DataVoDateTime.TryConvert(leftValue, out left) && DataVoDateTime.TryConvert(rightValue, out right);
     }
 
     /// <summary>

@@ -80,6 +80,7 @@ public class Column : IColumn
             "VARCHAR" => rawValue, // length is enforced by ColumnLengthRule; never truncate
 
             "DATE" => TryParseDate(rawValue, out DataVoDate parsedDate) ? parsedDate : rawValue,
+            "DATETIME" => DataVoDateTime.TryParse(rawValue, out long utcTicks) ? DataVoDateTime.FromUtcTicks(utcTicks) : rawValue,
             "GUID" => Guid.TryParse(rawValue, out Guid parsedGuid) ? parsedGuid : rawValue,
             "BIT" => bool.TryParse(rawValue, out bool parsedBit) ? parsedBit : rawValue,
             "INT" => int.TryParse(rawValue, NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsedInt) ? parsedInt : rawValue,

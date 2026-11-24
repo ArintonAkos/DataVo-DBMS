@@ -618,6 +618,10 @@ internal sealed partial class AggregateReactiveQuery : IBorrowedReactiveQuery
                 AppendDate(ref pos, value.AsDate());
                 return;
 
+            case CellType.DateTime:
+                AppendFormattable(ref pos, value.AsUtcTicks());
+                return;
+
             default:
                 AppendChars(ref pos, Convert.ToString(value.ToObject(), CultureInfo.InvariantCulture) ?? string.Empty);
                 return;

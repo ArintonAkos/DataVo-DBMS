@@ -85,7 +85,7 @@ public class DataVoTableGeneratorTests
 
     [Theory]
     [InlineData("public ulong Big { get; set; }", "DATAVOT003")]
-    [InlineData("public DateTime When { get; set; }", "DATAVOT003")]
+    [InlineData("public TimeSpan Duration { get; set; }", "DATAVOT003")]
     [InlineData("public decimal Price { get; set; }", "DATAVOT003")]
     [InlineData("[PrimaryKey] public int Second { get; set; }", "DATAVOT002")]
     public void Unsupported_ReportsAnError(string extraMember, string expectedId)

@@ -324,6 +324,8 @@ public sealed class DataVoQueryGenerator : IIncrementalGenerator
         SpecialType.System_Boolean => "GetBoolean",
         _ => type.ToDisplayString() == "DataVo.Core.DataVoDate" ? "GetDate" :
              type.ToDisplayString() == "System.DateOnly" ? "GetDateOnly" :
+             type.ToDisplayString() == "System.DateTime" ? "GetDateTime" :
+             type.ToDisplayString() == "System.DateTimeOffset" ? "GetDateTimeOffset" :
              type.ToDisplayString() == "System.Guid" ? "GetGuid" : null,
     };
 
