@@ -83,7 +83,7 @@ public class VersionStorageManager : IDisposable
     /// </summary>
     public void RemoveVersions(string databaseName, string tableName, IReadOnlyList<RowKey> rowIds)
     {
-        if (_versionMetadata.IsEmpty || rowIds.Count == 0)
+        if (rowIds.Count == 0 || IsEmptyWithoutLocks(_versionMetadata))
         {
             return;
         }
@@ -138,12 +138,14 @@ public class VersionStorageManager : IDisposable
     /// </summary>
     public RowVersion? GetVersion(string databaseName, string tableName, RowKey rowId)
     {
-        if (_versionMetadata.IsEmpty)
+        var key = (databaseName, tableName, rowId);
+
+        // A lock-free probe answers the common miss. (ConcurrentDictionary.IsEmpty is no shortcut: on an empty
+        // map, the steady state between transactions, it takes every bucket lock to confirm.)
+        if (!_versionMetadata.ContainsKey(key))
         {
             return null;
         }
-
-        var key = (databaseName, tableName, rowId);
 
         _versionLock.EnterReadLock();
         try
@@ -298,13 +300,28 @@ public class VersionStorageManager : IDisposable
         }
     }
 
+    /// <summary>
+    /// Returns whether a concurrent map holds no entries, without the bucket locks
+    /// <see cref="ConcurrentDictionary{TKey, TValue}.IsEmpty"/> takes when the map is empty. Like that check, the
+    /// answer is a moment-in-time hint for a fast path, not a guarantee.
+    /// </summary>
+    private static bool IsEmptyWithoutLocks<TKey, TValue>(ConcurrentDictionary<TKey, TValue> map)
+        where TKey : notnull
+    {
+        foreach (KeyValuePair<TKey, TValue> _ in map)
+        {
+            return false;
+        }
+
+        return true;
+    }
+
     /// <summary>Gets whether any row of a table has been replaced while a transaction was open.</summary>
     /// <param name="databaseName">The owning database.</param>
     /// <param name="tableName">The owning table.</param>
     /// <returns><see langword="true"/> when retained images exist for the table.</returns>
     public bool HasRetainedImages(string databaseName, string tableName) =>
-        !_retainedImages.IsEmpty
-        && _retainedImages.TryGetValue((databaseName, tableName), out List<RetainedRowImage>? images)
+        _retainedImages.TryGetValue((databaseName, tableName), out List<RetainedRowImage>? images)
         && Volatile.Read(ref images) is { Count: > 0 };
 
     /// <summary>Returns the retained images a snapshot should read.</summary>
@@ -350,7 +367,7 @@ public class VersionStorageManager : IDisposable
     /// <returns>The number of metadata entries removed.</returns>
     public int VacuumVersions(long? oldestSnapshot)
     {
-        if (_versionMetadata.IsEmpty && _recorded.Count == 0)
+        if (_recorded.Count == 0 && IsEmptyWithoutLocks(_versionMetadata))
         {
             return 0;
         }
