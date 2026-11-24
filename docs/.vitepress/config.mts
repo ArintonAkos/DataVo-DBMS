@@ -3,6 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { defineConfig, type HeadConfig } from "vitepress";
 import { withMermaid } from "vitepress-plugin-mermaid";
+import { writeLegacyRedirectPages } from "./legacy-redirects";
 
 const isProdBuild =
   process.env.NODE_ENV === "production" || process.argv.includes("build");
@@ -119,6 +120,9 @@ export default withMermaid(
 
       frontmatter.head = pageHead;
       pageData.frontmatter = frontmatter;
+    },
+    buildEnd(siteConfig) {
+      writeLegacyRedirectPages(siteConfig.outDir, siteConfig.site.base, fs, path);
     },
     srcExclude: [
       "public/**",
