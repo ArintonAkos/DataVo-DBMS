@@ -89,11 +89,10 @@ public class JoinBorrowedTests
         long perIter = (GC.GetAllocatedBytesForCurrentThread() - before) / 5_000;
 
         Assert.True(sink >= 0);
-        // ~4384 B/iter before Step 2; skipping BuildContext (no WHERE) + reusing the delta/candidate
-        // containers brings it to ~3176. The residual is recomputed composed keys (Identity/JoinKey)
-        // and per-row arrangement dicts — further cuts need typed arrangements (deferred). Allocation-
-        // light, not 0-byte (per-row arrangement entries are inherent to a maintained join).
-        Assert.True(perIter <= 3_600, $"join dispatch allocated {perIter} B/iter");
+        // ~4384 B/iter before Step 2, ~3176 after skipping BuildContext and reusing the delta/candidate
+        // containers. Typed arrangements (PackedKey identities, CellValue side rows, emitted state kept as
+        // side-row references) bring it to ~256: the one new stored image this dictionary-shaped insert needs.
+        Assert.True(perIter <= 400, $"join dispatch allocated {perIter} B/iter");
     }
 
     [Fact]

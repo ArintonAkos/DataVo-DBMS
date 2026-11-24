@@ -39,128 +39,113 @@ internal sealed partial class JoinReactiveQuery
         }
     }
 
-    /// <summary>
-    /// Builds the projected output row for a (leftRow, rightRow) pair, applying the WHERE predicate;
-    /// returns <c>null</c> when the WHERE rejects the row. Either side may be <c>null</c> for a
-    /// null-padded outer-join row.
-    /// </summary>
-    private IReadOnlyDictionary<string, object?>? ProjectJoined(
-        IReadOnlyDictionary<string, object?>? leftRow,
-        IReadOnlyDictionary<string, object?>? rightRow)
+    /// <summary>Where one output column's value comes from.</summary>
+    private enum SourceKind : byte
     {
-        // The WHERE-eval context (qualified + bare + alias keys for every column) is only needed when a
-        // post-join WHERE exists; skip building it entirely otherwise — it is a large per-candidate dict.
-        if (_hasWhere && !_where.Matches(BuildContext(leftRow, rightRow)))
-        {
-            return null;
-        }
+        Left,
+        Right,
+        Unqualified,
+        LeftIdentity,
+        RightIdentity,
+    }
 
-        var output = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+    /// <summary>The source of one output column: a side ordinal (or -1), or a hidden identity column.</summary>
+    private readonly record struct OutputSource(SourceKind Kind, int LeftOrdinal, int RightOrdinal);
 
+    /// <summary>
+    /// Builds the output column names and their sources: each explicit projection column, or — for
+    /// <c>SELECT *</c> — both tables' catalog columns qualified as <c>Table.Column</c>, followed by the hidden
+    /// identity columns every joined row carries.
+    /// </summary>
+    private (string[] Names, OutputSource[] Sources) BuildOutputs()
+    {
+        var names = new List<string>();
+        var sources = new List<OutputSource>();
         foreach (ProjectedColumn column in _projection)
         {
             if (column.IsStar)
             {
-                ProjectStar(output, leftRow, rightRow);
+                AddStarOutputs(_shape.LeftTable, _left.Layout, SourceKind.Left, names, sources);
+                AddStarOutputs(_shape.RightTable, _right.Layout, SourceKind.Right, names, sources);
                 continue;
             }
 
-            output[column.OutputName] = ResolveValue(column, leftRow, rightRow);
-        }
-
-        output[LeftIdentityColumn] = leftRow is null ? null : Identity(_leftPrimaryKeys, leftRow);
-        output[RightIdentityColumn] = rightRow is null ? null : Identity(_rightPrimaryKeys, rightRow);
-
-        return output;
-    }
-
-    private object? ResolveValue(
-        ProjectedColumn column,
-        IReadOnlyDictionary<string, object?>? leftRow,
-        IReadOnlyDictionary<string, object?>? rightRow)
-    {
-        return column.Side switch
-        {
-            Side.Left => leftRow is not null && leftRow.TryGetValue(column.Column, out object? lv) ? lv : null,
-            Side.Right => rightRow is not null && rightRow.TryGetValue(column.Column, out object? rv) ? rv : null,
-            // Unqualified column: resolve from whichever side defines it (left first, then right).
-            _ => ResolveUnqualified(column.Column, leftRow, rightRow),
-        };
-    }
-
-    private static object? ResolveUnqualified(
-        string columnName,
-        IReadOnlyDictionary<string, object?>? leftRow,
-        IReadOnlyDictionary<string, object?>? rightRow)
-    {
-        if (leftRow is not null && leftRow.TryGetValue(columnName, out object? lv))
-        {
-            return lv;
-        }
-
-        if (rightRow is not null && rightRow.TryGetValue(columnName, out object? rv))
-        {
-            return rv;
-        }
-
-        return null;
-    }
-
-    private void ProjectStar(
-        Dictionary<string, object?> output,
-        IReadOnlyDictionary<string, object?>? leftRow,
-        IReadOnlyDictionary<string, object?>? rightRow)
-    {
-        if (leftRow is not null)
-        {
-            foreach ((string key, object? value) in leftRow)
+            int leftOrdinal = column.Side is null or Side.Left ? _left.Layout.OrdinalOf(column.Column) : -1;
+            int rightOrdinal = column.Side is null or Side.Right ? _right.Layout.OrdinalOf(column.Column) : -1;
+            SourceKind kind = column.Side switch
             {
-                output[_shape.LeftTable + "." + key] = value;
-            }
+                Side.Left => SourceKind.Left,
+                Side.Right => SourceKind.Right,
+                _ => SourceKind.Unqualified,
+            };
+
+            names.Add(column.OutputName);
+            sources.Add(new OutputSource(kind, leftOrdinal, rightOrdinal));
         }
 
-        if (rightRow is not null)
+        names.Add(LeftIdentityColumn);
+        sources.Add(new OutputSource(SourceKind.LeftIdentity, -1, -1));
+        names.Add(RightIdentityColumn);
+        sources.Add(new OutputSource(SourceKind.RightIdentity, -1, -1));
+        return (names.ToArray(), sources.ToArray());
+    }
+
+    private static void AddStarOutputs(
+        string table,
+        ReactiveRowLayout layout,
+        SourceKind kind,
+        List<string> names,
+        List<OutputSource> sources)
+    {
+        for (int i = 0; i < layout.Count; i++)
         {
-            foreach ((string key, object? value) in rightRow)
-            {
-                output[_shape.RightTable + "." + key] = value;
-            }
+            names.Add(table + "." + layout.Columns[i]);
+            sources.Add(kind == SourceKind.Left ? new OutputSource(kind, i, -1) : new OutputSource(kind, -1, i));
         }
     }
 
     /// <summary>
-    /// Builds the predicate-evaluation context with both qualified (<c>R.Id</c>) and bare (<c>Id</c>)
-    /// keys so <see cref="ReactivePredicate"/> (which resolves by bare column name) can evaluate a
-    /// post-join WHERE. When both sides expose the same bare column the right side wins; qualify the
-    /// column in the WHERE to disambiguate.
+    /// Projects a pair of side rows into <paramref name="destination"/> in output-schema order. Either side
+    /// may be absent for a null-padded outer-join row; its columns then read as <c>NULL</c>.
     /// </summary>
-    private Dictionary<string, object?> BuildContext(
-        IReadOnlyDictionary<string, object?>? leftRow,
-        IReadOnlyDictionary<string, object?>? rightRow)
+    private void WriteRow(EmittedPair pair, CellValue[] destination)
     {
-        var context = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
-
-        if (leftRow is not null)
+        for (int i = 0; i < _outputSources.Length; i++)
         {
-            foreach ((string key, object? value) in leftRow)
-            {
-                context[key] = value;
-                context[_shape.LeftTable + "." + key] = value;
-                context[_shape.LeftAlias + "." + key] = value;
-            }
+            destination[i] = ResolveCell(_outputSources[i], pair);
+        }
+    }
+
+    private static CellValue ResolveCell(OutputSource source, EmittedPair pair)
+    {
+        return source.Kind switch
+        {
+            SourceKind.Left => ReadCell(pair.Left, source.LeftOrdinal),
+            SourceKind.Right => ReadCell(pair.Right, source.RightOrdinal),
+            // Unqualified column: resolve from whichever side defines it (left first, then right).
+            SourceKind.Unqualified => pair.Left is not null && source.LeftOrdinal >= 0
+                ? pair.Left.Cells[source.LeftOrdinal]
+                : ReadCell(pair.Right, source.RightOrdinal),
+            SourceKind.LeftIdentity => pair.Left is null ? CellValue.Null : CellValue.From(pair.Left.IdentityText),
+            _ => pair.Right is null ? CellValue.Null : CellValue.From(pair.Right.IdentityText),
+        };
+    }
+
+    private static CellValue ReadCell(SideRow? row, int ordinal) =>
+        row is not null && ordinal >= 0 ? row.Cells[ordinal] : CellValue.Null;
+
+    /// <summary>
+    /// Evaluates the post-join WHERE over a pair of side rows (either may be absent for a null-padded row),
+    /// reading the rows' typed cells through a reused context; <see langword="true"/> when there is no WHERE.
+    /// </summary>
+    private bool PassesWhere(EmittedPair pair)
+    {
+        if (!_hasWhere)
+        {
+            return true;
         }
 
-        if (rightRow is not null)
-        {
-            foreach ((string key, object? value) in rightRow)
-            {
-                context[key] = value;
-                context[_shape.RightTable + "." + key] = value;
-                context[_shape.RightAlias + "." + key] = value;
-            }
-        }
-
-        return context;
+        return _whereContext.Matches(_where, pair.Left?.Cells, pair.Right?.Cells);
     }
 
     private (Side? Side, string Column, string OutputName) ResolveColumn(SelectColumnNode column)
@@ -230,5 +215,78 @@ internal sealed partial class JoinReactiveQuery
         string raw = column.RawExpression.Trim();
         return raw == "*"
             || (column.Expression is null && raw.EndsWith("*", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// The typed evaluation context for a post-join WHERE. It exposes every column of both sides under its
+    /// bare, table-qualified and alias-qualified names, like the batch join's row context; when both sides
+    /// define the same bare name the right side wins, so qualify the column to disambiguate.
+    /// </summary>
+    private sealed class JoinWhereContext
+    {
+        private readonly ReactiveRowSchema _leftOnly;
+        private readonly ReactiveRowSchema _rightOnly;
+        private readonly ReactiveRowSchema _both;
+        private readonly CellValue[] _scratch;
+        private readonly int _leftWidth;
+        private readonly int _rightWidth;
+
+        /// <summary>Creates the context for the given side layouts, table names and aliases.</summary>
+        public JoinWhereContext(JoinShape shape, ReactiveRowLayout left, ReactiveRowLayout right)
+        {
+            List<string> leftNames = ContextNames(left, shape.LeftTable, shape.LeftAlias);
+            List<string> rightNames = ContextNames(right, shape.RightTable, shape.RightAlias);
+            _leftOnly = new ReactiveRowSchema(leftNames);
+            _rightOnly = new ReactiveRowSchema(rightNames);
+            _both = new ReactiveRowSchema(leftNames.Concat(rightNames).ToArray());
+            _leftWidth = leftNames.Count;
+            _rightWidth = rightNames.Count;
+            _scratch = new CellValue[_leftWidth + _rightWidth];
+        }
+
+        /// <summary>Evaluates <paramref name="where"/> over the given side cells (either may be absent).</summary>
+        public bool Matches(ReactivePredicate where, CellValue[]? left, CellValue[]? right)
+        {
+            Span<CellValue> scratch = _scratch;
+            if (left is not null && right is not null)
+            {
+                Fill(left, scratch[.._leftWidth]);
+                Fill(right, scratch[_leftWidth..]);
+                return where.Matches(new RowRef(_both, scratch));
+            }
+
+            if (left is not null)
+            {
+                Fill(left, scratch[.._leftWidth]);
+                return where.Matches(new RowRef(_leftOnly, scratch[.._leftWidth]));
+            }
+
+            Fill(right!, scratch[.._rightWidth]);
+            return where.Matches(new RowRef(_rightOnly, scratch[.._rightWidth]));
+        }
+
+        // Each stored cell appears three times: under its bare, table-qualified and alias-qualified name.
+        private static void Fill(CellValue[] cells, Span<CellValue> destination)
+        {
+            for (int i = 0; i < cells.Length; i++)
+            {
+                destination[3 * i] = cells[i];
+                destination[(3 * i) + 1] = cells[i];
+                destination[(3 * i) + 2] = cells[i];
+            }
+        }
+
+        private static List<string> ContextNames(ReactiveRowLayout layout, string table, string? alias)
+        {
+            var names = new List<string>(layout.Count * 3);
+            foreach (string column in layout.Columns)
+            {
+                names.Add(column);
+                names.Add(table + "." + column);
+                names.Add(alias + "." + column);
+            }
+
+            return names;
+        }
     }
 }

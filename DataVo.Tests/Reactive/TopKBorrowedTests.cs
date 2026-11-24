@@ -89,12 +89,10 @@ public class TopKBorrowedTests
         long perIter = (GC.GetAllocatedBytesForCurrentThread() - before) / 5_000;
 
         Assert.True(sink >= 0);
-        // Pre-Step-2 this 50-row window cost ~3920 B/iter and scaled ~linearly with window size (it
-        // rebuilt the window dict and re-projected all 50 rows every dispatch). After double-buffering +
-        // cached projections + the ReferenceEquals diff short-circuit it is ~900 B/iter and window-size
-        // independent. The bound proves the reduction; the residual is the inherent per-AddEntry cost
-        // (Entry + row copy + sorted-set node) — true 0-byte needs pooling (out of this slice).
-        Assert.True(perIter <= 1500, $"top-K dispatch allocated {perIter} B/iter (window={windowSize})");
+        // Pre-Step-2 this 50-row window cost ~3920 B/iter and scaled ~linearly with window size; double-
+        // buffering and cached projections brought it to ~900. Typed, pooled entries (CellValue cells and a
+        // PackedKey identity, no row dictionaries) bring it to ~184: the sorted-set node and enumerator.
+        Assert.True(perIter <= 300, $"top-K dispatch allocated {perIter} B/iter (window={windowSize})");
     }
 
     [Fact]

@@ -1,4 +1,3 @@
-using System.Globalization;
 using DataVo.Core.Runtime.Changes;
 
 namespace DataVo.Core.Runtime.Reactive;
@@ -8,58 +7,49 @@ namespace DataVo.Core.Runtime.Reactive;
 /// DBSP delta-join, and the output diff. INNER semantics live here; the outer-join null-padding
 /// extension is layered on top in <c>JoinReactiveQuery.Outer.cs</c>.
 /// </summary>
+/// <remarks>
+/// Arrangements are typed: every side row is an immutable <see cref="SideRow"/> holding the table's catalog
+/// columns as unboxed <see cref="CellValue"/> cells, keyed by <see cref="PackedKey"/> primary and join keys.
+/// The delivered result is tracked as the pair of side rows that produced each output row rather than as a
+/// projected copy, so an unchanged pair is recognized by reference and a changed one is projected straight
+/// into the reused output scratch.
+/// </remarks>
 internal sealed partial class JoinReactiveQuery
 {
-    // Identities and composite keys are length-prefixed ("<len>:<text>" per component) so they are
-    // collision-free for arbitrary value content without relying on a magic separator character.
-    // Sentinels for the absent side of a null-padded outer-join output identity. They cannot collide
-    // with a real primary-key rendering (which is either empty or a "v:"/null-marker join).
-    private const string LeftSentinel = "L";
-    private const string RightSentinel = "R";
+    /// <summary>What an output identity stands for: a matched pair, or one side padded with NULLs.</summary>
+    private enum OutputKind : byte
+    {
+        Inner = 0,
+        LeftPadded = 1,
+        RightPadded = 2,
+    }
 
-    // joinKey -> (sidePrimaryKey -> row). Only non-null join keys are matchable and indexed here.
-    private readonly Dictionary<string, Dictionary<string, IReadOnlyDictionary<string, object?>>> _leftByKey
-        = new(StringComparer.Ordinal);
+    /// <summary>The stable identity of one output row: both sides' primary keys (the absent one is default).</summary>
+    private readonly record struct OutputId(PackedKey Left, PackedKey Right, OutputKind Kind);
 
-    private readonly Dictionary<string, Dictionary<string, IReadOnlyDictionary<string, object?>>> _rightByKey
-        = new(StringComparer.Ordinal);
+    /// <summary>The side rows a delivered output row was projected from (either may be absent for a pad).</summary>
+    private readonly record struct EmittedPair(SideRow? Left, SideRow? Right);
 
-    // Full per-side row maps keyed by primary key, regardless of join-key nullability. Used to recompute
-    // candidate outputs from final state and by the outer extension to enumerate unmatched rows.
-    private readonly Dictionary<string, IReadOnlyDictionary<string, object?>> _leftRows
-        = new(StringComparer.Ordinal);
+    /// <summary>A single signed image delta for one side of the join.</summary>
+    private readonly record struct SideDelta(SideRow Row, int Weight);
 
-    private readonly Dictionary<string, IReadOnlyDictionary<string, object?>> _rightRows
-        = new(StringComparer.Ordinal);
-
-    // outputIdentity (length-prefixed leftPk followed by rightPk) -> currently emitted projected row.
-    private readonly Dictionary<string, IReadOnlyDictionary<string, object?>> _emitted
-        = new(StringComparer.Ordinal);
+    // outputIdentity -> the side rows the currently delivered row was projected from.
+    private readonly Dictionary<OutputId, EmittedPair> _emitted = [];
 
     private bool _seeded;
 
     // Reused per-batch scratch so the dispatch hot path does not allocate fresh containers each Apply.
     private readonly List<SideDelta> _leftDeltas = [];
     private readonly List<SideDelta> _rightDeltas = [];
-    private readonly HashSet<string> _candidates = new(StringComparer.Ordinal);
-
-    /// <summary>A single signed image delta for one side of the join.</summary>
-    private readonly record struct SideDelta(string PrimaryKey, IReadOnlyDictionary<string, object?> Row, int Weight);
+    private readonly HashSet<OutputId> _candidates = [];
 
     private void SeedSide(string table, IEnumerable<(RowKey RowId, IReadOnlyDictionary<string, object?> Row)> rows)
     {
-        bool isLeft = IsLeftTable(table);
+        JoinSide side = IsLeftTable(table) ? _left : _right;
 
         foreach ((RowKey _, IReadOnlyDictionary<string, object?> row) in rows)
         {
-            if (isLeft)
-            {
-                AddRow(_leftByKey, _leftRows, _leftPrimaryKeys, leftSide: true, row);
-            }
-            else
-            {
-                AddRow(_rightByKey, _rightRows, _rightPrimaryKeys, leftSide: false, row);
-            }
+            side.Store(side.LoadStored(row));
         }
     }
 
@@ -71,90 +61,84 @@ internal sealed partial class JoinReactiveQuery
 
         _leftDeltas.Clear();
         _rightDeltas.Clear();
-        List<SideDelta> leftDeltas = _leftDeltas;
-        List<SideDelta> rightDeltas = _rightDeltas;
 
         // Index loop (not foreach) so iterating the IReadOnlyList does not allocate a boxed enumerator.
         for (int i = 0; i < changes.Count; i++)
         {
-            RowChange change = changes[i];
-            bool isLeft = IsLeftTable(change.Table);
-            List<SideDelta> target = isLeft ? leftDeltas : rightDeltas;
-            IReadOnlyList<string> primaryKeys = isLeft ? _leftPrimaryKeys : _rightPrimaryKeys;
-
-            // Insert -> (After,+1); Delete -> (Before,-1); Update -> (Before,-1),(After,+1).
-            if (change.Before is not null && change.Kind is ChangeKind.Delete or ChangeKind.Update)
-            {
-                target.Add(new SideDelta(Identity(primaryKeys, change.Before), change.Before, -1));
-            }
-
-            if (change.After is not null && change.Kind is ChangeKind.Insert or ChangeKind.Update)
-            {
-                target.Add(new SideDelta(Identity(primaryKeys, change.After), change.After, +1));
-            }
+            CollectDeltas(changes[i]);
         }
 
         _candidates.Clear();
-        HashSet<string> candidates = _candidates;
 
         // Probe left deltas against the OLD right arrangement (collect affected identities).
-        CollectLeftCandidates(leftDeltas, candidates);
+        CollectInnerCandidates(_leftDeltas, probed: _right, deltasAreLeft: true);
 
         // Apply left deltas to the left arrangement.
-        ApplyDeltas(leftDeltas, _leftByKey, _leftRows, leftSide: true);
+        ApplyDeltas(_leftDeltas, _left);
 
         // Probe right deltas against the NEW left arrangement (collect affected identities).
-        CollectRightCandidates(rightDeltas, candidates);
+        CollectInnerCandidates(_rightDeltas, probed: _left, deltasAreLeft: false);
 
         // Apply right deltas to the right arrangement.
-        ApplyDeltas(rightDeltas, _rightByKey, _rightRows, leftSide: false);
+        ApplyDeltas(_rightDeltas, _right);
 
         // Outer joins additionally re-evaluate null-padded rows for every touched side row.
-        CollectOuterCandidates(leftDeltas, rightDeltas, candidates);
+        CollectOuterCandidates(_leftDeltas, _rightDeltas, _candidates);
 
-        DiffInto(candidates, builder);
+        DiffInto(_candidates, builder);
+        ReleaseRetractedImages();
     }
 
     /// <summary>
-    /// Collects the inner-join output identities affected by the left-side deltas, probing against the
-    /// right arrangement as it stands before the left deltas are applied. Both the before image (old
-    /// match) and the after image (new match) of each changed left row are probed (they appear as two
-    /// separate deltas), so removals and additions are both captured.
+    /// Expands one committed change into signed side deltas: Insert -> (After,+1); Delete -> (Before,-1);
+    /// Update -> (Before,-1),(After,+1). A typed after-image is read without materializing its dictionary.
     /// </summary>
-    private void CollectLeftCandidates(List<SideDelta> leftDeltas, HashSet<string> candidates)
+    private void CollectDeltas(RowChange change)
     {
-        foreach (SideDelta delta in leftDeltas)
-        {
-            string? key = JoinKey(delta.Row, leftSide: true);
-            if (key is null || !_rightByKey.TryGetValue(key, out Dictionary<string, IReadOnlyDictionary<string, object?>>? bucket))
-            {
-                continue;
-            }
+        bool isLeft = IsLeftTable(change.Table);
+        JoinSide side = isLeft ? _left : _right;
+        List<SideDelta> target = isLeft ? _leftDeltas : _rightDeltas;
 
-            foreach (string rightPk in bucket.Keys)
-            {
-                candidates.Add(OutputIdentity(delta.PrimaryKey, rightPk));
-            }
+        if (change.Before is not null && change.Kind is ChangeKind.Delete or ChangeKind.Update)
+        {
+            target.Add(new SideDelta(side.LoadRetracted(change.Before), -1));
+        }
+
+        if (change.Kind is not (ChangeKind.Insert or ChangeKind.Update))
+        {
+            return;
+        }
+
+        if (change.TypedAfter is { } typed)
+        {
+            target.Add(new SideDelta(side.LoadStored(typed), +1));
+        }
+        else if (change.After is not null)
+        {
+            target.Add(new SideDelta(side.LoadStored(change.After), +1));
         }
     }
 
     /// <summary>
-    /// Collects the inner-join output identities affected by the right-side deltas, probing against the
-    /// left arrangement after the left deltas have been applied (the DBSP linearization).
+    /// Collects the inner-join output identities affected by one side's deltas, probing the opposite
+    /// arrangement. Left deltas probe the right side before the left deltas apply; right deltas probe the
+    /// left side after (the DBSP linearization). Both the before and after image of a changed row appear as
+    /// separate deltas, so removals and additions are both captured.
     /// </summary>
-    private void CollectRightCandidates(List<SideDelta> rightDeltas, HashSet<string> candidates)
+    private void CollectInnerCandidates(List<SideDelta> deltas, JoinSide probed, bool deltasAreLeft)
     {
-        foreach (SideDelta delta in rightDeltas)
+        foreach (SideDelta delta in deltas)
         {
-            string? key = JoinKey(delta.Row, leftSide: false);
-            if (key is null || !_leftByKey.TryGetValue(key, out Dictionary<string, IReadOnlyDictionary<string, object?>>? bucket))
+            if (!probed.TryGetBucket(delta.Row, out Dictionary<PackedKey, SideRow>? bucket))
             {
                 continue;
             }
 
-            foreach (string leftPk in bucket.Keys)
+            foreach (PackedKey otherPk in bucket.Keys)
             {
-                candidates.Add(OutputIdentity(leftPk, delta.PrimaryKey));
+                _candidates.Add(deltasAreLeft
+                    ? new OutputId(delta.Row.Pk, otherPk, OutputKind.Inner)
+                    : new OutputId(otherPk, delta.Row.Pk, OutputKind.Inner));
             }
         }
     }
@@ -164,19 +148,19 @@ internal sealed partial class JoinReactiveQuery
     /// currently emitted set. Because every identity is recomputed from final state, listing it more
     /// than once (the cross term) is harmless — there is no weight summation to double-count.
     /// </summary>
-    private void DiffInto(HashSet<string> candidates, QueryChangeBuilder builder)
+    private void DiffInto(HashSet<OutputId> candidates, QueryChangeBuilder builder)
     {
-        foreach (string identity in candidates)
+        foreach (OutputId identity in candidates)
         {
-            IReadOnlyDictionary<string, object?>? current = ComputeOutputRow(identity);
-            bool wasEmitted = _emitted.TryGetValue(identity, out IReadOnlyDictionary<string, object?>? previous);
+            bool exists = TryComputeOutput(identity, out EmittedPair current);
+            bool wasEmitted = _emitted.TryGetValue(identity, out EmittedPair previous);
 
-            if (current is null)
+            if (!exists)
             {
                 if (wasEmitted)
                 {
                     _emitted.Remove(identity);
-                    WriteRow(previous!);
+                    WriteRow(previous, _rowScratch);
                     builder.AddRemovedRow(_rowScratch);
                 }
 
@@ -186,62 +170,48 @@ internal sealed partial class JoinReactiveQuery
             if (!wasEmitted)
             {
                 _emitted[identity] = current;
-                WriteRow(current);
+                WriteRow(current, _rowScratch);
                 builder.AddAddedRow(_rowScratch);
             }
-            else if (!RowsEqual(previous!, current))
+            else if (!ReferenceEquals(previous.Left, current.Left) || !ReferenceEquals(previous.Right, current.Right))
             {
+                // A new image of either side may still project to the same values; compare before emitting.
                 _emitted[identity] = current;
-                WriteRow(previous!);
-                builder.AddUpdatedBeforeRow(_rowScratch);
-                WriteRow(current);
-                builder.AddUpdatedRow(_rowScratch);
+                WriteRow(previous, _previousScratch);
+                WriteRow(current, _rowScratch);
+                if (!ReactiveCellOrdering.RowsEqual(_previousScratch, _rowScratch))
+                {
+                    builder.AddUpdatedBeforeRow(_previousScratch);
+                    builder.AddUpdatedRow(_rowScratch);
+                }
             }
         }
     }
 
     /// <summary>
-    /// Writes a (boxed) projected output row into the reused <see cref="_rowScratch"/>, in
-    /// <see cref="_outputSchema"/> column order. Step 1 (emit-side) wraps cell values via
-    /// <c>CellValue.From(object?)</c> — the documented residual boxing, targeted by Step 2.
-    /// </summary>
-    private void WriteRow(IReadOnlyDictionary<string, object?> row)
-    {
-        for (int i = 0; i < _outputColumns.Length; i++)
-        {
-            _rowScratch[i] = CellValue.From(row.TryGetValue(_outputColumns[i], out object? v) ? v : null);
-        }
-    }
-
-    /// <summary>
-    /// Computes the projected output row for an output identity from the final arrangements, or
-    /// <c>null</c> when the identity no longer joins or fails the WHERE predicate. Null-padded
+    /// Resolves an output identity against the final arrangements: the pair of side rows it projects from,
+    /// or <see langword="false"/> when the identity no longer joins or fails the WHERE predicate. Null-padded
     /// (outer-join) identities are delegated to the outer extension.
     /// </summary>
-    private IReadOnlyDictionary<string, object?>? ComputeOutputRow(string identity)
+    private bool TryComputeOutput(OutputId identity, out EmittedPair pair)
     {
-        (string leftPk, string rightPk) = SplitIdentity(identity);
-
-        if (string.Equals(leftPk, LeftSentinel, StringComparison.Ordinal)
-            || string.Equals(rightPk, RightSentinel, StringComparison.Ordinal))
+        if (identity.Kind != OutputKind.Inner)
         {
-            return ComputeOuterOutputRow(leftPk, rightPk);
+            return TryComputeOuterOutput(identity, out pair);
         }
 
-        if (!_leftRows.TryGetValue(leftPk, out IReadOnlyDictionary<string, object?>? leftRow)
-            || !_rightRows.TryGetValue(rightPk, out IReadOnlyDictionary<string, object?>? rightRow))
+        pair = default;
+        if (!_left.Rows.TryGetValue(identity.Left, out SideRow? leftRow)
+            || !_right.Rows.TryGetValue(identity.Right, out SideRow? rightRow)
+            || !leftRow.HasJoinKey
+            || !rightRow.HasJoinKey
+            || !leftRow.JoinKey.Equals(rightRow.JoinKey))
         {
-            return null;
+            return false;
         }
 
-        string? leftKey = JoinKey(leftRow, leftSide: true);
-        string? rightKey = JoinKey(rightRow, leftSide: false);
-        if (leftKey is null || rightKey is null || !leftKey.Equals(rightKey, StringComparison.Ordinal))
-        {
-            return null;
-        }
-
-        return ProjectJoined(leftRow, rightRow);
+        pair = new EmittedPair(leftRow, rightRow);
+        return PassesWhere(pair);
     }
 
     private void EnsureBaseline()
@@ -258,21 +228,21 @@ internal sealed partial class JoinReactiveQuery
     /// <summary>Materializes the current join result into <see cref="_emitted"/> without emitting it.</summary>
     private void MaterializeBaseline()
     {
-        foreach ((string key, Dictionary<string, IReadOnlyDictionary<string, object?>> leftBucket) in _leftByKey)
+        foreach ((PackedKey key, Dictionary<PackedKey, SideRow> leftBucket) in _left.ByKey)
         {
-            if (!_rightByKey.TryGetValue(key, out Dictionary<string, IReadOnlyDictionary<string, object?>>? rightBucket))
+            if (!_right.ByKey.TryGetValue(key, out Dictionary<PackedKey, SideRow>? rightBucket))
             {
                 continue;
             }
 
-            foreach ((string leftPk, IReadOnlyDictionary<string, object?> leftRow) in leftBucket)
+            foreach ((PackedKey leftPk, SideRow leftRow) in leftBucket)
             {
-                foreach ((string rightPk, IReadOnlyDictionary<string, object?> rightRow) in rightBucket)
+                foreach ((PackedKey rightPk, SideRow rightRow) in rightBucket)
                 {
-                    IReadOnlyDictionary<string, object?>? projected = ProjectJoined(leftRow, rightRow);
-                    if (projected is not null)
+                    var pair = new EmittedPair(leftRow, rightRow);
+                    if (PassesWhere(pair))
                     {
-                        _emitted[OutputIdentity(leftPk, rightPk)] = projected;
+                        _emitted[new OutputId(leftPk, rightPk, OutputKind.Inner)] = pair;
                     }
                 }
             }
@@ -281,182 +251,42 @@ internal sealed partial class JoinReactiveQuery
         MaterializeOuterBaseline();
     }
 
-    private void AddRow(
-        Dictionary<string, Dictionary<string, IReadOnlyDictionary<string, object?>>> byKey,
-        Dictionary<string, IReadOnlyDictionary<string, object?>> rows,
-        IReadOnlyList<string> primaryKeys,
-        bool leftSide,
-        IReadOnlyDictionary<string, object?> row)
-    {
-        string pk = Identity(primaryKeys, row);
-        IReadOnlyDictionary<string, object?> copy = Copy(row);
-        rows[pk] = copy;
-
-        string? key = JoinKey(copy, leftSide);
-        if (key is null)
-        {
-            return;
-        }
-
-        if (!byKey.TryGetValue(key, out Dictionary<string, IReadOnlyDictionary<string, object?>>? bucket))
-        {
-            bucket = new Dictionary<string, IReadOnlyDictionary<string, object?>>(StringComparer.Ordinal);
-            byKey[key] = bucket;
-        }
-
-        bucket[pk] = copy;
-    }
-
-    private void ApplyDeltas(
-        List<SideDelta> deltas,
-        Dictionary<string, Dictionary<string, IReadOnlyDictionary<string, object?>>> byKey,
-        Dictionary<string, IReadOnlyDictionary<string, object?>> rows,
-        bool leftSide)
+    /// <summary>Applies one side's signed deltas to its arrangement, in order.</summary>
+    private static void ApplyDeltas(List<SideDelta> deltas, JoinSide side)
     {
         foreach (SideDelta delta in deltas)
         {
-            string? key = JoinKey(delta.Row, leftSide);
-
             if (delta.Weight < 0)
             {
-                RemoveFromArrangement(byKey, rows, delta.PrimaryKey, key);
+                side.Remove(delta.Row);
             }
             else
             {
-                IReadOnlyDictionary<string, object?> copy = Copy(delta.Row);
-                rows[delta.PrimaryKey] = copy;
-
-                if (key is not null)
-                {
-                    if (!byKey.TryGetValue(key, out Dictionary<string, IReadOnlyDictionary<string, object?>>? bucket))
-                    {
-                        bucket = new Dictionary<string, IReadOnlyDictionary<string, object?>>(StringComparer.Ordinal);
-                        byKey[key] = bucket;
-                    }
-
-                    bucket[delta.PrimaryKey] = copy;
-                }
+                side.Store(delta.Row);
             }
         }
     }
 
-    private static void RemoveFromArrangement(
-        Dictionary<string, Dictionary<string, IReadOnlyDictionary<string, object?>>> byKey,
-        Dictionary<string, IReadOnlyDictionary<string, object?>> rows,
-        string primaryKey,
-        string? key)
+    /// <summary>Returns the retracted (before) images of this batch to their side's pool.</summary>
+    private void ReleaseRetractedImages()
     {
-        rows.Remove(primaryKey);
-
-        if (key is null || !byKey.TryGetValue(key, out Dictionary<string, IReadOnlyDictionary<string, object?>>? bucket))
+        foreach (SideDelta delta in _leftDeltas)
         {
-            return;
+            if (delta.Weight < 0)
+            {
+                _left.Release(delta.Row);
+            }
         }
 
-        bucket.Remove(primaryKey);
-        if (bucket.Count == 0)
+        foreach (SideDelta delta in _rightDeltas)
         {
-            byKey.Remove(key);
+            if (delta.Weight < 0)
+            {
+                _right.Release(delta.Row);
+            }
         }
     }
 
     private bool IsLeftTable(string table) =>
         table.Equals(_shape.LeftTable, StringComparison.OrdinalIgnoreCase);
-
-    // Output identity = length-prefixed leftPk followed by rightPk, so the split point is unambiguous
-    // for any pk content (including the "L"/"R" outer-join sentinels).
-    private static string OutputIdentity(string leftPk, string rightPk) =>
-        leftPk.Length.ToString(CultureInfo.InvariantCulture) + ":" + leftPk + rightPk;
-
-    private static (string LeftPk, string RightPk) SplitIdentity(string identity)
-    {
-        int colon = identity.IndexOf(':');
-        int leftLength = int.Parse(identity.Substring(0, colon), CultureInfo.InvariantCulture);
-        int start = colon + 1;
-        return (identity.Substring(start, leftLength), identity[(start + leftLength)..]);
-    }
-
-    private static string Identity(IReadOnlyList<string> primaryKeys, IReadOnlyDictionary<string, object?> row)
-    {
-        return Compose(primaryKeys.Select(column =>
-        {
-            object? value = row.TryGetValue(column, out object? v) ? v : null;
-            return value is null ? null : Convert.ToString(value, CultureInfo.InvariantCulture);
-        }));
-    }
-
-    /// <summary>
-    /// Computes the equi-join key for a row from the relevant side's join columns, or <c>null</c> when
-    /// any join column is NULL (SQL equi-joins never match on NULL).
-    /// </summary>
-    private string? JoinKey(IReadOnlyDictionary<string, object?> row, bool leftSide)
-    {
-        var parts = new List<string?>(_shape.Keys.Count);
-        foreach (JoinKeyColumn key in _shape.Keys)
-        {
-            string column = leftSide ? key.LeftColumn : key.RightColumn;
-            object? value = row.TryGetValue(column, out object? v) ? v : null;
-            if (value is null)
-            {
-                return null;
-            }
-
-            parts.Add(Convert.ToString(value, CultureInfo.InvariantCulture));
-        }
-
-        return Compose(parts);
-    }
-
-    /// <summary>
-    /// Renders an ordered list of component strings as a single collision-free key by length-prefixing
-    /// each component ("&lt;len&gt;:&lt;text&gt;"); a <c>null</c> component renders as "n".
-    /// </summary>
-    private static string Compose(IEnumerable<string?> components)
-    {
-        var builder = new System.Text.StringBuilder();
-        foreach (string? component in components)
-        {
-            if (component is null)
-            {
-                builder.Append('n');
-            }
-            else
-            {
-                builder.Append('v')
-                    .Append(component.Length.ToString(CultureInfo.InvariantCulture))
-                    .Append(':')
-                    .Append(component);
-            }
-        }
-
-        return builder.ToString();
-    }
-
-    private static IReadOnlyDictionary<string, object?> Copy(IReadOnlyDictionary<string, object?> row) =>
-        new Dictionary<string, object?>(
-            row.ToDictionary(pair => pair.Key, pair => pair.Value),
-            StringComparer.OrdinalIgnoreCase);
-
-    private static bool RowsEqual(IReadOnlyDictionary<string, object?> a, IReadOnlyDictionary<string, object?> b)
-    {
-        if (a.Count != b.Count)
-        {
-            return false;
-        }
-
-        foreach ((string key, object? value) in a)
-        {
-            if (!b.TryGetValue(key, out object? other))
-            {
-                return false;
-            }
-
-            if (ReactiveValueComparer.Instance.Compare(value, other) != 0)
-            {
-                return false;
-            }
-        }
-
-        return true;
-    }
 }

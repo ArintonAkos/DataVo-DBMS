@@ -15,40 +15,55 @@ namespace DataVo.Core.Runtime.Reactive;
 /// <see cref="Apply"/> updates the index, recomputes the window, and emits the diff against the
 /// previous window: rows entering are Added, rows leaving are Removed, and rows that stay but whose
 /// projected values changed are Updated.
+/// <para>
+/// The arrangement is typed: each entry keeps only the columns the view reads (sort keys, primary key and
+/// output columns) as unboxed <see cref="CellValue"/> cells, identified by a <see cref="PackedKey"/>. Entries
+/// are pooled and reused once they leave both the index and the delivered window, so a steady stream of
+/// updates allocates no dictionaries, identity strings or boxed values during dispatch.
+/// </para>
 /// </remarks>
 internal sealed class TopKReactiveQuery : IBorrowedReactiveQuery
 {
-    private sealed record SortKey(string Column, bool Ascending);
+    private sealed record SortKey(int Ordinal, bool Ascending);
 
+    /// <summary>One indexed row: its identity and its stored cells, immutable while it is indexed.</summary>
     private sealed class Entry
     {
-        public required string Key { get; init; }
+        public Entry(int width) => Cells = new CellValue[width];
 
-        // Full source row image; read by the sort comparator (sort keys may not be in the projection).
-        public required IReadOnlyDictionary<string, object?> Row { get; init; }
+        public PackedKey Key;
 
-        // Projected output row, computed once at entry creation so the per-dispatch window fill does not
-        // re-project. This is what the window diff compares and what is emitted.
-        public required IReadOnlyDictionary<string, object?> Projected { get; init; }
+        public readonly CellValue[] Cells;
+
+        // Whether the sorted index holds the entry, and whether the delivered window still references it.
+        // An entry returns to the pool only when both are false.
+        public bool InIndex;
+
+        public bool InWindow;
     }
 
     private readonly ReactivePredicate _predicate;
     private readonly List<SortKey> _sortKeys = [];
-    private readonly List<string> _primaryKeys;
     private readonly int _skip;
     private readonly int _take;
-    private readonly bool _selectStar;
-    private readonly List<string> _projection = [];
+
+    private readonly ReactiveRowLayout _layout;
+    private readonly int[] _primaryKeyOrdinals;
+    private readonly int[] _outputOrdinals;
 
     private readonly SortedSet<Entry> _index;
-    private readonly Dictionary<string, Entry> _byKey = new(StringComparer.Ordinal);
-    // Double-buffered window: _window is current, _spareWindow is cleared and refilled each dispatch and
-    // then swapped in, so recomputing the window allocates no new dictionary at steady state.
-    private Dictionary<string, IReadOnlyDictionary<string, object?>> _window = new(StringComparer.Ordinal);
-    private Dictionary<string, IReadOnlyDictionary<string, object?>> _spareWindow = new(StringComparer.Ordinal);
+    private readonly Dictionary<PackedKey, Entry> _byKey = [];
+    private readonly Stack<Entry> _pool = new();
+    private readonly CellValue[] _imageScratch;
+
+    // Double-buffered window: the current one and a spare that is cleared, refilled and swapped in on each
+    // dispatch, so recomputing the window allocates nothing at steady state.
+    private List<Entry> _window = [];
+    private List<Entry> _spareWindow = [];
+    private Dictionary<PackedKey, Entry> _windowByKey = [];
+    private Dictionary<PackedKey, Entry> _spareWindowByKey = [];
 
     private readonly ReactiveRowSchema _outputSchema;
-    private readonly string[] _outputColumns;
     private readonly QueryChangeBuilder _legacyBuilder;
     private readonly CellValue[] _rowScratch;
 
@@ -65,47 +80,38 @@ internal sealed class TopKReactiveQuery : IBorrowedReactiveQuery
         Table = select.FromTable!.Name;
         _predicate = ReactivePredicate.Compile(select.WhereExpression);
 
-        foreach (OrderByColumnNode column in select.OrderByExpression!.Columns)
-        {
-            _sortKeys.Add(new SortKey(StripQualifier(column.Column.Name), column.IsAscending));
-        }
-
         select.LimitExpression!.EnsureBound();
         _skip = Math.Max(0, select.LimitExpression!.SkipTarget);
         _take = Math.Max(0, select.LimitExpression!.TakeTarget);
 
-        foreach (SelectColumnNode column in select.Columns)
-        {
-            if (IsStarColumn(column))
-            {
-                _selectStar = true;
-                continue;
-            }
-
-            _projection.Add(ResolveProjectedColumnName(column));
-        }
-
-        if (_projection.Count == 0)
-        {
-            _selectStar = true;
-        }
-
-        _primaryKeys = engine.Catalog.GetTablePrimaryKeys(Table, databaseName);
-        if (_primaryKeys.Count == 0)
+        List<string> projection = ResolveProjection(select, out bool selectStar);
+        List<string> primaryKeys = engine.Catalog.GetTablePrimaryKeys(Table, databaseName);
+        if (primaryKeys.Count == 0)
         {
             throw new NotSupportedException(
                 $"Reactive top-K requires a primary key on table '{Table}' to identify rows across updates.");
         }
 
-        _index = new SortedSet<Entry>(new EntryComparer(_sortKeys));
-
         // Output schema: the explicit projection columns, or the table's catalog columns for SELECT *.
         // A SELECT * top-K carries no schema in the SQL, so the borrowed fast lane takes it from the
         // catalog here (the same catalog access already used for the primary key above).
-        string[] outputColumns = _selectStar
+        string[] outputColumns = selectStar
             ? engine.Catalog.GetTableColumns(Table, databaseName).Select(c => c.Name).ToArray()
-            : _projection.ToArray();
-        _outputColumns = outputColumns;
+            : projection.ToArray();
+
+        List<string> sortColumns = select.OrderByExpression!.Columns
+            .Select(column => StripQualifier(column.Column.Name))
+            .ToList();
+        _layout = new ReactiveRowLayout(DistinctColumns(outputColumns, sortColumns, primaryKeys));
+        _outputOrdinals = outputColumns.Select(_layout.OrdinalOf).ToArray();
+        _primaryKeyOrdinals = primaryKeys.Select(_layout.OrdinalOf).ToArray();
+        for (int i = 0; i < sortColumns.Count; i++)
+        {
+            _sortKeys.Add(new SortKey(_layout.OrdinalOf(sortColumns[i]), select.OrderByExpression.Columns[i].IsAscending));
+        }
+
+        _imageScratch = new CellValue[_layout.Count];
+        _index = new SortedSet<Entry>(new EntryComparer(_sortKeys));
         _outputSchema = new ReactiveRowSchema(outputColumns);
         _rowScratch = new CellValue[outputColumns.Length];
         _legacyBuilder = new QueryChangeBuilder(_outputSchema);
@@ -124,11 +130,17 @@ internal sealed class TopKReactiveQuery : IBorrowedReactiveQuery
         {
             if (_predicate.Matches(row))
             {
-                AddEntry(row);
+                Entry entry = RentEntry();
+                _layout.Load(row, entry.Cells);
+                AddEntry(entry);
             }
         }
 
-        FillWindowInto(_window);
+        FillWindowInto(_window, _windowByKey);
+        foreach (Entry entry in _window)
+        {
+            entry.InWindow = true;
+        }
     }
 
     /// <inheritdoc />
@@ -150,127 +162,175 @@ internal sealed class TopKReactiveQuery : IBorrowedReactiveQuery
         for (int i = 0; i < tableChanges.Count; i++)
         {
             RowChange change = tableChanges[i];
-            bool beforeMatches = change.Before is not null && _predicate.Matches(change.Before);
-            bool afterMatches = change.After is not null && _predicate.Matches(change.After);
-
-            switch (change.Kind)
+            if (change.Kind is ChangeKind.Delete or ChangeKind.Update
+                && change.Before is not null
+                && _predicate.Matches(change.Before))
             {
-                case ChangeKind.Insert:
-                    if (afterMatches)
-                    {
-                        AddEntry(change.After!);
-                    }
+                RemoveEntry(change.Before);
+            }
 
-                    break;
-
-                case ChangeKind.Delete:
-                    if (beforeMatches)
-                    {
-                        RemoveEntry(change.Before!);
-                    }
-
-                    break;
-
-                case ChangeKind.Update:
-                    if (beforeMatches)
-                    {
-                        RemoveEntry(change.Before!);
-                    }
-
-                    if (afterMatches)
-                    {
-                        AddEntry(change.After!);
-                    }
-
-                    break;
+            if (change.Kind is ChangeKind.Insert or ChangeKind.Update)
+            {
+                ApplyAfterImage(change);
             }
         }
 
-        FillWindowInto(_spareWindow);
-        Dictionary<string, IReadOnlyDictionary<string, object?>> next = _spareWindow;
+        FillWindowInto(_spareWindow, _spareWindowByKey);
+        EmitWindowDiff(builder);
+        SwapWindows();
+    }
 
-        // Rows entering the window are Added; rows that stayed but changed value are Updated (with their
-        // before-image); rows that left are Removed. Each output row is written into the reused scratch.
-        foreach ((string key, IReadOnlyDictionary<string, object?> row) in next)
+    /// <summary>Indexes a change's after-image when it matches, reading the typed image when one was captured.</summary>
+    private void ApplyAfterImage(RowChange change)
+    {
+        if (change.TypedAfter is { } typed)
         {
-            if (!_window.TryGetValue(key, out IReadOnlyDictionary<string, object?>? previous))
+            RowRef row = typed.AsRowRef();
+            if (_predicate.Matches(row))
             {
-                WriteRow(row);
+                Entry entry = RentEntry();
+                _layout.Load(row, typed.Schema, entry.Cells);
+                AddEntry(entry);
+            }
+        }
+        else if (change.After is { } after && _predicate.Matches(after))
+        {
+            Entry entry = RentEntry();
+            _layout.Load(after, entry.Cells);
+            AddEntry(entry);
+        }
+    }
+
+    /// <summary>
+    /// Emits the window diff: rows entering the window are Added, rows that stayed but changed value are
+    /// Updated (with their before-image), and rows that left are Removed.
+    /// </summary>
+    private void EmitWindowDiff(QueryChangeBuilder builder)
+    {
+        foreach (Entry entry in _spareWindow)
+        {
+            if (!_windowByKey.TryGetValue(entry.Key, out Entry? previous))
+            {
+                WriteRow(entry);
                 builder.AddAddedRow(_rowScratch);
             }
-            else if (!ReferenceEquals(previous, row) && !RowsEqual(previous, row))
+            else if (!ReferenceEquals(previous, entry) && !OutputsEqual(previous, entry))
             {
-                // An unchanged window entry keeps the same cached Projected instance across dispatches, so
-                // the ReferenceEquals short-circuit skips RowsEqual (and its per-call boxed enumerator) for
-                // every untouched row — making per-dispatch diff allocation independent of window size.
+                // An untouched window row keeps the same entry across dispatches, so the reference check
+                // skips the value comparison for every row the batch did not change.
                 WriteRow(previous);
                 builder.AddUpdatedBeforeRow(_rowScratch);
-                WriteRow(row);
+                WriteRow(entry);
                 builder.AddUpdatedRow(_rowScratch);
             }
         }
 
-        foreach ((string key, IReadOnlyDictionary<string, object?> row) in _window)
+        foreach (Entry previous in _window)
         {
-            if (!next.ContainsKey(key))
+            if (!_spareWindowByKey.ContainsKey(previous.Key))
             {
-                WriteRow(row);
+                WriteRow(previous);
                 builder.AddRemovedRow(_rowScratch);
             }
         }
-
-        // Swap the double-buffered windows: the just-filled buffer becomes current; the old current
-        // becomes the spare to be cleared and refilled next dispatch (no per-dispatch allocation).
-        _spareWindow = _window;
-        _window = next;
     }
 
     /// <summary>
-    /// Writes a (already-projected) window row into the reused <see cref="_rowScratch"/>, in
-    /// <see cref="_outputSchema"/> column order. Step 1 (emit-side) wraps the boxed cell values via
-    /// <c>CellValue.From(object?)</c> — the documented residual boxing, removed in Step 2.
+    /// Makes the just-filled window current and returns entries that neither the index nor the new window
+    /// references to the pool.
     /// </summary>
-    private void WriteRow(IReadOnlyDictionary<string, object?> row)
+    private void SwapWindows()
     {
-        for (int i = 0; i < _outputColumns.Length; i++)
+        foreach (Entry previous in _window)
         {
-            _rowScratch[i] = CellValue.From(row.TryGetValue(_outputColumns[i], out object? v) ? v : null);
+            previous.InWindow = false;
+        }
+
+        foreach (Entry entry in _spareWindow)
+        {
+            entry.InWindow = true;
+        }
+
+        foreach (Entry previous in _window)
+        {
+            if (!previous.InWindow && !previous.InIndex)
+            {
+                _pool.Push(previous);
+            }
+        }
+
+        (_window, _spareWindow) = (_spareWindow, _window);
+        (_windowByKey, _spareWindowByKey) = (_spareWindowByKey, _windowByKey);
+    }
+
+    /// <summary>Writes an entry's output columns into the reused <see cref="_rowScratch"/>, in output order.</summary>
+    private void WriteRow(Entry entry)
+    {
+        for (int i = 0; i < _outputOrdinals.Length; i++)
+        {
+            int ordinal = _outputOrdinals[i];
+            _rowScratch[i] = ordinal >= 0 ? entry.Cells[ordinal] : CellValue.Null;
         }
     }
 
-    private void AddEntry(IReadOnlyDictionary<string, object?> row)
+    private bool OutputsEqual(Entry left, Entry right)
     {
-        string key = ComputeIdentity(row);
-
-        // Out-of-place updates can produce a fresh row image for an existing identity; replace.
-        if (_byKey.TryGetValue(key, out Entry? existing))
+        foreach (int ordinal in _outputOrdinals)
         {
-            _index.Remove(existing);
+            if (ordinal >= 0 && ReactiveCellOrdering.Compare(left.Cells[ordinal], right.Cells[ordinal]) != 0)
+            {
+                return false;
+            }
         }
 
-        IReadOnlyDictionary<string, object?> copy = Copy(row);
-        var entry = new Entry { Key = key, Row = copy, Projected = Project(copy) };
+        return true;
+    }
+
+    private Entry RentEntry() => _pool.Count > 0 ? _pool.Pop() : new Entry(_layout.Count);
+
+    /// <summary>Indexes a loaded entry, replacing any entry with the same primary key.</summary>
+    private void AddEntry(Entry entry)
+    {
+        entry.Key = PackedKey.From(entry.Cells, _primaryKeyOrdinals);
+
+        // Out-of-place updates can produce a fresh row image for an existing identity; replace.
+        if (_byKey.TryGetValue(entry.Key, out Entry? existing))
+        {
+            Unindex(existing);
+        }
+
+        entry.InIndex = true;
         _index.Add(entry);
-        _byKey[key] = entry;
+        _byKey[entry.Key] = entry;
     }
 
     private void RemoveEntry(IReadOnlyDictionary<string, object?> row)
     {
-        string key = ComputeIdentity(row);
+        _layout.Load(row, _imageScratch);
+        PackedKey key = PackedKey.From(_imageScratch, _primaryKeyOrdinals);
         if (_byKey.TryGetValue(key, out Entry? existing))
         {
-            _index.Remove(existing);
             _byKey.Remove(key);
+            Unindex(existing);
         }
     }
 
-    // Fills the target window buffer (cleared first) with the top-K entries' cached projected rows.
-    // No per-entry Project/allocation — projections are computed once at entry creation.
-    private void FillWindowInto(Dictionary<string, IReadOnlyDictionary<string, object?>> target)
+    private void Unindex(Entry entry)
+    {
+        _index.Remove(entry);
+        entry.InIndex = false;
+        if (!entry.InWindow)
+        {
+            _pool.Push(entry);
+        }
+    }
+
+    // Fills the target window buffers (cleared first) with the first `take` entries after `skip`.
+    private void FillWindowInto(List<Entry> target, Dictionary<PackedKey, Entry> targetByKey)
     {
         target.Clear();
+        targetByKey.Clear();
         int skipped = 0;
-        int taken = 0;
 
         foreach (Entry entry in _index)
         {
@@ -280,67 +340,51 @@ internal sealed class TopKReactiveQuery : IBorrowedReactiveQuery
                 continue;
             }
 
-            if (taken >= _take)
+            if (target.Count >= _take)
             {
                 break;
             }
 
-            target[entry.Key] = entry.Projected;
-            taken++;
+            target.Add(entry);
+            targetByKey[entry.Key] = entry;
         }
     }
 
-    private string ComputeIdentity(IReadOnlyDictionary<string, object?> row)
+    private static List<string> DistinctColumns(params IEnumerable<string>[] groups)
     {
-        return string.Join(
-            "",
-            _primaryKeys.Select(column =>
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var columns = new List<string>();
+        foreach (IEnumerable<string> group in groups)
+        {
+            foreach (string column in group)
             {
-                object? value = row.TryGetValue(column, out object? v) ? v : null;
-                return value is null ? " NULL" : "v:" + Convert.ToString(value, System.Globalization.CultureInfo.InvariantCulture);
-            }));
-    }
-
-    private IReadOnlyDictionary<string, object?> Project(IReadOnlyDictionary<string, object?> row)
-    {
-        if (_selectStar)
-        {
-            return Copy(row);
-        }
-
-        var projected = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
-        foreach (string column in _projection)
-        {
-            projected[column] = row.TryGetValue(column, out object? value) ? value : null;
-        }
-
-        return projected;
-    }
-
-    private static IReadOnlyDictionary<string, object?> Copy(IReadOnlyDictionary<string, object?> row) =>
-        new Dictionary<string, object?>(row, StringComparer.OrdinalIgnoreCase);
-
-    private static bool RowsEqual(IReadOnlyDictionary<string, object?> a, IReadOnlyDictionary<string, object?> b)
-    {
-        if (a.Count != b.Count)
-        {
-            return false;
-        }
-
-        foreach ((string key, object? value) in a)
-        {
-            if (!b.TryGetValue(key, out object? other))
-            {
-                return false;
-            }
-
-            if (ReactiveValueComparer.Instance.Compare(value, other) != 0)
-            {
-                return false;
+                if (seen.Add(column))
+                {
+                    columns.Add(column);
+                }
             }
         }
 
-        return true;
+        return columns;
+    }
+
+    private static List<string> ResolveProjection(SelectStatement select, out bool selectStar)
+    {
+        selectStar = false;
+        var projection = new List<string>();
+        foreach (SelectColumnNode column in select.Columns)
+        {
+            if (IsStarColumn(column))
+            {
+                selectStar = true;
+                continue;
+            }
+
+            projection.Add(ResolveProjectedColumnName(column));
+        }
+
+        selectStar |= projection.Count == 0;
+        return projection;
     }
 
     private sealed class EntryComparer(List<SortKey> sortKeys) : IComparer<Entry>
@@ -352,15 +396,17 @@ internal sealed class TopKReactiveQuery : IBorrowedReactiveQuery
                 return 0;
             }
 
-            DataVo.Core.Compat.ThrowHelper.ThrowIfNull(x);
-            DataVo.Core.Compat.ThrowHelper.ThrowIfNull(y);
+            if (x is null || y is null)
+            {
+                throw new ArgumentNullException(x is null ? nameof(x) : nameof(y));
+            }
 
             foreach (SortKey sortKey in sortKeys)
             {
-                object? left = x.Row.TryGetValue(sortKey.Column, out object? lv) ? lv : null;
-                object? right = y.Row.TryGetValue(sortKey.Column, out object? rv) ? rv : null;
+                CellValue left = sortKey.Ordinal >= 0 ? x.Cells[sortKey.Ordinal] : CellValue.Null;
+                CellValue right = sortKey.Ordinal >= 0 ? y.Cells[sortKey.Ordinal] : CellValue.Null;
 
-                int comparison = ReactiveValueComparer.Instance.Compare(left, right);
+                int comparison = ReactiveCellOrdering.Compare(left, right);
                 if (comparison != 0)
                 {
                     return sortKey.Ascending ? comparison : -comparison;
@@ -369,7 +415,7 @@ internal sealed class TopKReactiveQuery : IBorrowedReactiveQuery
 
             // Break ties on the stable primary-key identity so distinct rows never collapse and the
             // ordering is deterministic.
-            return string.CompareOrdinal(x.Key, y.Key);
+            return x.Key.CompareTo(y.Key);
         }
     }
 

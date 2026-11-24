@@ -18,39 +18,34 @@ internal sealed partial class JoinReactiveQuery
     private bool EmitsRightNullPad => _shape.Kind is JoinKind.Right or JoinKind.Full;
 
     /// <summary>
-    /// Recomputes a null-padded output identity from final state. <paramref name="leftPk"/> is the
-    /// <see cref="LeftSentinel"/> for a right-padded row; <paramref name="rightPk"/> is the
-    /// <see cref="RightSentinel"/> for a left-padded row.
+    /// Recomputes a null-padded output identity from final state: a left row with no right match
+    /// (<see cref="OutputKind.LeftPadded"/>) or a right row with no left match (<see cref="OutputKind.RightPadded"/>).
     /// </summary>
-    private IReadOnlyDictionary<string, object?>? ComputeOuterOutputRow(string leftPk, string rightPk)
+    private bool TryComputeOuterOutput(OutputId identity, out EmittedPair pair)
     {
-        // Left row padded with NULLs on the right side.
-        if (string.Equals(rightPk, RightSentinel, StringComparison.Ordinal))
+        pair = default;
+        if (identity.Kind == OutputKind.LeftPadded)
         {
             if (!EmitsLeftNullPad
-                || !_leftRows.TryGetValue(leftPk, out IReadOnlyDictionary<string, object?>? leftRow)
-                || HasRightMatch(leftRow))
+                || !_left.Rows.TryGetValue(identity.Left, out SideRow? leftRow)
+                || _right.HasMatchFor(leftRow))
             {
-                return null;
+                return false;
             }
 
-            return ProjectJoined(leftRow, rightRow: null);
+            pair = new EmittedPair(leftRow, null);
+            return PassesWhere(pair);
         }
 
-        // Right row padded with NULLs on the left side.
-        if (string.Equals(leftPk, LeftSentinel, StringComparison.Ordinal))
+        if (!EmitsRightNullPad
+            || !_right.Rows.TryGetValue(identity.Right, out SideRow? rightRow)
+            || _left.HasMatchFor(rightRow))
         {
-            if (!EmitsRightNullPad
-                || !_rightRows.TryGetValue(rightPk, out IReadOnlyDictionary<string, object?>? rightRow)
-                || HasLeftMatch(rightRow))
-            {
-                return null;
-            }
-
-            return ProjectJoined(leftRow: null, rightRow);
+            return false;
         }
 
-        return null;
+        pair = new EmittedPair(null, rightRow);
+        return PassesWhere(pair);
     }
 
     /// <summary>Adds the baseline null-padded rows (left/right rows with no match) without emitting.</summary>
@@ -58,30 +53,24 @@ internal sealed partial class JoinReactiveQuery
     {
         if (EmitsLeftNullPad)
         {
-            foreach ((string leftPk, IReadOnlyDictionary<string, object?> leftRow) in _leftRows)
+            foreach ((PackedKey leftPk, SideRow leftRow) in _left.Rows)
             {
-                if (!HasRightMatch(leftRow))
+                var pair = new EmittedPair(leftRow, null);
+                if (!_right.HasMatchFor(leftRow) && PassesWhere(pair))
                 {
-                    IReadOnlyDictionary<string, object?>? padded = ProjectJoined(leftRow, rightRow: null);
-                    if (padded is not null)
-                    {
-                        _emitted[OutputIdentity(leftPk, RightSentinel)] = padded;
-                    }
+                    _emitted[LeftPadded(leftPk)] = pair;
                 }
             }
         }
 
         if (EmitsRightNullPad)
         {
-            foreach ((string rightPk, IReadOnlyDictionary<string, object?> rightRow) in _rightRows)
+            foreach ((PackedKey rightPk, SideRow rightRow) in _right.Rows)
             {
-                if (!HasLeftMatch(rightRow))
+                var pair = new EmittedPair(null, rightRow);
+                if (!_left.HasMatchFor(rightRow) && PassesWhere(pair))
                 {
-                    IReadOnlyDictionary<string, object?>? padded = ProjectJoined(leftRow: null, rightRow);
-                    if (padded is not null)
-                    {
-                        _emitted[OutputIdentity(LeftSentinel, rightPk)] = padded;
-                    }
+                    _emitted[RightPadded(rightPk)] = pair;
                 }
             }
         }
@@ -90,30 +79,29 @@ internal sealed partial class JoinReactiveQuery
     /// <summary>
     /// Collects the null-padded identities a change batch can affect: every changed left/right row, plus
     /// every opposite-side row sharing a changed row's join key (its match status may have flipped). All
-    /// are recomputed from final state in <see cref="ComputeOuterOutputRow"/>.
+    /// are recomputed from final state in <see cref="TryComputeOuterOutput"/>.
     /// </summary>
     private void CollectOuterCandidates(
         List<SideDelta> leftDeltas,
         List<SideDelta> rightDeltas,
-        HashSet<string> candidates)
+        HashSet<OutputId> candidates)
     {
         if (EmitsLeftNullPad)
         {
             // A left row may flip its null-padded status when it changes...
             foreach (SideDelta delta in leftDeltas)
             {
-                candidates.Add(OutputIdentity(delta.PrimaryKey, RightSentinel));
+                candidates.Add(LeftPadded(delta.Row.Pk));
             }
 
             // ...or when a right row at its join key appears/disappears.
             foreach (SideDelta delta in rightDeltas)
             {
-                string? key = JoinKey(delta.Row, leftSide: false);
-                if (key is not null && _leftByKey.TryGetValue(key, out Dictionary<string, IReadOnlyDictionary<string, object?>>? bucket))
+                if (_left.TryGetBucket(delta.Row, out Dictionary<PackedKey, SideRow>? bucket))
                 {
-                    foreach (string leftPk in bucket.Keys)
+                    foreach (PackedKey leftPk in bucket.Keys)
                     {
-                        candidates.Add(OutputIdentity(leftPk, RightSentinel));
+                        candidates.Add(LeftPadded(leftPk));
                     }
                 }
             }
@@ -123,36 +111,23 @@ internal sealed partial class JoinReactiveQuery
         {
             foreach (SideDelta delta in rightDeltas)
             {
-                candidates.Add(OutputIdentity(LeftSentinel, delta.PrimaryKey));
+                candidates.Add(RightPadded(delta.Row.Pk));
             }
 
             foreach (SideDelta delta in leftDeltas)
             {
-                string? key = JoinKey(delta.Row, leftSide: true);
-                if (key is not null && _rightByKey.TryGetValue(key, out Dictionary<string, IReadOnlyDictionary<string, object?>>? bucket))
+                if (_right.TryGetBucket(delta.Row, out Dictionary<PackedKey, SideRow>? bucket))
                 {
-                    foreach (string rightPk in bucket.Keys)
+                    foreach (PackedKey rightPk in bucket.Keys)
                     {
-                        candidates.Add(OutputIdentity(LeftSentinel, rightPk));
+                        candidates.Add(RightPadded(rightPk));
                     }
                 }
             }
         }
     }
 
-    private bool HasRightMatch(IReadOnlyDictionary<string, object?> leftRow)
-    {
-        string? key = JoinKey(leftRow, leftSide: true);
-        return key is not null
-            && _rightByKey.TryGetValue(key, out Dictionary<string, IReadOnlyDictionary<string, object?>>? bucket)
-            && bucket.Count > 0;
-    }
+    private static OutputId LeftPadded(PackedKey leftPk) => new(leftPk, default, OutputKind.LeftPadded);
 
-    private bool HasLeftMatch(IReadOnlyDictionary<string, object?> rightRow)
-    {
-        string? key = JoinKey(rightRow, leftSide: false);
-        return key is not null
-            && _leftByKey.TryGetValue(key, out Dictionary<string, IReadOnlyDictionary<string, object?>>? bucket)
-            && bucket.Count > 0;
-    }
+    private static OutputId RightPadded(PackedKey rightPk) => new(default, rightPk, OutputKind.RightPadded);
 }

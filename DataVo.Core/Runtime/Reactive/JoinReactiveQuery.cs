@@ -22,13 +22,15 @@ internal sealed partial class JoinReactiveQuery : IBorrowedReactiveQuery
     private readonly JoinShape _shape;
     private readonly ReactivePredicate _where;
     private readonly bool _hasWhere;
-    private readonly IReadOnlyList<string> _leftPrimaryKeys;
-    private readonly IReadOnlyList<string> _rightPrimaryKeys;
+    private readonly JoinSide _left;
+    private readonly JoinSide _right;
+    private readonly JoinWhereContext _whereContext;
 
     private readonly ReactiveRowSchema _outputSchema;
-    private readonly string[] _outputColumns;
+    private readonly OutputSource[] _outputSources;
     private readonly QueryChangeBuilder _legacyBuilder;
     private readonly CellValue[] _rowScratch;
+    private readonly CellValue[] _previousScratch;
 
     /// <summary>
     /// Compiles the supplied join shape into an incremental equi-join operator.
@@ -49,54 +51,45 @@ internal sealed partial class JoinReactiveQuery : IBorrowedReactiveQuery
         _where = ReactivePredicate.Compile(shape.Where);
         _hasWhere = shape.Where is not null;
 
-        _leftPrimaryKeys = engine.Catalog.GetTablePrimaryKeys(shape.LeftTable, databaseName);
-        _rightPrimaryKeys = engine.Catalog.GetTablePrimaryKeys(shape.RightTable, databaseName);
+        List<string> leftPrimaryKeys = engine.Catalog.GetTablePrimaryKeys(shape.LeftTable, databaseName);
+        List<string> rightPrimaryKeys = engine.Catalog.GetTablePrimaryKeys(shape.RightTable, databaseName);
 
-        if (_leftPrimaryKeys.Count == 0)
+        if (leftPrimaryKeys.Count == 0)
         {
             throw new NotSupportedException(
                 $"Reactive joins require a primary key on table '{shape.LeftTable}' to identify rows across updates.");
         }
 
-        if (_rightPrimaryKeys.Count == 0)
+        if (rightPrimaryKeys.Count == 0)
         {
             throw new NotSupportedException(
                 $"Reactive joins require a primary key on table '{shape.RightTable}' to identify rows across updates.");
         }
 
+        // Each side stores its catalog columns, so SELECT *, unqualified columns and the WHERE context
+        // all resolve against the same layout the batch join reads.
+        _left = new JoinSide(
+            CatalogLayout(engine, shape.LeftTable, databaseName),
+            leftPrimaryKeys,
+            shape.Keys.Select(key => key.LeftColumn).ToList());
+        _right = new JoinSide(
+            CatalogLayout(engine, shape.RightTable, databaseName),
+            rightPrimaryKeys,
+            shape.Keys.Select(key => key.RightColumn).ToList());
+        _whereContext = new JoinWhereContext(shape, _left.Layout, _right.Layout);
+
         BuildProjection();
 
-        // Output schema: each explicit projection column's output name, or — for SELECT * — both tables'
-        // catalog columns qualified as "Table.Column" (matching ProjectStar), followed by the hidden
-        // identity columns every joined row carries. Built once so the borrowed delta has a fixed schema.
-        var outputColumns = new List<string>();
-        foreach (ProjectedColumn column in _projection)
-        {
-            if (column.IsStar)
-            {
-                foreach (var c in engine.Catalog.GetTableColumns(_shape.LeftTable, databaseName))
-                {
-                    outputColumns.Add(_shape.LeftTable + "." + c.Name);
-                }
-
-                foreach (var c in engine.Catalog.GetTableColumns(_shape.RightTable, databaseName))
-                {
-                    outputColumns.Add(_shape.RightTable + "." + c.Name);
-                }
-            }
-            else
-            {
-                outputColumns.Add(column.OutputName);
-            }
-        }
-
-        outputColumns.Add(LeftIdentityColumn);
-        outputColumns.Add(RightIdentityColumn);
-        _outputColumns = outputColumns.ToArray();
-        _outputSchema = new ReactiveRowSchema(_outputColumns);
-        _rowScratch = new CellValue[_outputColumns.Length];
+        // Built once so the borrowed delta has a fixed schema.
+        (string[] outputColumns, _outputSources) = BuildOutputs();
+        _outputSchema = new ReactiveRowSchema(outputColumns);
+        _rowScratch = new CellValue[outputColumns.Length];
+        _previousScratch = new CellValue[outputColumns.Length];
         _legacyBuilder = new QueryChangeBuilder(_outputSchema);
     }
+
+    private static ReactiveRowLayout CatalogLayout(DataVoEngine engine, string table, string databaseName) =>
+        new(engine.Catalog.GetTableColumns(table, databaseName).Select(column => column.Name).ToList());
 
     /// <inheritdoc />
     public IReadOnlyCollection<string> Tables => [_shape.LeftTable, _shape.RightTable];
