@@ -47,7 +47,7 @@ This is a separate relational benchmark; it does not include the NPC-memory vect
 
 ### Desktop .NET lane
 
-This table compares DataVo reactive, DataVo polling, SQLite, and DuckDB on .NET. DuckDB is desktop-only. Run each fixed profile with an output directory outside tracked source files:
+This table compares DataVo reactive, DataVo polling, SQLite, and DuckDB on .NET. DuckDB runs only in the desktop .NET lane. Run each fixed profile with an output directory outside tracked source files:
 
 ```bash
 dotnet run -c Release --project demos/Research.Benchmark/src/Research.Benchmark.Host -- \

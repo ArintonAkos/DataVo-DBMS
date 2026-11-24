@@ -31,7 +31,7 @@ public sealed class ArenaLiveViewsDocumentationTests
         // The Unity cross-engine lane runs DataVo and SQLite only (see the engine loop in
         // scripts/run-unity-macos-il2cpp-arena-cross-engine.sh), so DuckDB results exist only on desktop .NET.
         ("DuckDB runs only in the desktop .NET lane",
-            new Regex(@"DuckDB (is desktop-only|runs only in the desktop \.NET lane)", RegexOptions.IgnoreCase)),
+            new Regex(@"DuckDB runs only in the desktop \.NET lane", RegexOptions.IgnoreCase)),
         ("results of the two lanes are not comparable",
             new Regex(@"do not compare Unity IL2CPP (values|timings) directly with desktop \.NET (values|timings)", RegexOptions.IgnoreCase)),
     ];

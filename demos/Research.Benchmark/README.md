@@ -224,7 +224,7 @@ The arena matrix is a separate deterministic relational workload: every write ba
 
 ### Desktop .NET lane
 
-The desktop .NET lane compares DataVo reactive, DataVo polling, SQLite, and DuckDB on .NET. DuckDB is desktop-only. Use an output directory outside tracked source files and run both fixed profiles:
+The desktop .NET lane compares DataVo reactive, DataVo polling, SQLite, and DuckDB on .NET. DuckDB runs only in the desktop .NET lane. Use an output directory outside tracked source files and run both fixed profiles:
 
 ```bash
 dotnet run -c Release --project demos/Research.Benchmark/src/Research.Benchmark.Host -- \
