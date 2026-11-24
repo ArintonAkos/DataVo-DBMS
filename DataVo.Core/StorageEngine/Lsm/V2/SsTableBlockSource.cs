@@ -96,7 +96,7 @@ internal abstract class SsTableBlockSource : IDisposable
             return mode;
         }
 
-#if NETSTANDARD2_1
+#if !NET8_0_OR_GREATER
         // Memory mapping is not available on every runtime this target serves; plain reads work everywhere.
         return LsmReadMode.PositionalRead;
 #else

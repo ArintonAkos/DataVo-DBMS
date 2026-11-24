@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Build-only fence: the source generators' output must compile against every DataVo.Core target a NuGet
+       consumer can pick. Building this project compiles one model, compiled LINQ queries and a [DataVoQuery]
+       method for net8.0, net9.0, net10.0 and netstandard2.1. Interceptors need C# 12, so consumers on
+       netstandard2.1 set LangVersion to 12 or later. -->
+  <PropertyGroup>
+    <TargetFrameworks>net8.0;net9.0;net10.0;netstandard2.1</TargetFrameworks>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <InterceptorsNamespaces>$(InterceptorsNamespaces);DataVo.Generated</InterceptorsNamespaces>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\DataVo.Core\DataVo.Core.csproj" />
+    <ProjectReference Include="..\..\DataVo.Generators\DataVo.Generators.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+  </ItemGroup>
+
+</Project>

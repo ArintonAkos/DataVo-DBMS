@@ -1,4 +1,4 @@
-#if NETSTANDARD2_1
+#if !NET9_0_OR_GREATER
 namespace DataVo.Core.Indexing;
 
 public partial class IndexManager

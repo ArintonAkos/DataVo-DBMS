@@ -346,7 +346,7 @@ internal static partial class ColumnarKernels
         }
     }
 
-#if !NET10_0_OR_GREATER
+#if !NET8_0_OR_GREATER
     private static SimdWidth DetectWidth() => SimdWidth.Scalar;
 
     public static void Compare(ReadOnlySpan<int> values, ColumnarCompare op, int constant, Span<ulong> mask, SimdWidth width) => CompareScalar(values, op, constant, mask);

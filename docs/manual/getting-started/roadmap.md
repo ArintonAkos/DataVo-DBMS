@@ -65,7 +65,7 @@ The current release on NuGet is **0.4.0-rc.1 (release candidate, 17 November 202
 
 ## Unity Evaluation Status {#unity-evaluation-status}
 
-Unity is an **evaluation target**, not a supported runtime. The public `DataVo.Core` package ships `net10.0` only; `DataVoEnablePortableTarget=true` produces an experimental local `netstandard2.1` candidate.
+Unity is an **evaluation target**, not a supported runtime. The public `DataVo.Core` package ships `net8.0`, `net9.0`, `net10.0` and `netstandard2.1` assets; the `netstandard2.1` asset is what Unity evaluation builds use.
 
 ::: details Unity Evaluation Matrix (Unity 6000.5.4f1)
 | Target / Boundary | Status | Notes |

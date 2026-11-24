@@ -90,8 +90,11 @@ jobs:
         with:
           dotnet-version: "10.0.x"
 
-      - name: Build the experimental portable target
-        run: dotnet build DataVo.Core/DataVo.Core.csproj -c Release -p:DataVoEnablePortableTarget=true
+      - name: Build every package target (net8.0, net9.0, net10.0, netstandard2.1)
+        run: |
+          dotnet build DataVo.Core/DataVo.Core.csproj -c Release
+          dotnet build DataVo.Data/DataVo.Data.csproj -c Release
+          dotnet build tests/DataVo.GeneratedCodeTargets/DataVo.GeneratedCodeTargets.csproj -c Release
 
       - name: Install ripgrep (used by the support-claims check)
         run: sudo apt-get update && sudo apt-get install -y ripgrep

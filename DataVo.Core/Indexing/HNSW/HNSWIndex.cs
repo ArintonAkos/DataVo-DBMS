@@ -2,7 +2,7 @@ using DataVo.Core.Indexing;
 using DataVo.Core.Compat;
 using DataVo.Core.Utils;
 using System.Runtime.CompilerServices;
-#if NET10_0_OR_GREATER
+#if NET8_0_OR_GREATER
 using System.Runtime.Intrinsics.X86;
 #endif
 
@@ -1999,7 +1999,7 @@ public partial class HNSWIndex : IVectorIndex, IReservableVectorIndex, ISpanVect
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private unsafe void PrefetchOrdinalVector(int ordinal)
     {
-#if NET10_0_OR_GREATER
+#if NET8_0_OR_GREATER
         if (!Sse.IsSupported || _vectorDimension <= 0 || ordinal < 0 || ordinal >= _nextOrdinal)
         {
             return;

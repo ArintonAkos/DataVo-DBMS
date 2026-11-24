@@ -55,7 +55,7 @@ internal sealed class FlatChunk
         Stride = stride;
         Capacity = capacity;
         int length = checked(capacity * stride);
-#if NET10_0_OR_GREATER
+#if NET8_0_OR_GREATER
         _memory = GC.AllocateArray<byte>(length + Alignment - 1, pinned: true);
         _start = AlignmentGap(_memory);
 #else
@@ -90,7 +90,7 @@ internal sealed class FlatChunk
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public Span<byte> Slot(int index) => new(_memory, _start + index * Stride, Stride);
 
-#if NET10_0_OR_GREATER
+#if NET8_0_OR_GREATER
     /// <summary>Whether the first slot sits on an <see cref="Alignment"/>-byte boundary.</summary>
     public unsafe bool IsAligned => (nuint)Unsafe.AsPointer(ref _memory[_start]) % Alignment == 0;
 

@@ -66,14 +66,12 @@ mkdir -p "$packages_dir" "$pack_cache" "$pack_extensions" "$consumer_cache" \
   "$dotnet_home" "$stage/Runtime"
 
 NUGET_PACKAGES="$pack_cache" dotnet restore "$root/DataVo.Core/DataVo.Core.csproj" \
-  -p:DataVoEnablePortableTarget=true \
   -p:MSBuildProjectExtensionsPath="$pack_extensions" \
   --force --no-cache
 
 NUGET_PACKAGES="$pack_cache" dotnet pack "$root/DataVo.Core/DataVo.Core.csproj" \
   -c Release \
   --no-restore \
-  -p:DataVoEnablePortableTarget=true \
   -p:EnablePackageValidation=true \
   -p:MSBuildProjectExtensionsPath="$pack_extensions" \
   -p:PackageVersion="$package_version" \

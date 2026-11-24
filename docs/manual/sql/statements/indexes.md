@@ -109,7 +109,7 @@ CREATE INDEX cx_players_stats ON players (score, id) USING COLUMNAR;
 
 ### Eligibility & Storage Rules
 
-- **Allowed column types:** `INT`, `BIGINT`, `FLOAT`, `DOUBLE`, `BIT`, and `DATE` only. Any other type (such as `VARCHAR`, `GUID`, or `VECTOR`) is rejected at `CREATE INDEX` time.
+- **Allowed column types:** `INT`, `BIGINT`, `FLOAT`, `DOUBLE`, `BIT`, `DATE`, and `DATETIME` only (a `DATETIME` is kept as its UTC ticks and scanned with the 64-bit integer kernels; `MIN`/`MAX`/`COUNT` fold natively). Any other type (such as `VARCHAR`, `GUID`, or `VECTOR`) is rejected at `CREATE INDEX` time.
 - **Storage modes:**
   - `InMemory`: Stores 4–8 bytes per row per indexed column in RAM for SIMD-accelerated scans.
   - `Lsm`: Persists format-v8 columnar segments inside `.sst` files with `min`/`max`/`NULL`/`NaN` zone maps for chunk skipping.

@@ -2,7 +2,7 @@
 
 DataVo is not currently a supported Unity or Godot runtime integration. This page records the proposed use cases, the managed integration boundary, and the proof required before support is claimed.
 
-The public `DataVo.Core` package remains `net10.0`-only. `DataVoEnablePortableTarget=true` creates an experimental local `netstandard2.1` candidate; it is not a distributed or supported Unity package. Passing its .NET-host verifier alone does not prove Unity Editor, Mono, IL2CPP, Jobs, or Burst compatibility.
+The public `DataVo.Core` package ships a `netstandard2.1` asset next to `net8.0`, `net9.0` and `net10.0`; it is an evaluation target for Unity, not a supported Unity package. Passing its .NET-host verifier alone does not prove Unity Editor, Mono, IL2CPP, Jobs, or Burst compatibility.
 
 ## Support matrix
 

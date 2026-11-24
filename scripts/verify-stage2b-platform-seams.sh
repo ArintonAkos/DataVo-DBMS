@@ -116,13 +116,11 @@ unset NUGET_FALLBACK_PACKAGES || true
 dotnet restore "$SOURCE_ROOT/DataVo.Core/DataVo.Core.csproj" \
   --nologo --ignore-failed-sources \
   -p:NuGetAudit=false \
-  -p:DataVoEnablePortableTarget=false \
   -p:MSBuildProjectExtensionsPath="$EXTENSIONS_DIR"
 
 PACKAGE_VERSION='0.0.0-stage2b-layout'
 dotnet pack "$SOURCE_ROOT/DataVo.Core/DataVo.Core.csproj" \
   -c Release --no-restore --nologo \
-  -p:DataVoEnablePortableTarget=false \
   -p:NuGetAudit=false \
   -p:MSBuildProjectExtensionsPath="$EXTENSIONS_DIR" \
   -p:EnablePackageValidation=false \

@@ -1,4 +1,4 @@
-#if NET10_0_OR_GREATER
+#if NET8_0_OR_GREATER
 using System.Numerics.Tensors;
 using System.Runtime.Intrinsics.Arm;
 using System.Runtime.Intrinsics;
@@ -40,7 +40,7 @@ internal static class SimdDistanceKernels
             throw new ArgumentException($"Vector dimensions do not match ({a.Length} vs {b.Length}).");
         }
 
-#if NET10_0_OR_GREATER
+#if NET8_0_OR_GREATER
         if (TryDotAvx(a, b, out float avxResult))
         {
             return avxResult;
@@ -65,7 +65,7 @@ internal static class SimdDistanceKernels
             throw new ArgumentException($"Vector dimensions do not match ({a.Length} vs {b.Length}).");
         }
 
-#if NET10_0_OR_GREATER
+#if NET8_0_OR_GREATER
         if (TryCosineDistanceAvx(a, b, out float avxResult))
         {
             return avxResult;
@@ -95,7 +95,7 @@ internal static class SimdDistanceKernels
             throw new ArgumentException($"Vector dimensions do not match ({a.Length} vs {b.Length}).");
         }
 
-#if NET10_0_OR_GREATER
+#if NET8_0_OR_GREATER
         if (TryEuclideanDistanceAvx(a, b, out float avxResult))
         {
             return avxResult;
@@ -113,7 +113,7 @@ internal static class SimdDistanceKernels
 #endif
     }
 
-#if NET10_0_OR_GREATER
+#if NET8_0_OR_GREATER
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
     private static unsafe bool TryDotAvx(ReadOnlySpan<float> a, ReadOnlySpan<float> b, out float result)
     {

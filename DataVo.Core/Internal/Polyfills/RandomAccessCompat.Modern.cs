@@ -1,4 +1,4 @@
-#if NET10_0_OR_GREATER
+#if NET8_0_OR_GREATER
 using Microsoft.Win32.SafeHandles;
 
 namespace DataVo.Core.Compat;

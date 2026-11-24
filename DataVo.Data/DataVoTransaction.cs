@@ -44,7 +44,11 @@ public class DataVoTransaction(DataVoConnection connection) : DbTransaction
     }
 
     /// <inheritdoc />
+#if NET8_0_OR_GREATER
     public override void Save(string savepointName)
+#else
+    public void Save(string savepointName)
+#endif
     {
         EnsureNotCompleted();
         string normalizedName = NormalizeSavepointName(savepointName);
@@ -52,7 +56,11 @@ public class DataVoTransaction(DataVoConnection connection) : DbTransaction
     }
 
     /// <inheritdoc />
+#if NET8_0_OR_GREATER
     public override void Rollback(string savepointName)
+#else
+    public void Rollback(string savepointName)
+#endif
     {
         EnsureNotCompleted();
         string normalizedName = NormalizeSavepointName(savepointName);
@@ -60,7 +68,11 @@ public class DataVoTransaction(DataVoConnection connection) : DbTransaction
     }
 
     /// <inheritdoc />
+#if NET8_0_OR_GREATER
     public override void Release(string savepointName)
+#else
+    public void Release(string savepointName)
+#endif
     {
         EnsureNotCompleted();
         string normalizedName = NormalizeSavepointName(savepointName);

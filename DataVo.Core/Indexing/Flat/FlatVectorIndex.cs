@@ -605,7 +605,7 @@ public sealed class FlatVectorIndex : IVectorIndex, IReservableVectorIndex, ISpa
 
     private static float ComputeInverseNorm(ReadOnlySpan<float> vector)
     {
-#if NET10_0_OR_GREATER
+#if NET8_0_OR_GREATER
         float norm = System.Numerics.Tensors.TensorPrimitives.Norm(vector);
 #else
         float sumSquares = 0f;

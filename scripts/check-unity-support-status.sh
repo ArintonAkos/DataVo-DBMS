@@ -58,7 +58,7 @@ require_text \
   "Unity 6000.5.4f1 macOS Editor and a macOS IL2CPP Player. Windows IL2CPP is unverified and direct Burst calls are unsupported by design."
 require_text \
   "$ROOT/docs/features/setup-and-packaging.md" \
-  "The public DataVo.Core package currently contains only a net10.0 asset."
+  "ship \`net8.0\`, \`net9.0\`, \`net10.0\` and \`netstandard2.1\` assets in one package"
 require_text \
   "$ROOT/docs/features/roadmap-and-integrations.md" \
   "Unity is an evaluation target, not an available runtime integration."

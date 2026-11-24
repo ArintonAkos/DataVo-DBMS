@@ -15,28 +15,25 @@ fi
 
 entries="$(unzip -Z1 "$package_path")"
 readonly entries
-portable_entries="$(
-  printf '%s\n' "$entries" |
-    sed -n '/netstandard2\.1/p'
-)"
-readonly portable_entries
 core_dlls="$(
   printf '%s\n' "$entries" |
-    sed -n '/^lib\/[^/]*\/DataVo\.Core\.dll$/p'
+    sed -n '/^lib\/[^/]*\/DataVo\.Core\.dll$/p' |
+    sort
 )"
 readonly core_dlls
 
-if [[ -n "$portable_entries" ]]; then
-  echo "Public DataVo.Core package contains quarantined netstandard2.1 entries:" >&2
-  printf '%s\n' "$portable_entries" >&2
-  exit 1
-fi
+expected="$(printf '%s\n' \
+  lib/net10.0/DataVo.Core.dll \
+  lib/net8.0/DataVo.Core.dll \
+  lib/net9.0/DataVo.Core.dll \
+  lib/netstandard2.1/DataVo.Core.dll | sort)"
+readonly expected
 
-if [[ "$core_dlls" != "lib/net10.0/DataVo.Core.dll" ]]; then
-  echo "Public DataVo.Core package must contain exactly lib/net10.0/DataVo.Core.dll." >&2
+if [[ "$core_dlls" != "$expected" ]]; then
+  echo "Public DataVo.Core package must contain exactly the net8.0, net9.0, net10.0 and netstandard2.1 assets." >&2
   echo "Found Core DLL entries:" >&2
   printf '%s\n' "${core_dlls:-<none>}" >&2
   exit 1
 fi
 
-echo "Core package target assertion passed: net10.0 only."
+echo "Core package target assertion passed: net8.0, net9.0, net10.0, netstandard2.1."

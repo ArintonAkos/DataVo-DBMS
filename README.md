@@ -168,7 +168,7 @@ while (reader.Read())
 
 - **.NET 10** is the supported runtime. The published `DataVo.Core` package currently ships a `net10.0` asset; multi-target packages (`net8.0`, `net9.0`, `net10.0`, `netstandard2.1`) are planned for v0.5.
 - **Native AOT:** `DataVo.Core`, `DataVo.Data`, and `DataVo.Generators` output publish cleanly with `PublishAot=true`. The EF Core preview bridge is excluded from AOT.
-- **Unity** is an evaluation target, not a supported runtime. `DataVoEnablePortableTarget=true` builds an experimental local `netstandard2.1` candidate; a narrow smoke (in-memory, LSM and Disk save/reopen) passes in the Unity 6000.5.4f1 macOS Editor and a macOS IL2CPP Player. Windows IL2CPP is unverified and direct Burst calls are unsupported by design.
+- **Unity** is an evaluation target, not a supported runtime. the package ships a `netstandard2.1` asset (alongside `net8.0`, `net9.0` and `net10.0`); a narrow smoke (in-memory, LSM and Disk save/reopen) passes in the Unity 6000.5.4f1 macOS Editor and a macOS IL2CPP Player. Windows IL2CPP is unverified and direct Burst calls are unsupported by design.
 - **Browser / WebAssembly:** `DataVo.Browser` powers the documentation site's playground. It is experimental and not published on npm. To run it locally: `bash ./scripts/deploy-browser-wasm.sh`, then `cd docs && npm install && npm run docs:dev`.
 
 ## Commercial Add-On: DataVo Sync

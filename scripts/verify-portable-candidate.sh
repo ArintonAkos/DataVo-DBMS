@@ -29,12 +29,10 @@ mkdir -p "$PACKAGES_DIR" "$EXTRACT_DIR" "$PACK_CACHE" \
   "$SMOKE_CACHE" "$SMOKE_HTTP_CACHE" "$SMOKE_EXTENSIONS" "$TEST_ROOT" "$DOTNET_CLI_HOME"
 
 NUGET_PACKAGES="$PACK_CACHE" dotnet restore "$ROOT_DIR/DataVo.Core/DataVo.Core.csproj" \
-  -p:DataVoEnablePortableTarget=true \
   -p:MSBuildProjectExtensionsPath="$CORE_EXTENSIONS" \
   --force --no-cache
 NUGET_PACKAGES="$PACK_CACHE" dotnet pack "$ROOT_DIR/DataVo.Core/DataVo.Core.csproj" \
   -c Release --no-restore \
-  -p:DataVoEnablePortableTarget=true \
   -p:MSBuildProjectExtensionsPath="$CORE_EXTENSIONS" \
   -p:EnablePackageValidation=true \
   -p:PackageVersion="$PACKAGE_VERSION" \

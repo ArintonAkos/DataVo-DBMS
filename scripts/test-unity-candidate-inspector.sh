@@ -25,7 +25,7 @@ mkdir -p "$runtime_dir"
 
 portable_dll="$root/DataVo.Core/bin/Debug/netstandard2.1/DataVo.Core.dll"
 [[ -f "$portable_dll" ]] || {
-  echo "Missing portable DataVo.Core build output: $portable_dll. Build DataVo.Core with DataVoEnablePortableTarget=true first." >&2
+  echo "Missing portable DataVo.Core build output: $portable_dll. Build DataVo.Core (its netstandard2.1 target) first." >&2
   exit 1
 }
 

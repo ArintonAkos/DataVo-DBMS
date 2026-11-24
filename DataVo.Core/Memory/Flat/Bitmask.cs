@@ -96,28 +96,11 @@ internal static class Bitmask
 
     /// <summary>The number of set bits in one word.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static int PopCount(ulong word)
-    {
-#if NET10_0_OR_GREATER
-        return System.Numerics.BitOperations.PopCount(word);
-#else
-        word -= (word >> 1) & 0x5555_5555_5555_5555UL;
-        word = (word & 0x3333_3333_3333_3333UL) + ((word >> 2) & 0x3333_3333_3333_3333UL);
-        word = (word + (word >> 4)) & 0x0F0F_0F0F_0F0F_0F0FUL;
-        return (int)((word * 0x0101_0101_0101_0101UL) >> 56);
-#endif
-    }
+    public static int PopCount(ulong word) => Internal.Polyfills.BitOperationsCompat.PopCount(word);
 
     /// <summary>The position of the lowest set bit of a word that is not zero.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static int LowestSet(ulong word)
-    {
-#if NET10_0_OR_GREATER
-        return System.Numerics.BitOperations.TrailingZeroCount(word);
-#else
-        return PopCount((word & (~word + 1)) - 1);
-#endif
-    }
+    public static int LowestSet(ulong word) => Internal.Polyfills.BitOperationsCompat.TrailingZeroCount(word);
 }
 
 /// <summary>

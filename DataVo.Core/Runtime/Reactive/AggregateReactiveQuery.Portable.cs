@@ -1,4 +1,4 @@
-#if NETSTANDARD2_1
+#if !NET9_0_OR_GREATER
 using System.Globalization;
 
 namespace DataVo.Core.Runtime.Reactive;

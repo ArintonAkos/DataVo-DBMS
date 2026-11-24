@@ -1,4 +1,4 @@
-#if NETSTANDARD2_1
+#if !NET8_0_OR_GREATER
 namespace DataVo.Core.Indexing;
 
 internal sealed class GuidSimdEqualityComparer : IEqualityComparer<Guid>

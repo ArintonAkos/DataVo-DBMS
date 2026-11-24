@@ -1,4 +1,4 @@
-#if NETSTANDARD2_1
+#if !NET8_0_OR_GREATER
 using System.Diagnostics;
 
 namespace DataVo.Core.Compat;
