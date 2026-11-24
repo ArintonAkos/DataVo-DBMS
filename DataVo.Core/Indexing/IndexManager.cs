@@ -206,7 +206,7 @@ public partial class IndexManager : IDisposable
     /// <summary>
     /// Removes the index entries of deleted (or rewritten) rows. With the old rows the exact (key, row id)
     /// pairs are removed; without them, or for vector indexes, every entry has to be checked by row id.
-    /// Rows whose key has a null part were never indexed and are skipped.
+    /// Rows whose key has a null part lose their NULL-key entry (see <see cref="InsertNullKeyRow"/>).
     /// </summary>
     internal void DeleteRowsFromIndex(
         Models.Catalog.IndexFile index,
@@ -229,19 +229,13 @@ public partial class IndexManager : IDisposable
                 continue;
             }
 
-            bool hasKey = true;
-            foreach (string attribute in index.AttributeNames)
-            {
-                if (!oldRow.TryGetValue(attribute, out object? value) || value is null)
-                {
-                    hasKey = false;
-                    break;
-                }
-            }
-
-            if (hasKey)
+            if (IndexKeyEncoder.HasCompleteKey(oldRow, index.AttributeNames))
             {
                 entries.Add((IndexKeyEncoder.BuildKeyString(oldRow, index.AttributeNames), rowId));
+            }
+            else
+            {
+                DeleteNullKeyRow(rowId, index.IndexFileName, tableName, databaseName);
             }
         }
 
@@ -251,8 +245,13 @@ public partial class IndexManager : IDisposable
     private static IndexException MissingIndex(string indexName, string tableName) =>
         new($"Index {indexName} on table {tableName} does not exist!");
 
-    private static IEnumerable<(byte[] EncodedKey, RowKey RowId)> FlattenForLsm(Dictionary<string, List<RowKey>> values)
+    private static IEnumerable<(byte[] EncodedKey, RowKey RowId)> FlattenForLsm(Dictionary<string, List<RowKey>> values, IReadOnlyList<RowKey> nullKeyRows)
     {
+        foreach (RowKey rowId in nullKeyRows)
+        {
+            yield return (LsmIndexKeyCodec.NullKey, rowId);
+        }
+
         foreach (KeyValuePair<string, List<RowKey>> entry in values)
         {
             byte[] encodedKey = LsmIndexKeyCodec.EncodeString(entry.Key);
@@ -573,11 +572,18 @@ public partial class IndexManager : IDisposable
     /// <summary>
     /// Creates or replaces a scalar BTree index.
     /// </summary>
-    public void CreateIndex(Dictionary<string, List<RowKey>> values, string indexName, string tableName, string databaseName, IndexType? indexType = null)
+    public void CreateIndex(Dictionary<string, List<RowKey>> values, string indexName, string tableName, string databaseName, IndexType? indexType = null) =>
+        CreateIndex(values, nullKeyRows: [], indexName, tableName, databaseName);
+
+    /// <summary>Creates a scalar index from gathered <paramref name="contents"/>, NULL-key rows included.</summary>
+    internal void CreateIndex(ScalarIndexContents contents, string indexName, string tableName, string databaseName) =>
+        CreateIndex(contents.Keys, contents.NullKeyRows, indexName, tableName, databaseName);
+
+    private void CreateIndex(Dictionary<string, List<RowKey>> values, IReadOnlyList<RowKey> nullKeyRows, string indexName, string tableName, string databaseName)
     {
         if (_lsmStore is { } store)
         {
-            store.BuildIndex(databaseName, tableName, indexName, FlattenForLsm(values));
+            store.BuildIndex(databaseName, tableName, indexName, FlattenForLsm(values, nullKeyRows));
             return;
         }
 
@@ -833,6 +839,13 @@ public partial class IndexManager : IDisposable
     {
         DropIndex(indexName, tableName, databaseName);
         CreateIndex(values, indexName, tableName, databaseName, indexType);
+    }
+
+    /// <summary>Rebuilds a scalar index from gathered <paramref name="contents"/>, NULL-key rows included.</summary>
+    internal void RebuildIndex(ScalarIndexContents contents, string indexName, string tableName, string databaseName)
+    {
+        DropIndex(indexName, tableName, databaseName);
+        CreateIndex(contents, indexName, tableName, databaseName);
     }
 
     /// <summary>

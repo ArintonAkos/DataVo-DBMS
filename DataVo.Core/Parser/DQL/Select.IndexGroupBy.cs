@@ -23,8 +23,9 @@ namespace DataVo.Core.Parser.DQL;
 /// <remarks>
 /// The plan applies only outside a transaction (an index holds committed rows), with no WHERE, when every aggregate
 /// is <c>COUNT(*)</c> or <c>COUNT</c> of the key, and when ORDER BY names the key, so the order of the result does
-/// not depend on the order groups are found in. NULL keys form one group, as on the scan path; indexes do not hold
-/// them, so for a column that can be NULL that group is counted from the rows, reading only the column's null flag.
+/// not depend on the order groups are found in. NULL keys form one group, as on the scan path. A persisted (LSM)
+/// index holds its NULL-key rows and counts that group too; an in-memory index does not, so for a column that can be
+/// NULL the group is counted from the rows there, reading only the column's null flag.
 /// Like a scan outside a transaction, the plan does not freeze the table: a row a concurrent writer changes between
 /// NULL and a key while the query runs may be counted on either side, or on both.
 /// </remarks>
@@ -48,7 +49,7 @@ internal partial class Select
         long nulls = 0;
         bool keyMayBeNull = !state.Columns[key].IsNotNull
             && !engine.Catalog.GetTablePrimaryKeys(tableName, databaseName).Contains(state.Columns[key].Name, StringComparer.OrdinalIgnoreCase);
-        if (keyMayBeNull && !TryCountNullKeys(engine, tableName, databaseName, state, key, out nulls))
+        if (keyMayBeNull && !engine.IndexManager.IndexesNullKeys && !TryCountNullKeys(engine, tableName, databaseName, state, key, out nulls))
         {
             return null;
         }
@@ -58,15 +59,17 @@ internal partial class Select
             new TypedGroupSelector(this, state),
             state.Columns[key].Type.Equals("INT", StringComparison.OrdinalIgnoreCase),
             TryCompileHavingCountBounds(state, tableName));
-        if (nulls > 0)
-        {
-            OfferIndexGroup(ref stream, null, nulls);
-        }
-
-        if (!engine.IndexManager.TryVisitIntegerKeyCounts(indexName!, tableName, databaseName, ref stream, static (ref IndexGroupStream s, long value, long rows) => OfferIndexGroup(ref s, value, rows)))
+        if (!engine.IndexManager.TryVisitIntegerKeyCounts(indexName!, tableName, databaseName, ref stream, static (ref IndexGroupStream s, long value, long rows) => OfferIndexGroup(ref s, value, rows), out long? indexedNulls))
         {
             outcome = IndexGroupOutcome.Failed;
             return null;
+        }
+
+        // The NULL group last: the result order comes from ORDER BY, never from the order groups are offered in.
+        nulls = indexedNulls ?? nulls;
+        if (keyMayBeNull && nulls > 0)
+        {
+            OfferIndexGroup(ref stream, null, nulls);
         }
 
         outcome = IndexGroupOutcome.Answered;

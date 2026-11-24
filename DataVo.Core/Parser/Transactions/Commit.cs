@@ -633,8 +633,8 @@ internal class Commit : BaseDbAction
     }
 
     /// <summary>
-    /// Adds a stored row's entries to every index of its table. Scalar indexes skip a row whose key has a NULL
-    /// column (NULL keys are never indexed); vector indexes take the row's vector.
+    /// Adds a stored row's entries to every index of its table. A row whose key has a NULL column goes under the
+    /// NULL key (see <see cref="Indexing.IndexManager.InsertNullKeyRow"/>); vector indexes take the row's vector.
     /// </summary>
     internal static void AddIndexEntries(
         Runtime.DataVoEngine engine,
@@ -662,6 +662,7 @@ internal class Commit : BaseDbAction
 
             if (!IndexKeyEncoder.HasCompleteKey(row, index.AttributeNames))
             {
+                engine.IndexManager.InsertNullKeyRow(rowId, index.IndexFileName, tableName, databaseName);
                 continue;
             }
 

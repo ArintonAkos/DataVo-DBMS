@@ -1,3 +1,4 @@
+using DataVo.Core.Indexing;
 using DataVo.Core.BTree;
 using DataVo.Core.Models.Catalog;
 using DataVo.Core.Runtime.Changes;
@@ -471,23 +472,17 @@ public sealed partial class DataVoEngine : IDisposable
                 continue;
             }
 
-            Dictionary<string, List<RowKey>> values = new(StringComparer.Ordinal);
+            var values = new ScalarIndexContents();
             foreach (KeyValuePair<RowKey, StoredRow> row in rows)
             {
                 if (!HasAllKeyCells(row.Value, index.AttributeNames))
                 {
+                    values.NullKeyRows.Add(row.Key);
                     continue;
                 }
 
                 StoredRowView view = row.Value.AsView();
-                string key = IndexKeyEncoder.BuildKeyString(view.Schema, view.Cells, index.AttributeNames);
-                if (!values.TryGetValue(key, out List<RowKey>? rowIds))
-                {
-                    rowIds = [];
-                    values[key] = rowIds;
-                }
-
-                rowIds.Add(row.Key);
+                values.AddKey(IndexKeyEncoder.BuildKeyString(view.Schema, view.Cells, index.AttributeNames), row.Key);
             }
 
             IndexManager.RebuildIndex(values, indexName, tableName, databaseName);

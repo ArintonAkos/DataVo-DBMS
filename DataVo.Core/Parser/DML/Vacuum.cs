@@ -1,3 +1,4 @@
+using DataVo.Core.Indexing;
 using DataVo.Core.BTree;
 using DataVo.Core.Logging;
 using DataVo.Core.Models.Catalog;
@@ -62,7 +63,7 @@ internal class Vacuum(VacuumStatement ast) : BaseDbAction
                 Indexes.DropIndex(index.IndexFileName, tableName, databaseName);
 
                 // Recreate with fresh data
-                var indexData = new Dictionary<string, List<RowKey>>();
+                var indexData = new ScalarIndexContents();
 
                 foreach (var (newRowId, rawRow) in compactedRows)
                 {
@@ -73,17 +74,7 @@ internal class Vacuum(VacuumStatement ast) : BaseDbAction
                         null,
                         Catalog,
                         Engine.Id.ToString("N"));
-                    if (!IndexKeyEncoder.HasCompleteKey(row, index.AttributeNames))
-                    {
-                        continue; // NULL keys are never indexed
-                    }
-
-                    string indexKey = IndexKeyEncoder.BuildKeyString(row, index.AttributeNames);
-
-                    if (!indexData.ContainsKey(indexKey))
-                        indexData[indexKey] = [];
-
-                    indexData[indexKey].Add(newRowId);
+                    indexData.Add(row, newRowId, index.AttributeNames);
                 }
 
                 Indexes.CreateIndex(indexData, index.IndexFileName, tableName, databaseName);

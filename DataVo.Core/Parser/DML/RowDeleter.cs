@@ -143,9 +143,18 @@ internal static class RowDeleter
             var entries = new List<(string Key, RowKey RowId)>(toBeDeleted.Count);
             foreach (RowKey rowId in toBeDeleted)
             {
-                if (deletedRows.TryGetValue(rowId, out var oldRow) && indexFile.AttributeNames.All(oldRow.ContainsKey))
+                if (!deletedRows.TryGetValue(rowId, out var oldRow))
+                {
+                    continue;
+                }
+
+                if (DataVo.Core.BTree.IndexKeyEncoder.HasCompleteKey(oldRow, indexFile.AttributeNames))
                 {
                     entries.Add((DataVo.Core.BTree.IndexKeyEncoder.BuildKeyString(oldRow, indexFile.AttributeNames), rowId));
+                }
+                else
+                {
+                    engine.IndexManager.DeleteNullKeyRow(rowId, indexFile.IndexFileName, tableName, databaseName);
                 }
             }
 

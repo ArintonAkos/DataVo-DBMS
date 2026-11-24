@@ -11,8 +11,8 @@ internal delegate bool IntegerKeyCountVisitor<TState>(ref TState state, long key
 
 /// <summary>Row counts per key of a single-column integer index, read from the index without touching table rows.</summary>
 /// <remarks>
-/// Rows whose key is NULL are not counted: most write paths do not index them, so an index cannot say how many
-/// there are. A caller that needs the NULL group counts it from the rows.
+/// A persisted (LSM) index holds its NULL-key rows (see <see cref="InsertNullKeyRow"/>) and reports how many there
+/// are; an in-memory index does not hold them, so a caller that needs the NULL group counts it from the rows.
 /// </remarks>
 public partial class IndexManager
 {
@@ -31,12 +31,14 @@ public partial class IndexManager
     /// the LSM engine the persisted index is walked in key order; in memory the complete integer lane is read.
     /// Returns false when the index cannot answer exactly (no such index, an incomplete lane, a key that is not an
     /// integer, staged index changes). The visitor may already have been called by then, so a caller discards what it
-    /// gathered on false.
+    /// gathered on false. <paramref name="nullRows"/> is the number of rows whose key is NULL, or null when the index
+    /// does not hold them (in memory).
     /// </summary>
-    internal bool TryVisitIntegerKeyCounts<TState>(string indexName, string tableName, string databaseName, ref TState state, IntegerKeyCountVisitor<TState> visit)
+    internal bool TryVisitIntegerKeyCounts<TState>(string indexName, string tableName, string databaseName, ref TState state, IntegerKeyCountVisitor<TState> visit, out long? nullRows)
     {
+        nullRows = null;
         bool answered = _lsmStore is { } store
-            ? VisitLsmIntegerKeyCounts(store, indexName, tableName, databaseName, ref state, visit)
+            ? VisitLsmIntegerKeyCounts(store, indexName, tableName, databaseName, ref state, visit, out nullRows)
             : VisitLaneIntegerKeyCounts(indexName, tableName, databaseName, ref state, visit);
         if (answered)
         {
@@ -46,7 +48,7 @@ public partial class IndexManager
         return answered;
     }
 
-    private static bool VisitLsmIntegerKeyCounts<TState>(StorageEngine.ILsmIndexStore store, string indexName, string tableName, string databaseName, ref TState state, IntegerKeyCountVisitor<TState> visit)
+    private static bool VisitLsmIntegerKeyCounts<TState>(StorageEngine.ILsmIndexStore store, string indexName, string tableName, string databaseName, ref TState state, IntegerKeyCountVisitor<TState> visit, out long? nullRows)
     {
         var box = new KeyCountBox<TState>(state, visit);
         bool walked = store.TryVisitIndexKeyCounts(databaseName, tableName, indexName, ref box, static (ref KeyCountBox<TState> b, ReadOnlySpan<byte> encodedKey, long rows) =>
@@ -57,15 +59,17 @@ public partial class IndexManager
                 return b.Visit(ref b.State, key, rows);
             }
 
-            if (encodedKey.Length == 1 && encodedKey[0] == LsmIndexKeyCodec.StringTag)
+            if (encodedKey.Length == 1 && encodedKey[0] == LsmIndexKeyCodec.NullTag)
             {
-                return true; // a NULL key, which some write paths index under the empty string: not counted here
+                b.NullRows += rows;
+                return true;
             }
 
             b.Failed = true;
             return false;
         });
         state = box.State;
+        nullRows = box.NullRows;
         return walked && !box.Failed;
     }
 
@@ -97,5 +101,6 @@ public partial class IndexManager
         public TState State = state;
         public readonly IntegerKeyCountVisitor<TState> Visit = visit;
         public bool Failed;
+        public long NullRows;
     }
 }

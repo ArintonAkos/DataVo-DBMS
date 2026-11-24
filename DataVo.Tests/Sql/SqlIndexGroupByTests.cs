@@ -6,8 +6,9 @@ using DataVo.Core.StorageEngine.Config;
 namespace DataVo.Tests.Sql;
 
 /// <summary>
-/// A GROUP BY over one indexed integer column that only counts rows is answered from the index (and, for a
-/// nullable column, a count of the rows whose key is NULL, which indexes do not hold). Each query is
+/// A GROUP BY over one indexed integer column that only counts rows is answered from the index. A persisted (LSM)
+/// index also counts the rows whose key is NULL; in memory, a nullable column's NULL group is counted from the rows'
+/// null flags. Each query is
 /// checked against the same query over <c>Tag</c>, an unindexed copy of the column that the scan groups by hash, so
 /// the two plans must agree exactly: NULL keys, HAVING (rejected before a group is built, or tested by the general
 /// evaluator), ORDER BY with LIMIT and OFFSET, after updates and deletes, and inside a transaction, where the scan
@@ -147,9 +148,9 @@ public sealed class SqlIndexGroupByTests
             Assert.Equal(expected, Rows(actual, "CustomerId"));
             Assert.NotEmpty(expected);
 
-            // Indexes do not hold NULL keys, so a nullable column's NULL group is counted from the rows' null flags.
+            // LSM indexes hold NULL keys; in memory a nullable column's NULL group is counted from the rows' null flags.
             Assert.Contains(Index, stats.IndexesUsed, StringComparer.OrdinalIgnoreCase);
-            Assert.Equal(nulls, stats.FullTableScan);
+            Assert.Equal(nulls && !context.Engine.IndexManager.IndexesNullKeys, stats.FullTableScan);
         }
     }
 

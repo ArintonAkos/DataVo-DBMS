@@ -56,7 +56,7 @@ CREATE INDEX ix_players_region_score ON players (region, score) USING BTREE;
 
 ### Behavior & Query Acceleration
 
-- **Non-`NULL` indexing:** A B-Tree index stores entries only for rows where **all** indexed columns are non-`NULL`. Rows containing a `NULL` key receive no index entry, so `IS NULL` predicates scan table rows and multiple `NULL`s may coexist in a `UNIQUE` column.
+- **`NULL` keys:** A row whose key has a `NULL` in any indexed column never matches an equality or range lookup, so `IS NULL` predicates scan table rows and multiple `NULL`s may coexist in a `UNIQUE` column. `Lsm` indexes still record such rows under a dedicated `NULL` key (every `INSERT`, `UPDATE`, `DELETE`, `COMMIT` and rebuild path does this the same way), so a counting `GROUP BY` on an indexed integer column gets its `NULL` group from the index without reading the table. `InMemory` indexes hold no entry for them and count that group from the rows' null flags.
 - **When B-Tree accelerates queries:**
   - Single-column equality predicates (`WHERE score = 500`) use an index point lookup.
   - Selective `INNER JOIN` probes on indexed integer keys probe the B-Tree instead of streaming the full table.

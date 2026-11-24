@@ -1702,6 +1702,7 @@ internal sealed partial class InsertRowService(
         {
             if (index.AttributeNames.Any(attribute => row[attribute] == null))
             {
+                InsertNullKeyRow(tableName, databaseName, rowId, index);
                 continue;
             }
 
@@ -1752,6 +1753,20 @@ internal sealed partial class InsertRowService(
         }
     }
 
+    /// <summary>
+    /// Enters a row whose key for scalar <paramref name="index"/> has a NULL part under the NULL key (persisted
+    /// indexes only; see <see cref="PolyIndexManager.InsertNullKeyRow"/>). Vector indexes take no entry for a NULL vector.
+    /// </summary>
+    private void InsertNullKeyRow(string tableName, string databaseName, RowKey rowId, IndexFile index)
+    {
+        if (indexes.IndexesNullKeys
+            && !string.IsNullOrWhiteSpace(index.IndexFileName)
+            && !indexes.SupportsVectorIndexType(index.IndexKind ?? string.Empty))
+        {
+            indexes.InsertNullKeyRow(rowId, index.IndexFileName, tableName, databaseName);
+        }
+    }
+
     private void InsertTypedIndexes(
         string tableName,
         string databaseName,
@@ -1774,6 +1789,7 @@ internal sealed partial class InsertRowService(
 
             if (hasNullKeyPart)
             {
+                InsertNullKeyRow(tableName, databaseName, rowId, index);
                 continue;
             }
 
@@ -1863,6 +1879,8 @@ internal sealed partial class InsertRowService(
                 InsertTypedVectorIndexBatch(tableName, databaseName, schema, rows, rowIds, index, indexName, indexKind);
                 continue;
             }
+
+            indexes.InsertNullKeyRows(schema, rows, rowIds, index.AttributeNames, indexName, tableName, databaseName);
 
             bool canReusePrimaryKey = primaryKeyValues is not null
                 && IsPrimaryKeyIndex(tableName, indexName)

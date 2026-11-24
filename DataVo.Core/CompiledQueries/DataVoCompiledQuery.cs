@@ -2189,6 +2189,7 @@ public static class DataVoCompiledQuery
             return;
         }
 
+        indexes.UpdateNullKeyRows(oldRowIds, oldRows, newRowIds, newRows, index.AttributeNames, indexName, tableName, databaseName);
         bool isPrimaryKeyIndex = indexName.Equals($"_PK_{tableName}", StringComparison.OrdinalIgnoreCase);
         bool fastLane = (isPrimaryKeyIndex && indexes.HasIntegerPrimaryKeyFastLane(indexName, tableName, databaseName))
             || indexes.HasIntegerIndexFastLane(indexName, tableName, databaseName)

@@ -1,3 +1,4 @@
+using DataVo.Core.Indexing;
 ﻿using System.Text.RegularExpressions;
 using DataVo.Core.Exceptions;
 using DataVo.Core.Logging;
@@ -116,7 +117,7 @@ internal class CreateIndex(CreateIndexStatement ast) : BaseDbAction
             }
             else
             {
-                Dictionary<string, List<RowKey>> indexValues = CreateIndexContents(tableDataRows);
+                ScalarIndexContents indexValues = CreateIndexContents(tableDataRows);
                 Indexes.CreateIndex(indexValues, _model.IndexName, _model.TableName, databaseName);
             }
 
@@ -131,15 +132,6 @@ internal class CreateIndex(CreateIndexStatement ast) : BaseDbAction
     }
 
     /// <summary>
-    /// Iterates over all existing rows in the table and builds a dictionary mapping
-    /// composite index keys to their corresponding row IDs.
-    /// </summary>
-    /// <param name="tableData">All rows in the table, keyed by row ID with column name/value dictionaries as values.</param>
-    /// <returns>
-    /// A dictionary where each key is a composite index string (column values joined by <c>"##"</c>)
-    /// and each value is a list of row IDs that share that key.
-    /// </returns>
-    /// <summary>
     /// Records a columnar index and builds it from the table's rows. It holds no keys, so nothing else that
     /// maintains or consults indexes hears of it; the storage engine keeps it current as rows change.
     /// </summary>
@@ -153,30 +145,18 @@ internal class CreateIndex(CreateIndexStatement ast) : BaseDbAction
         Messages.Add($"New columnar index {_model.IndexName} successfully created!");
     }
 
-    private Dictionary<string, List<RowKey>> CreateIndexContents(Dictionary<RowKey, Dictionary<string, object?>> tableData)
+    /// <summary>
+    /// Gathers the index's contents from every row of the table: row ids per key (column values joined by
+    /// <c>"##"</c>), and the rows whose key has a NULL part, which follow the rule every write path uses.
+    /// </summary>
+    private ScalarIndexContents CreateIndexContents(Dictionary<RowKey, Dictionary<string, object?>> tableData)
     {
-        Dictionary<string, List<RowKey>> indexContentDict = [];
-
+        var contents = new ScalarIndexContents();
         foreach (KeyValuePair<RowKey, Dictionary<string, object?>> row in tableData)
         {
-            // NULL keys are never indexed (see IndexKeyEncoder.HasCompleteKey), the same rule every write path uses.
-            if (!IndexKeyEncoder.HasCompleteKey(row.Value, _model.Attributes))
-            {
-                continue;
-            }
-
-            string key = IndexKeyEncoder.BuildKeyString(row.Value, _model.Attributes);
-
-            if (indexContentDict.TryGetValue(key, out var rowIds))
-            {
-                rowIds.Add(row.Key);
-            }
-            else
-            {
-                indexContentDict.Add(key, [row.Key]);
-            }
+            contents.Add(row.Value, row.Key, _model.Attributes);
         }
 
-        return indexContentDict;
+        return contents;
     }
 }

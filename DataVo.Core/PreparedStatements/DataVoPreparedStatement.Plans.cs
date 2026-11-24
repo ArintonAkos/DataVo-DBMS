@@ -2104,6 +2104,12 @@ public sealed partial class DataVoPreparedStatement
             for (int i = 0; i < plan.SecondaryIndexes.Length; i++)
             {
                 IndexFile indexFile = plan.SecondaryIndexes[i];
+                if (!IndexKeyEncoder.HasCompleteKey(oldRow, indexFile.AttributeNames))
+                {
+                    _engine.IndexManager.DeleteNullKeyRow(rowId, indexFile.IndexFileName, tableName, databaseName);
+                    continue;
+                }
+
                 string key = IndexKeyEncoder.BuildKeyString(oldRow, indexFile.AttributeNames);
                 _engine.IndexManager.DeleteIndexEntries([(key, rowId)], indexFile.IndexFileName, tableName, databaseName);
             }

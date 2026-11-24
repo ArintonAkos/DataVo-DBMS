@@ -17,6 +17,12 @@ namespace DataVo.Core.StorageEngine.Lsm.V2;
 /// </summary>
 internal static class LsmIndexKeyCodec
 {
+    /// <summary>
+    /// Tag of the NULL key: rows whose indexed value (or any part of a composite key) is NULL are indexed under
+    /// <see cref="NullKey"/>, so an index accounts for every row of its table. No lookup encodes it: a NULL never
+    /// equals anything, so equality and range probes cannot reach these entries.
+    /// </summary>
+    public const byte NullTag = 0x00;
     public const byte IntegerTag = 0x01;
     public const byte GuidTag = 0x02;
     public const byte StringTag = 0x03;
@@ -30,6 +36,9 @@ internal static class LsmIndexKeyCodec
 
     /// <summary>Largest encoded key (K) an index entry can hold.</summary>
     public const int MaxKeyLength = ushort.MaxValue;
+
+    /// <summary>K for a NULL key (see <see cref="NullTag"/>). Shared and never mutated.</summary>
+    public static readonly byte[] NullKey = [NullTag];
 
     /// <summary>K for an integer key.</summary>
     public static byte[] EncodeInteger(long key)

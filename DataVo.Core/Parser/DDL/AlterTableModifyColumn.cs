@@ -1,3 +1,4 @@
+using DataVo.Core.Indexing;
 using DataVo.Core.StorageEngine;
 using System.Globalization;
 using DataVo.Core.BTree;
@@ -134,24 +135,7 @@ internal class AlterTableModifyColumn(AlterTableModifyColumnStatement ast) : Bas
 
         foreach (var index in indexes)
         {
-            Dictionary<string, List<RowKey>> indexData = [];
-
-            for (int i = 0; i < rows.Count; i++)
-            {
-                if (!IndexKeyEncoder.HasCompleteKey(rows[i], index.AttributeNames))
-                {
-                    continue; // NULL keys are never indexed
-                }
-
-                string key = IndexKeyEncoder.BuildKeyString(rows[i], index.AttributeNames);
-                if (!indexData.TryGetValue(key, out var ids))
-                {
-                    ids = [];
-                    indexData[key] = ids;
-                }
-
-                ids.Add(newRowIds[i]);
-            }
+            ScalarIndexContents indexData = ScalarIndexContents.From(rows, newRowIds, index.AttributeNames);
 
             Indexes.CreateIndex(indexData, index.IndexFileName, tableName, databaseName);
         }
