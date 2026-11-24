@@ -255,7 +255,7 @@ public sealed partial class LsmStorageEngine
 
         for (int i = 0; i < files.Length; i++)
         {
-            SsTableV2Reader reader = files[i].GetV2Reader(_readMode);
+            SsTableV2Reader reader = files[i].GetV2Reader(_readMode, _blockCache);
             if (reader.Columnar is not { } segment || !segment.Spec.Matches(spec))
             {
                 // A file written before the table had this spec: the next query has it rewritten.

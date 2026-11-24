@@ -203,6 +203,7 @@ public sealed class SharedEngineRegistryTests : IDisposable
     {
         if (type == typeof(bool)) return !(bool)value!;
         if (type == typeof(int)) return (int)value! + 1;
+        if (type == typeof(long)) return (long)value! + 1;
         if (type == typeof(double)) return (double)value! + 0.5d;
         if (type == typeof(string)) return (value as string ?? "x") + "_changed";
         if (type.IsEnum)

@@ -101,7 +101,7 @@ internal sealed class LsmSstableHandle
     /// The file's v2 reader, opened (memory-mapped or positional) on first use and kept until the file
     /// is deleted or <see cref="CloseReader"/> runs. Callers must hold a reference (<see cref="AddRef"/>).
     /// </summary>
-    public SsTableV2Reader GetV2Reader(LsmReadMode mode)
+    public SsTableV2Reader GetV2Reader(LsmReadMode mode, LsmBlockCache? cache = null)
     {
         SsTableV2Reader? reader = Volatile.Read(ref _reader);
         if (reader is not null)
@@ -116,7 +116,7 @@ internal sealed class LsmSstableHandle
                 throw new ObjectDisposedException(nameof(LsmSstableHandle));
             }
 
-            _reader ??= SsTableV2Reader.Open(FilePath, mode);
+            _reader ??= SsTableV2Reader.Open(FilePath, mode, cache);
             return _reader;
         }
     }
@@ -124,7 +124,7 @@ internal sealed class LsmSstableHandle
     private SsTableKeyedReader? _keyedReader;
 
     /// <summary>The file's keyed (v3) reader, opened on first use; see <see cref="GetV2Reader"/>.</summary>
-    public SsTableKeyedReader GetKeyedReader(LsmReadMode mode)
+    public SsTableKeyedReader GetKeyedReader(LsmReadMode mode, LsmBlockCache? cache = null)
     {
         SsTableKeyedReader? reader = Volatile.Read(ref _keyedReader);
         if (reader is not null)
@@ -139,7 +139,7 @@ internal sealed class LsmSstableHandle
                 throw new ObjectDisposedException(nameof(LsmSstableHandle));
             }
 
-            _keyedReader ??= SsTableKeyedReader.Open(FilePath, mode);
+            _keyedReader ??= SsTableKeyedReader.Open(FilePath, mode, cache);
             return _keyedReader;
         }
     }

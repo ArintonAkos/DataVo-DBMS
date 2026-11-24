@@ -13,9 +13,10 @@ internal sealed class LsmStorageBackend : IStorageBackend, IFixedWidthPatchStora
     public LsmStorageBackend(
         string storagePath,
         LsmWalDurabilityMode walDurabilityMode = LsmWalDurabilityMode.StrictFsync,
-        Lsm.V2.LsmReadMode readMode = Lsm.V2.LsmReadMode.Auto)
+        Lsm.V2.LsmReadMode readMode = Lsm.V2.LsmReadMode.Auto,
+        long blockCacheSizeBytes = 0)
     {
-        _inner = new LsmStorageEngine(storagePath, walDurabilityMode, readMode);
+        _inner = new LsmStorageEngine(storagePath, walDurabilityMode, readMode, blockCacheSizeBytes);
     }
 
     public string BackendKind => "Lsm";

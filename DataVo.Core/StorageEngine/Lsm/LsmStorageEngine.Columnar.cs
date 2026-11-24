@@ -126,7 +126,7 @@ public sealed partial class LsmStorageEngine
         {
             foreach (LsmSstableHandle file in version.Files)
             {
-                if (file.GetV2Reader(_readMode).Columnar is not { } segment || segment.Spec.ColumnCount != tail.ColumnCount)
+                if (file.GetV2Reader(_readMode, _blockCache).Columnar is not { } segment || segment.Spec.ColumnCount != tail.ColumnCount)
                 {
                     continue;
                 }

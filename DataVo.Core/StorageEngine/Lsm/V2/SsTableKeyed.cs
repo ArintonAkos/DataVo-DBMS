@@ -555,7 +555,7 @@ internal sealed class SsTableKeyedWriter : IDisposable
 internal delegate void KeyedEntryAction<TState>(ReadOnlySpan<byte> userKey, ulong sequence, LsmValueType type, ReadOnlySpan<byte> value, TState state);
 
 /// <summary>Reads a keyed SSTable; opening validates only metadata (O(blocks)).</summary>
-internal sealed class SsTableKeyedReader : IDisposable
+internal sealed class SsTableKeyedReader : IDisposable, ISsTableBlockVerifier
 {
     private readonly SsTableBlockSource _source;
     private readonly ReadOnlyMemory<byte> _index;
@@ -578,9 +578,9 @@ internal sealed class SsTableKeyedReader : IDisposable
 
     public int BlockCount => Properties.BlockCount;
 
-    public static SsTableKeyedReader Open(string path, LsmReadMode mode = LsmReadMode.Auto)
+    public static SsTableKeyedReader Open(string path, LsmReadMode mode = LsmReadMode.Auto, LsmBlockCache? cache = null)
     {
-        SsTableBlockSource source = SsTableBlockSource.Open(path, mode);
+        SsTableBlockSource source = SsTableBlockSource.Open(path, mode, cache);
         try
         {
             long length = source.Length;
@@ -674,7 +674,8 @@ internal sealed class SsTableKeyedReader : IDisposable
                 return; // the block starts past every key with this prefix
             }
 
-            ReadOnlySpan<byte> bytes = GetVerifiedBlock(block).Span;
+            using SsTableBlockLease lease = AcquireBlock(block);
+            ReadOnlySpan<byte> bytes = lease.Span;
             if (SsTableCompactKeyedBlock.IsCompact(bytes))
             {
                 if (!VisitCompactBlockWithPrefix(bytes, bloomKey, state, visit, ref carriedHeap, carried, ref carriedLength))
@@ -811,7 +812,8 @@ internal sealed class SsTableKeyedReader : IDisposable
     {
         for (int block = 0; block < BlockCount; block++)
         {
-            ReadOnlySpan<byte> bytes = GetVerifiedBlock(block).Span;
+            using SsTableBlockLease lease = AcquireBlock(block);
+            ReadOnlySpan<byte> bytes = lease.Span;
             if (SsTableCompactKeyedBlock.IsCompact(bytes))
             {
                 var entries = default(CompactKeyedBlockReader);
@@ -835,14 +837,13 @@ internal sealed class SsTableKeyedReader : IDisposable
 
     public void Dispose() => _source.Dispose();
 
-    internal ReadOnlyMemory<byte> GetVerifiedBlock(int block)
+    /// <summary>Borrows the verified bytes of block <paramref name="block"/>; dispose the lease when done.</summary>
+    internal SsTableBlockLease AcquireBlock(int block)
     {
         ReadOnlySpan<byte> record = Record(block);
         long offset = BinaryPrimitives.ReadInt64LittleEndian(record);
         int length = BinaryPrimitives.ReadInt32LittleEndian(record[8..]);
-        ReadOnlyMemory<byte> bytes = _source.GetRegion(offset, length);
-        VerifyOnce(block, bytes.Span);
-        return bytes;
+        return _source.ReadBlock(offset, length, block, this);
     }
 
     private ReadOnlySpan<byte> Record(int block) =>
@@ -921,11 +922,13 @@ internal sealed class SsTableKeyedReader : IDisposable
         tag = BinaryPrimitives.ReadUInt64LittleEndian(entry[(SsTableKeyedFormat.EntryHeaderSize + keyLength + valueLength)..]);
     }
 
-    private void VerifyOnce(int block, ReadOnlySpan<byte> bytes)
+    /// <inheritdoc />
+    /// <remarks>Mapped bytes are checked once per block; bytes read from disk on every read.</remarks>
+    void ISsTableBlockVerifier.VerifyBlock(int block, ReadOnlySpan<byte> bytes, bool physicalRead)
     {
         int word = block >> 5;
         int bit = 1 << (block & 31);
-        if ((Volatile.Read(ref _verifiedBlocks[word]) & bit) != 0)
+        if (!physicalRead && (Volatile.Read(ref _verifiedBlocks[word]) & bit) != 0)
         {
             return;
         }
@@ -1045,9 +1048,9 @@ internal sealed class SsTableKeyedReader : IDisposable
 /// Reads a keyed SSTable entry by entry (user key ascending, then sequence descending), one block in memory at
 /// a time. The key and value are valid until the next <see cref="MoveNext"/>.
 /// </summary>
-internal sealed class SsTableKeyedCursor(SsTableKeyedReader reader)
+internal sealed class SsTableKeyedCursor(SsTableKeyedReader reader) : IDisposable
 {
-    private ReadOnlyMemory<byte> _block;
+    private SsTableBlockLease _block;
     private int _blockIndex = -1;
     private bool _compact;
     private int _entry;
@@ -1117,13 +1120,13 @@ internal sealed class SsTableKeyedCursor(SsTableKeyedReader reader)
                 }
             }
 
+            DropBlock();
             if (++_blockIndex >= reader.BlockCount)
             {
-                _block = default;
                 return false;
             }
 
-            _block = reader.GetVerifiedBlock(_blockIndex);
+            _block = reader.AcquireBlock(_blockIndex);
             ReadOnlySpan<byte> block = _block.Span;
             _compact = SsTableCompactKeyedBlock.IsCompact(block);
             if (_compact)
@@ -1136,5 +1139,15 @@ internal sealed class SsTableKeyedCursor(SsTableKeyedReader reader)
                 _entry = 0;
             }
         }
+    }
+
+    /// <summary>Gives back the block this cursor holds.</summary>
+    public void Dispose() => DropBlock();
+
+    private void DropBlock()
+    {
+        SsTableBlockLease block = _block;
+        _block = default;
+        block.Dispose();
     }
 }

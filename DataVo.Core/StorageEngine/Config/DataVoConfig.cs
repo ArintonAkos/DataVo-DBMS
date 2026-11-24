@@ -360,6 +360,19 @@ public class DataVoConfig
     public Lsm.V2.LsmReadMode LsmReadMode { get; set; } = Lsm.V2.LsmReadMode.Auto;
 
     /// <summary>
+    /// Gets or sets the byte budget of the sharded user-space block cache that serves
+    /// <see cref="Lsm.V2.LsmReadMode.PositionalRead"/> SSTable reads (also used when
+    /// <see cref="Lsm.V2.LsmReadMode.Auto"/> resolves to positional reads, e.g. on 32-bit or browser hosts).
+    /// Defaults to 64 MiB; 0 disables the cache. Ignored when SSTables are memory-mapped.
+    /// </summary>
+    /// <remarks>
+    /// Every block read from disk has its CRC32C verified before it is served or cached, so positional reads
+    /// with the cache give memory-mapped-class read latency without mmap's SIGBUS-on-truncation exposure.
+    /// Warm cache hits allocate nothing on the managed heap.
+    /// </remarks>
+    public long LsmBlockCacheSizeBytes { get; set; } = 64L * 1024 * 1024;
+
+    /// <summary>
     /// Gets or sets the disk I/O scheduler mode. Phase 1 enables only pooled file handles and
     /// positioned I/O; group commit is reserved for the WAL-as-commit-point implementation.
     /// </summary>

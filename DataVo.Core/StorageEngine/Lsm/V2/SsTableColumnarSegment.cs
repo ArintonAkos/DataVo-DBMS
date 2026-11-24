@@ -230,11 +230,11 @@ internal sealed class SsTableColumnarSegment
             return false;
         }
 
-        VerifyOnce(chunk, new ReadOnlySpan<byte>((void*)address, info.Length));
+        Verify(chunk, new ReadOnlySpan<byte>((void*)address, info.Length), physicalRead: false);
         return true;
     }
 
-    /// <summary>Copies a chunk group into <paramref name="buffer"/>, its CRC checked the first time.</summary>
+    /// <summary>Copies a chunk group into <paramref name="buffer"/>, its CRC checked on every copy (every physical read).</summary>
     internal void CopyChunk(int chunk, byte[] buffer)
     {
         ref readonly SsTableColumnarChunk info = ref _chunks[chunk];
@@ -243,13 +243,14 @@ internal sealed class SsTableColumnarSegment
             bytes.CopyTo(target);
             return true;
         });
-        VerifyOnce(chunk, buffer.AsSpan(0, info.Length));
+        Verify(chunk, buffer.AsSpan(0, info.Length), physicalRead: true);
     }
 
-    private void VerifyOnce(int chunk, ReadOnlySpan<byte> bytes)
+    // Mapped chunks are checked once; bytes copied from disk are checked every time they are read.
+    private void Verify(int chunk, ReadOnlySpan<byte> bytes, bool physicalRead)
     {
         int bit = 1 << (chunk & 31);
-        if ((Volatile.Read(ref _verified[chunk >> 5]) & bit) != 0)
+        if (!physicalRead && (Volatile.Read(ref _verified[chunk >> 5]) & bit) != 0)
         {
             return;
         }

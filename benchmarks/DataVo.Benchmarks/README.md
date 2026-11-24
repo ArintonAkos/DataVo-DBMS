@@ -29,6 +29,7 @@ once with every database in a file.
 | `PointLookupBenchmarks` | One row by primary key, read into a `Player`; 100,000 rows, keys in shuffled order | Compiled LINQ: `FirstOrDefault(id, static (p, k) => p.Id == k)` | A statement prepared once, `ExecuteReader`, one `Player` built |
 | `OutOfCoreAggregateBenchmarks` | The same four aggregates over 1,000,000 rows on the LSM engine, with the rows unflushed (columns in memory) and flushed (columns read from SSTable files), plus opening the database and answering the first aggregate | Compiled LINQ, DataVo only | Not run |
 | `BulkInsertBenchmarks` | Load 100,000 rows into an empty table | `InsertTypedBatch` | SQLite: prepared `INSERT` in one transaction. DuckDB: appender |
+| `LsmReadModeBenchmarks` | Random point lookups, a full cursor scan of one 200,000-row SSTable, and engine `ReadRow` on a flushed table, for mmap (`Auto`), uncached `PositionalRead`, and `PositionalRead` + block cache | `SsTableV2Reader` / `LsmStorageEngine` directly, DataVo only | Not run |
 
 Before timing, each class checks that the three engines return the same answer.
 

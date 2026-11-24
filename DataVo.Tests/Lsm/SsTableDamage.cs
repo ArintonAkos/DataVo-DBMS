@@ -82,6 +82,24 @@ internal static class SsTableDamage
             return func(_bytes.AsSpan((int)offset, length), state);
         }
 
+        public override SsTableBlockLease ReadBlock(long offset, int length, int block, ISsTableBlockVerifier verifier)
+        {
+            ThrowIfOutOfRange(offset, length, _bytes.Length);
+            byte[] copy = System.Buffers.ArrayPool<byte>.Shared.Rent(length);
+            _bytes.AsSpan((int)offset, length).CopyTo(copy);
+            try
+            {
+                verifier.VerifyBlock(block, copy.AsSpan(0, length), physicalRead: !_mapped);
+            }
+            catch
+            {
+                System.Buffers.ArrayPool<byte>.Shared.Return(copy);
+                throw;
+            }
+
+            return SsTableBlockLease.Pooled(copy, length, pool: null);
+        }
+
         public override void Dispose()
         {
         }

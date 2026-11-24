@@ -17,7 +17,7 @@ internal delegate TResult RowVersionFunc<TState, TResult>(LsmValueType type, ulo
 /// 24-byte entries in v2). Each block's CRC32C is verified the first time any reader touches it.
 /// Files of versions 2 and 4 hold integer keys; their keys are exposed as <see cref="RowKey"/>s.
 /// </remarks>
-internal sealed class SsTableV2Reader : IDisposable
+internal sealed class SsTableV2Reader : IDisposable, ISsTableBlockVerifier
 {
     private readonly SsTableBlockSource _source;
     private readonly ReadOnlyMemory<byte> _index;
@@ -80,9 +80,9 @@ internal sealed class SsTableV2Reader : IDisposable
     public long FileLength => _source.Length;
 
     /// <summary>Opens <paramref name="path"/> with the given read mode.</summary>
-    public static SsTableV2Reader Open(string path, LsmReadMode mode = LsmReadMode.Auto)
+    public static SsTableV2Reader Open(string path, LsmReadMode mode = LsmReadMode.Auto, LsmBlockCache? cache = null)
     {
-        SsTableBlockSource source = SsTableBlockSource.Open(path, mode);
+        SsTableBlockSource source = SsTableBlockSource.Open(path, mode, cache);
         try
         {
             return Open(source, ownsSource: true);
@@ -203,8 +203,13 @@ internal sealed class SsTableV2Reader : IDisposable
                 return missing;
             }
 
-            var request = new LookupRequest<TState, TResult>(this, key, snapshotSequence, state, onFound, block);
-            BlockLookupResult<TResult> result = _source.Read(info.Offset, info.Length, request, static (bytes, req) => req.Reader.SearchBlock(bytes, req));
+            var request = new LookupRequest<TState, TResult>(key, snapshotSequence, state, onFound);
+            BlockLookupResult<TResult> result;
+            using (SsTableBlockLease lease = _source.ReadBlock(info.Offset, info.Length, block, this))
+            {
+                result = SearchBlock(lease.Span, request);
+            }
+
             if (result.Status == BlockLookupStatus.Found)
             {
                 return result.Value;
@@ -224,31 +229,14 @@ internal sealed class SsTableV2Reader : IDisposable
     /// <summary>Opens a sequential cursor over every entry in key order.</summary>
     public SsTableV2Cursor OpenCursor() => new(this);
 
-    /// <summary>The bytes of block <paramref name="block"/>, CRC-verified on first use.</summary>
     /// <summary>
-    /// The verified bytes of a block as an address into the mapped file, when the file is mapped; otherwise
-    /// false, and <see cref="GetVerifiedBlock"/> returns a copy.
+    /// Borrows the verified bytes of block <paramref name="block"/>: mapped memory (checked on first use), or a
+    /// pooled or cached buffer whose bytes were checked when read from disk. Dispose the lease when done.
     /// </summary>
-    internal unsafe bool TryGetVerifiedBlockAddress(int block, out IntPtr address, out int length)
+    internal SsTableBlockLease AcquireBlock(int block)
     {
         SsTableV2BlockInfo info = GetBlockInfo(block);
-        if (!_source.TryGetRegionAddress(info.Offset, info.Length, out address))
-        {
-            length = 0;
-            return false;
-        }
-
-        length = info.Length;
-        VerifyOnce(block, new ReadOnlySpan<byte>((void*)address, length));
-        return true;
-    }
-
-    internal ReadOnlyMemory<byte> GetVerifiedBlock(int block)
-    {
-        SsTableV2BlockInfo info = GetBlockInfo(block);
-        ReadOnlyMemory<byte> bytes = _source.GetRegion(info.Offset, info.Length);
-        VerifyOnce(block, bytes.Span);
-        return bytes;
+        return _source.ReadBlock(info.Offset, info.Length, block, this);
     }
 
     public void Dispose()
@@ -259,9 +247,8 @@ internal sealed class SsTableV2Reader : IDisposable
         }
     }
 
-    private BlockLookupResult<TResult> SearchBlock<TState, TResult>(ReadOnlySpan<byte> bytes, LookupRequest<TState, TResult> request)
+    private static BlockLookupResult<TResult> SearchBlock<TState, TResult>(ReadOnlySpan<byte> bytes, LookupRequest<TState, TResult> request)
     {
-        VerifyOnce(request.Block, bytes);
         if (SsTableWideRowBlock.IsWide(bytes))
         {
             return SearchWideBlock(bytes, request);
@@ -512,11 +499,16 @@ internal sealed class SsTableV2Reader : IDisposable
         return low;
     }
 
-    private void VerifyOnce(int block, ReadOnlySpan<byte> bytes)
+    /// <inheritdoc />
+    /// <remarks>
+    /// Mapped bytes are checked once per block (the bit set remembers it); bytes read from disk are checked on
+    /// every read, so a block that rots on disk after leaving the block cache is still caught.
+    /// </remarks>
+    void ISsTableBlockVerifier.VerifyBlock(int block, ReadOnlySpan<byte> bytes, bool physicalRead)
     {
         int word = block >> 5;
         int bit = 1 << (block & 31);
-        if ((Volatile.Read(ref _verifiedBlocks[word]) & bit) != 0)
+        if (!physicalRead && (Volatile.Read(ref _verifiedBlocks[word]) & bit) != 0)
         {
             return;
         }
@@ -708,19 +700,15 @@ internal sealed class SsTableV2Reader : IDisposable
 
     // A struct passed by value through the block callback: a lookup allocates nothing.
     private readonly struct LookupRequest<TState, TResult>(
-        SsTableV2Reader reader,
         RowKey key,
         ulong snapshotSequence,
         TState state,
-        RowVersionFunc<TState, TResult> onFound,
-        int block)
+        RowVersionFunc<TState, TResult> onFound)
     {
-        public SsTableV2Reader Reader { get; } = reader;
         public RowKey Key { get; } = key;
         public ulong SnapshotSequence { get; } = snapshotSequence;
         public TState State { get; } = state;
         public RowVersionFunc<TState, TResult> OnFound { get; } = onFound;
-        public int Block { get; } = block;
     }
 
     private enum BlockLookupStatus : byte
@@ -744,11 +732,9 @@ internal sealed class SsTableV2Reader : IDisposable
 internal sealed unsafe class SsTableV2Cursor
 {
     private SsTableV2Reader _reader;
-    private ReadOnlyMemory<byte> _block;
 
-    // A mapped block is read through its address: wrapping it in a Memory would allocate per block.
-    private IntPtr _blockAddress;
-    private int _blockLength;
+    // The current block: mapped memory, or a pooled/cached buffer held until the cursor moves past it.
+    private SsTableBlockLease _block;
     private int _blockIndex = -1;
     private int _entry;
     private int _entryCount;
@@ -766,8 +752,7 @@ internal sealed unsafe class SsTableV2Cursor
     internal SsTableV2Cursor Reset(SsTableV2Reader reader)
     {
         _reader = reader;
-        _block = default;
-        _blockAddress = IntPtr.Zero;
+        DropBlock();
         _blockIndex = -1;
         _entry = 0;
         _entryCount = 0;
@@ -780,8 +765,14 @@ internal sealed unsafe class SsTableV2Cursor
     internal void Release()
     {
         _reader = null!;
+        DropBlock();
+    }
+
+    private void DropBlock()
+    {
+        SsTableBlockLease block = _block;
         _block = default;
-        _blockAddress = IntPtr.Zero;
+        block.Dispose();
     }
 
     public RowKey Key { get; private set; }
@@ -796,8 +787,7 @@ internal sealed unsafe class SsTableV2Cursor
     /// <summary>The current entry's value; valid until the next <see cref="MoveNext"/>.</summary>
     public ReadOnlySpan<byte> Value => BlockSpan.Slice(_valueOffset, _valueLength);
 
-    private ReadOnlySpan<byte> BlockSpan =>
-        _blockAddress != IntPtr.Zero ? new ReadOnlySpan<byte>((void*)_blockAddress, _blockLength) : _block.Span;
+    private ReadOnlySpan<byte> BlockSpan => _block.Span;
 
     /// <summary>
     /// Moves to the first entry whose key is at or after <paramref name="key"/>; returns false when there
@@ -824,20 +814,13 @@ internal sealed unsafe class SsTableV2Cursor
         while (_entry >= _entryCount)
         {
             _blockIndex++;
+            DropBlock();
             if (_blockIndex >= _reader.BlockCount)
             {
                 return false;
             }
 
-            if (_reader.TryGetVerifiedBlockAddress(_blockIndex, out _blockAddress, out _blockLength))
-            {
-                _block = default;
-            }
-            else
-            {
-                _block = _reader.GetVerifiedBlock(_blockIndex);
-                _blockAddress = IntPtr.Zero;
-            }
+            _block = _reader.AcquireBlock(_blockIndex);
             _entryCount = BinaryPrimitives.ReadInt32LittleEndian(BlockSpan[4..]);
             _entry = 0;
             _wide = SsTableWideRowBlock.IsWide(BlockSpan);

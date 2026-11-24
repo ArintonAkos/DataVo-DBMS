@@ -4,3 +4,4 @@ using System.Runtime.CompilerServices;
 [assembly: InternalsVisibleTo("Research.Benchmark.Runners")]
 [assembly: InternalsVisibleTo("DataVo.PortablePackageSmoke")]
 [assembly: InternalsVisibleTo("DataVo.CrashHarness")]
+[assembly: InternalsVisibleTo("DataVo.Benchmarks")]

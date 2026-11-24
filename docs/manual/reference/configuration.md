@@ -42,6 +42,7 @@ using var db = new DataVoContext(new DataVoConfig
 | --- | --- | --- |
 | `LsmStrictFsync` | `true` | `true` flushes the LSM commit log to stable storage before acknowledging writes; `false` (Relaxed) acknowledges in OS page cache. |
 | `LsmReadMode` | `LsmReadMode.Auto` | `Auto` memory-maps SSTables on 64-bit platforms; `PositionalRead` uses standard file reads. |
+| `LsmBlockCacheSizeBytes` | `67108864` (64 MiB) | Byte budget of the sharded (32-shard, SIEVE-evicted) block cache that serves positional SSTable reads. Every block read from disk is CRC32C-verified before it is served or cached; warm hits allocate 0 B. `0` disables the cache. Ignored when SSTables are memory-mapped. |
 | `ClusteredPrimaryKeys` | `true` | Stores new LSM tables with single-column `INT` or `GUID` primary keys clustered under that key. |
 | `IoSchedulerMode` | `IoSchedulerMode.Off` | Disk I/O scheduler mode (`Off`, pooled positioned I/O, or `GroupCommit`). |
 | `EnableZeroAllocCompiledUpdate` | `true` | Allows eligible fixed-width single-row compiled `UPDATE`s to byte-patch stored rows in place. |

@@ -87,6 +87,9 @@ public sealed class LsmTable : IDisposable
     /// <summary>How compaction reads v2 inputs.</summary>
     internal LsmReadMode ReadMode { get; set; }
 
+    /// <summary>The engine's block cache for positional reads, or null.</summary>
+    internal LsmBlockCache? BlockCache { get; set; }
+
     /// <summary>
     /// Called on the flushing thread once a MemTable's SSTable is durable and in the manifest, while the
     /// MemTable is still readable: the owner can drop row versions that now live in the file.
@@ -786,7 +789,7 @@ public sealed class LsmTable : IDisposable
         lock (_ioGate)
         {
             int maxLevel = ValidatedMaxCompactionLevel();
-            var compactor = new LsmCompactor(_tableDirectory, _manifest, registry) { Format = Format, ReadMode = ReadMode, Columnar = ColumnarSpec };
+            var compactor = new LsmCompactor(_tableDirectory, _manifest, registry) { Format = Format, ReadMode = ReadMode, BlockCache = BlockCache, Columnar = ColumnarSpec };
             compactor.CompactLevel(sourceLevel, sourceLevel + 1, dropTombstonesAtBottomLevel: sourceLevel + 1 == maxLevel);
         }
     }
@@ -840,7 +843,7 @@ public sealed class LsmTable : IDisposable
                             continue;
                         }
 
-                        SsTableV2Reader reader = handles[0].GetV2Reader(ReadMode);
+                        SsTableV2Reader reader = handles[0].GetV2Reader(ReadMode, BlockCache);
                         if (!rewriteRest && reader.Columnar is { } segment && segment.Spec.Matches(spec))
                         {
                             continue;
@@ -994,7 +997,7 @@ public sealed class LsmTable : IDisposable
     private void CompactEligibleLevels(LsmFileRegistry registry)
     {
         int maxLevel = ValidatedMaxCompactionLevel();
-        var compactor = new LsmCompactor(_tableDirectory, _manifest, registry) { Format = Format, ReadMode = ReadMode, Columnar = ColumnarSpec };
+        var compactor = new LsmCompactor(_tableDirectory, _manifest, registry) { Format = Format, ReadMode = ReadMode, BlockCache = BlockCache, Columnar = ColumnarSpec };
 
         bool madeProgress;
         do
@@ -1027,7 +1030,7 @@ public sealed class LsmTable : IDisposable
     private void CompactAllLevels(LsmFileRegistry registry)
     {
         int maxLevel = ValidatedMaxCompactionLevel();
-        var compactor = new LsmCompactor(_tableDirectory, _manifest, registry) { Format = Format, ReadMode = ReadMode, Columnar = ColumnarSpec };
+        var compactor = new LsmCompactor(_tableDirectory, _manifest, registry) { Format = Format, ReadMode = ReadMode, BlockCache = BlockCache, Columnar = ColumnarSpec };
 
         for (int sourceLevel = 0; sourceLevel < maxLevel; sourceLevel++)
         {

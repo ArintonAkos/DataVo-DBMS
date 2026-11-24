@@ -188,7 +188,7 @@ public sealed partial class LsmStorageEngine
             foreach (LsmSstableHandle file in version.Files)
             {
                 int before = found.Count;
-                file.GetKeyedReader(_readMode).ForEachWithPrefix(prefix, found, static (userKey, sequence, type, _, list) =>
+                file.GetKeyedReader(_readMode, _blockCache).ForEachWithPrefix(prefix, found, static (userKey, sequence, type, _, list) =>
                     list.Add((LsmIndexKeyCodec.RowKeyOf(userKey), sequence, type == LsmValueType.Put)));
                 if (found.Count > before)
                 {
@@ -276,7 +276,7 @@ public sealed partial class LsmStorageEngine
         {
             foreach (LsmSstableHandle file in version.Files)
             {
-                file.GetKeyedReader(_readMode).ForEach(newest, static (userKey, sequence, type, _, versions) =>
+                file.GetKeyedReader(_readMode, _blockCache).ForEach(newest, static (userKey, sequence, type, _, versions) =>
                 {
                     byte[] key = userKey.ToArray();
                     if (!versions.TryGetValue(key, out (ulong Sequence, bool Live) current) || sequence > current.Sequence)
@@ -499,7 +499,7 @@ public sealed partial class LsmStorageEngine
         string directory = GetIndexDirectory(databaseName, tableName, indexName);
         Directory.CreateDirectory(directory);
         var manifest = new LsmManifest(Path.Combine(directory, "MANIFEST"));
-        var table = new LsmTable(directory, manifest) { Format = LsmSstableFormat.Keyed, ReadMode = _readMode };
+        var table = new LsmTable(directory, manifest) { Format = LsmSstableFormat.Keyed, ReadMode = _readMode, BlockCache = _blockCache };
         if (MemTableFlushThresholdOverrideBytes is long thresholdOverride)
         {
             table.FlushThresholdBytes = thresholdOverride;
@@ -518,7 +518,7 @@ public sealed partial class LsmStorageEngine
         {
             foreach (LsmSstableHandle file in version.Files)
             {
-                flushed = Math.Max(flushed, file.GetKeyedReader(_readMode).Properties.LargestSequence);
+                flushed = Math.Max(flushed, file.GetKeyedReader(_readMode, _blockCache).Properties.LargestSequence);
             }
         }
         finally

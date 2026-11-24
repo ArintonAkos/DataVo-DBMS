@@ -38,6 +38,7 @@ public sealed partial class LsmStorageEngine : IFixedWidthPatchStorageEngine, IL
     private readonly string _storageDirectory;
     private readonly LsmWalDurabilityMode _walDurabilityMode;
     private readonly LsmReadMode _readMode;
+    private readonly LsmBlockCache? _blockCache;
     private readonly ConcurrentDictionary<(string DatabaseName, string TableName), TableState> _tables = new();
     private readonly LsmCommitLog _commitLog;
 
@@ -59,12 +60,23 @@ public sealed partial class LsmStorageEngine : IFixedWidthPatchStorageEngine, IL
     public LsmStorageEngine(
         string storageDirectory,
         LsmWalDurabilityMode walDurabilityMode = LsmWalDurabilityMode.StrictFsync,
-        LsmReadMode readMode = LsmReadMode.Auto)
+        LsmReadMode readMode = LsmReadMode.Auto,
+        long blockCacheSizeBytes = 0)
     {
         ThrowHelper.ThrowIfNullOrWhiteSpace(storageDirectory);
+        if (blockCacheSizeBytes < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(blockCacheSizeBytes), "The block cache size cannot be negative.");
+        }
+
         _storageDirectory = storageDirectory;
         _walDurabilityMode = walDurabilityMode;
         _readMode = readMode;
+
+        // The cache serves positional reads only: a memory mapping already reads the OS page cache directly.
+        _blockCache = blockCacheSizeBytes > 0 && SsTableBlockSource.ResolveMode(readMode) == LsmReadMode.PositionalRead
+            ? new LsmBlockCache(blockCacheSizeBytes)
+            : null;
         Directory.CreateDirectory(_storageDirectory);
         _commitLog = new LsmCommitLog(Path.Combine(_storageDirectory, CommitLogFileName), walDurabilityMode);
 
@@ -82,6 +94,12 @@ public sealed partial class LsmStorageEngine : IFixedWidthPatchStorageEngine, IL
         _appliedLsn = _commitLog.LastLsn;
         _nextPublishLsn = _commitLog.LastLsn + 1;
     }
+
+    /// <summary>
+    /// The user-space block cache serving positional SSTable reads, or null when reads are memory-mapped or
+    /// the cache is disabled (<c>DataVoConfig.LsmBlockCacheSizeBytes</c> = 0).
+    /// </summary>
+    public LsmBlockCache? BlockCache => _blockCache;
 
     /// <summary>
     /// Groups every mutation made by the current flow (one SQL statement or one transaction commit) into
@@ -402,7 +420,7 @@ public sealed partial class LsmStorageEngine : IFixedWidthPatchStorageEngine, IL
                 break;
             }
 
-            SstableHit hit = file.GetV2Reader(_readMode).Lookup(
+            SstableHit hit = file.GetV2Reader(_readMode, _blockCache).Lookup(
                 key,
                 ulong.MaxValue,
                 0,
@@ -506,7 +524,7 @@ public sealed partial class LsmStorageEngine : IFixedWidthPatchStorageEngine, IL
                 }
 
                 // Lookup starts with the range check and the Bloom probe; a miss costs only those.
-                SstableHit hit = file.GetV2Reader(_readMode).Lookup(
+                SstableHit hit = file.GetV2Reader(_readMode, _blockCache).Lookup(
                     rowId,
                     ulong.MaxValue,
                     (Materializer: materializer, Key: rowId),
@@ -909,6 +927,7 @@ public sealed partial class LsmStorageEngine : IFixedWidthPatchStorageEngine, IL
         {
             Format = LsmSstableFormat.RowKeyed,
             ReadMode = _readMode,
+            BlockCache = _blockCache,
             ColumnarSpec = LsmColumnarSpecFile.TryLoad(tableDirectory),
         };
         if (MemTableFlushThresholdOverrideBytes is long thresholdOverride)
@@ -946,7 +965,7 @@ public sealed partial class LsmStorageEngine : IFixedWidthPatchStorageEngine, IL
         {
             foreach (LsmSstableHandle file in version.Files)
             {
-                SsTableV2Properties properties = file.GetV2Reader(_readMode).Properties;
+                SsTableV2Properties properties = file.GetV2Reader(_readMode, _blockCache).Properties;
                 flushed = Math.Max(flushed, Math.Max(properties.LargestSequence, properties.NextRowIdSequence));
                 nextRowId = Math.Max(nextRowId, NextRowIdAfter(properties.LargestKey));
                 if (properties.NextRowId > 0 && (!hasMetadata || properties.NextRowIdSequence >= metadataSequence))
@@ -1919,7 +1938,7 @@ public sealed partial class LsmStorageEngine : IFixedWidthPatchStorageEngine, IL
                 break;
             }
 
-            SstableScratchHit hit = file.GetV2Reader(_readMode).Lookup(
+            SstableScratchHit hit = file.GetV2Reader(_readMode, _blockCache).Lookup(
                 rowId,
                 ulong.MaxValue,
                 best.Found ? best.Sequence : 0UL,
@@ -2066,7 +2085,7 @@ public sealed partial class LsmStorageEngine : IFixedWidthPatchStorageEngine, IL
         int[] order = scratch.Order;
         for (int i = 0; i < files.Length; i++)
         {
-            if (files[i].GetV2Reader(_readMode).Properties.EntryCount == 0)
+            if (files[i].GetV2Reader(_readMode, _blockCache).Properties.EntryCount == 0)
             {
                 continue;
             }
@@ -2085,7 +2104,7 @@ public sealed partial class LsmStorageEngine : IFixedWidthPatchStorageEngine, IL
 
         for (int i = 1; i < count; i++)
         {
-            if (files[order[i - 1]].GetV2Reader(_readMode).Properties.LargestKey >= SmallestKeyOf(files[order[i]]))
+            if (files[order[i - 1]].GetV2Reader(_readMode, _blockCache).Properties.LargestKey >= SmallestKeyOf(files[order[i]]))
             {
                 return false;
             }
@@ -2094,7 +2113,7 @@ public sealed partial class LsmStorageEngine : IFixedWidthPatchStorageEngine, IL
         return true;
     }
 
-    private RowKey SmallestKeyOf(LsmSstableHandle file) => file.GetV2Reader(_readMode).Properties.SmallestKey;
+    private RowKey SmallestKeyOf(LsmSstableHandle file) => file.GetV2Reader(_readMode, _blockCache).Properties.SmallestKey;
 
     /// <summary>
     /// Visits the live rows of runs whose key ranges do not overlap, one run after another: no key is in two runs,
@@ -2107,7 +2126,7 @@ public sealed partial class LsmStorageEngine : IFixedWidthPatchStorageEngine, IL
         scratch.Prepare(1);
         for (int i = 0; i < count; i++)
         {
-            SsTableV2Reader reader = files[scratch.Order[i]].GetV2Reader(_readMode);
+            SsTableV2Reader reader = files[scratch.Order[i]].GetV2Reader(_readMode, _blockCache);
             if (upper is { } end && reader.Properties.SmallestKey >= end)
             {
                 return; // this run and every later one lie past the range
@@ -2308,7 +2327,7 @@ public sealed partial class LsmStorageEngine : IFixedWidthPatchStorageEngine, IL
             bool[] hasCurrent = scratch.HasCurrent;
             for (int i = 0; i < files; i++)
             {
-                SsTableV2Reader reader = version.Files[i].GetV2Reader(_readMode);
+                SsTableV2Reader reader = version.Files[i].GetV2Reader(_readMode, _blockCache);
                 cursors[i] = cursors[i]?.Reset(reader) ?? reader.OpenCursor();
                 hasCurrent[i] = lower is { } from ? cursors[i]!.SeekTo(from) : cursors[i]!.MoveNext();
                 if (hasCurrent[i] && upper is { } to && cursors[i]!.Key >= to)

@@ -61,6 +61,9 @@ public sealed class LsmCompactor
     /// <summary>How v2 inputs are read when no registry handle provides a reader.</summary>
     internal LsmReadMode ReadMode { get; set; }
 
+    /// <summary>The engine's block cache for positional reads, or null.</summary>
+    internal LsmBlockCache? BlockCache { get; set; }
+
     internal static LsmCompactor CreateForTesting(
         string tableDirectory,
         LsmManifest manifest,
@@ -215,7 +218,7 @@ public sealed class LsmCompactor
         string path = Path.Combine(_tableDirectory, file.FileName);
         if (SsTableKeyedFormat.IsKeyedFile(path))
         {
-            SsTableKeyedReader keyed = handle?.GetKeyedReader(ReadMode) ?? SsTableKeyedReader.Open(path, ReadMode);
+            SsTableKeyedReader keyed = handle?.GetKeyedReader(ReadMode, BlockCache) ?? SsTableKeyedReader.Open(path, ReadMode);
             sources.Add(new LsmKeyedFileMergeSource(ordinal, keyed, ownsReader: handle is null));
             return;
         }
@@ -227,7 +230,7 @@ public sealed class LsmCompactor
             return;
         }
 
-        SsTableV2Reader reader = handle?.GetV2Reader(ReadMode) ?? SsTableV2Reader.Open(path, ReadMode);
+        SsTableV2Reader reader = handle?.GetV2Reader(ReadMode, BlockCache) ?? SsTableV2Reader.Open(path, ReadMode);
         sources.Add(new LsmRowFileMergeSource(ordinal, reader, ownsReader: handle is null));
         SsTableV2Properties properties = reader.Properties;
         if (properties.NextRowId > 0)

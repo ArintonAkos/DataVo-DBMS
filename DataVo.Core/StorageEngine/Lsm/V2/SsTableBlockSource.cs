@@ -18,6 +18,17 @@ public enum LsmReadMode
     PositionalRead = 2,
 }
 
+/// <summary>Checks one SSTable data block (CRC and structure) and throws <see cref="InvalidDataException"/> when it is bad.</summary>
+internal interface ISsTableBlockVerifier
+{
+    /// <summary>
+    /// Verifies block <paramref name="block"/>. <paramref name="physicalRead"/> is true when the bytes were just
+    /// read from disk into memory: those are always checked in full. False means the bytes are mapped file
+    /// memory, which a reader may check only on first use.
+    /// </summary>
+    void VerifyBlock(int block, ReadOnlySpan<byte> bytes, bool physicalRead);
+}
+
 /// <summary>Callback receiving a span that is valid only for the duration of the call.</summary>
 internal delegate TResult SpanFunc<TState, TResult>(ReadOnlySpan<byte> bytes, TState state);
 
@@ -49,9 +60,18 @@ internal abstract class SsTableBlockSource : IDisposable
     /// <summary>Invokes <paramref name="func"/> with the bytes of [offset, offset + length).</summary>
     public abstract TResult Read<TState, TResult>(long offset, int length, TState state, SpanFunc<TState, TResult> func);
 
+    /// <summary>
+    /// Borrows the verified bytes of data block <paramref name="block"/> at [offset, offset + length). Bytes read
+    /// from disk are verified by <paramref name="verifier"/> every time, before anyone sees or caches them.
+    /// </summary>
+    public abstract SsTableBlockLease ReadBlock(long offset, int length, int block, ISsTableBlockVerifier verifier);
+
     public abstract void Dispose();
 
-    public static SsTableBlockSource Open(string path, LsmReadMode mode)
+    public static SsTableBlockSource Open(string path, LsmReadMode mode) => Open(path, mode, cache: null);
+
+    /// <summary>Opens <paramref name="path"/>; positional sources serve data blocks through <paramref name="cache"/> when given.</summary>
+    public static SsTableBlockSource Open(string path, LsmReadMode mode, LsmBlockCache? cache)
     {
         if (ResolveMode(mode) == LsmReadMode.MemoryMapped)
         {
@@ -65,7 +85,7 @@ internal abstract class SsTableBlockSource : IDisposable
             }
         }
 
-        return new PositionalBlockSource(path);
+        return new PositionalBlockSource(path, cache);
     }
 
     /// <summary>The mode that <see cref="LsmReadMode.Auto"/> resolves to on this process.</summary>
@@ -171,6 +191,14 @@ internal sealed unsafe class MappedBlockSource : SsTableBlockSource
         return func(new ReadOnlySpan<byte>(_base + offset, length), state);
     }
 
+    public override SsTableBlockLease ReadBlock(long offset, int length, int block, ISsTableBlockVerifier verifier)
+    {
+        ThrowIfOutOfRange(offset, length, _length);
+        var bytes = new ReadOnlySpan<byte>(_base + offset, length);
+        verifier.VerifyBlock(block, bytes, physicalRead: false);
+        return SsTableBlockLease.Mapped((IntPtr)(_base + offset), length);
+    }
+
     public override void Dispose()
     {
         if (Interlocked.Exchange(ref _disposed, 1) != 0)
@@ -202,21 +230,33 @@ internal sealed unsafe class MappedBlockSource : SsTableBlockSource
 }
 
 /// <summary>
-/// Positional reads for targets without memory mapping. Metadata regions are read once into arrays;
-/// each block read is one pread into a pooled buffer that is returned after the callback.
+/// Positional reads for targets without memory mapping (or when mapping is not wanted). Metadata regions are
+/// read once into arrays. A data block is one pread into a pooled buffer, CRC-verified on every physical read;
+/// with an <see cref="LsmBlockCache"/>, verified blocks are kept and later reads of them touch neither the
+/// disk nor the managed heap.
 /// </summary>
+/// <remarks>
+/// Unlike a memory mapping, a truncated or failing file surfaces as an <see cref="InvalidDataException"/> or
+/// <see cref="IOException"/> on the reading thread, never as a SIGBUS, and bytes that rot on disk after a block
+/// left the cache are caught by the CRC check of the next physical read.
+/// </remarks>
 internal sealed class PositionalBlockSource : SsTableBlockSource
 {
     private readonly FileStream _stream;
     private readonly long _length;
+    private readonly LsmBlockCache? _cache;
+    private readonly long _sourceId;
+    private int _disposed;
 #if !NET6_0_OR_GREATER
     private readonly object _gate = new();
 #endif
 
-    public PositionalBlockSource(string path)
+    public PositionalBlockSource(string path, LsmBlockCache? cache = null)
     {
         _stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete, bufferSize: 1, FileOptions.RandomAccess);
         _length = _stream.Length;
+        _cache = cache;
+        _sourceId = cache is null ? 0 : LsmBlockCache.NextSourceId();
     }
 
     public override long Length => _length;
@@ -246,7 +286,54 @@ internal sealed class PositionalBlockSource : SsTableBlockSource
         }
     }
 
-    public override void Dispose() => _stream.Dispose();
+    public override SsTableBlockLease ReadBlock(long offset, int length, int block, ISsTableBlockVerifier verifier)
+    {
+        ThrowIfOutOfRange(offset, length, _length);
+        LsmBlockCache? cache = _cache;
+        if (cache is not null && cache.TryAcquire(_sourceId, offset, out LsmBlockCache.CachedBlock cached))
+        {
+            return SsTableBlockLease.Cached(cached);
+        }
+
+        byte[] buffer = cache is null ? ArrayPool<byte>.Shared.Rent(length) : cache.Rent(length);
+        try
+        {
+            ReadExactly(offset, buffer.AsSpan(0, length));
+            verifier.VerifyBlock(block, buffer.AsSpan(0, length), physicalRead: true);
+        }
+        catch
+        {
+            ReturnBuffer(cache, buffer);
+            throw;
+        }
+
+        return cache is null
+            ? SsTableBlockLease.Pooled(buffer, length, pool: null)
+            : SsTableBlockLease.Cached(cache.InsertAndAcquire(_sourceId, offset, buffer, length));
+    }
+
+    public override void Dispose()
+    {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+        {
+            return;
+        }
+
+        _cache?.RemoveSource(_sourceId);
+        _stream.Dispose();
+    }
+
+    private static void ReturnBuffer(LsmBlockCache? cache, byte[] buffer)
+    {
+        if (cache is null)
+        {
+            ArrayPool<byte>.Shared.Return(buffer);
+        }
+        else
+        {
+            cache.Return(buffer);
+        }
+    }
 
     private void ReadExactly(long offset, Span<byte> destination)
     {
@@ -257,7 +344,7 @@ internal sealed class PositionalBlockSource : SsTableBlockSource
             int read = RandomAccess.Read(handle, destination, offset);
             if (read == 0)
             {
-                throw new EndOfStreamException("SSTable ended before the requested region.");
+                throw new InvalidDataException($"SSTable is truncated: it ended before the region at offset {offset}.");
             }
 
             destination = destination[read..];
@@ -272,7 +359,7 @@ internal sealed class PositionalBlockSource : SsTableBlockSource
                 int read = _stream.Read(destination);
                 if (read == 0)
                 {
-                    throw new EndOfStreamException("SSTable ended before the requested region.");
+                    throw new InvalidDataException($"SSTable is truncated: it ended before the region at offset {offset}.");
                 }
 
                 destination = destination[read..];

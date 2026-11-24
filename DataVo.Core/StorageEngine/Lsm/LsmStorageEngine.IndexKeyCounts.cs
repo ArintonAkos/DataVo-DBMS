@@ -39,7 +39,7 @@ public sealed partial class LsmStorageEngine
         TableVersion version = index.AcquireVersion();
         try
         {
-            var merge = new IndexEntryMerge(overlay, overlayCount, version.Files, _readMode);
+            var merge = new IndexEntryMerge(overlay, overlayCount, version.Files, _readMode, _blockCache);
             CountIndexKeys(ref merge, ref state, visit);
         }
         finally
@@ -145,7 +145,7 @@ public sealed partial class LsmStorageEngine
         private int _prefixLength;
         private RowKey _row;
 
-        public IndexEntryMerge(OverlayEntry[] overlay, int overlayCount, LsmSstableHandle[] files, LsmReadMode readMode)
+        public IndexEntryMerge(OverlayEntry[] overlay, int overlayCount, LsmSstableHandle[] files, LsmReadMode readMode, LsmBlockCache? blockCache)
         {
             _overlay = overlay;
             _overlayCount = overlayCount;
@@ -153,7 +153,7 @@ public sealed partial class LsmStorageEngine
             _hasCurrent = new bool[files.Length];
             for (int i = 0; i < files.Length; i++)
             {
-                _cursors[i] = files[i].GetKeyedReader(readMode).OpenCursor();
+                _cursors[i] = files[i].GetKeyedReader(readMode, blockCache).OpenCursor();
                 _hasCurrent[i] = _cursors[i].MoveNext();
             }
 

@@ -37,6 +37,15 @@ Each SSTable is written sequentially to a temporary file, fsynced, atomically re
 
 - **4 KiB data blocks + Bloom filters:** Sorted entries with a sparse block index and per-file blocked Bloom filter let point lookups skip absent files and touch at most one block on a hit.
 - **Memory-mapped reads (`LsmReadMode`):** `LsmReadMode.Auto` (default) memory-maps `.sst` files on 64-bit platforms so reads hit the OS page cache with no syscall per lookup. Use `LsmReadMode.PositionalRead` to force standard file reads.
+- **Positional reads + block cache (`LsmBlockCacheSizeBytes`):** with `LsmReadMode.PositionalRead`, data blocks are read with `RandomAccess.Read` into a sharded user-space block cache (32 shards, SIEVE eviction, 64 MiB by default). Every physical read verifies the block's CRC32C before the bytes are served or cached, and a truncated or damaged file surfaces as a managed `InvalidDataException` on the reading thread, never as a `SIGBUS`. Bytes that rot on disk after a block was evicted are caught on the next read. Warm hits allocate nothing.
+
+  | 200,000-row SSTable, Apple M4 Pro | Point lookup | Full scan | Engine `ReadRow` | Allocated per lookup |
+  | --- | ---: | ---: | ---: | ---: |
+  | `Auto` (mmap) | 179 ns | 1.74 ms | 172 ns | 0 B |
+  | `PositionalRead`, no cache | 5,963 ns | 4.47 ms | 6,074 ns | 0 B |
+  | `PositionalRead` + 64 MiB block cache | 204 ns | 1.76 ms | 203 ns | 0 B |
+
+  Measured with `benchmarks/DataVo.Benchmarks` (`--filter '*LsmReadMode*' --job short`); `ReadRow` includes its 64 B row copy. Choose `PositionalRead` when you want checksummed reads and clean I/O errors at near-mmap speed (network or removable volumes, files other processes might truncate); keep `Auto` for the last ~15 % of point-read latency.
 - **Out-of-core columnar segments (v8):** Tables with a `USING COLUMNAR` (`[Columnar]`) index store 4,096-row columnar chunks, NULL/NaN masks, tombstone runs, and per-chunk min/max zone maps inside each `.sst` file.
 
 ## Durability Settings & `IoSchedulerMode`
