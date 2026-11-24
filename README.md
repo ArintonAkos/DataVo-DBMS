@@ -98,6 +98,11 @@ Releases are published from CI with [NuGet Trusted Publishing](https://learn.mic
 
 ## More Examples
 
+Two runnable demos live under [`examples/`](examples) (`dotnet run -c Release` in either folder):
+
+- [**HybridVectorRagAot**](examples/HybridVectorRagAot): hybrid retrieval with SQL metadata filters (`Category`, `CreatedAt DATETIME`) and HNSW vector similarity, published as one Native AOT binary with no native library beside it.
+- [**LiveReactiveLeaderboard**](examples/LiveReactiveLeaderboard): high-frequency game events feeding incremental `GROUP BY`, top-N and `JOIN` views through `SubscribeZeroAlloc`, checked against a full re-query.
+
 ### Compiled LINQ over a typed table (`DataVo.Generators`)
 
 ```csharp

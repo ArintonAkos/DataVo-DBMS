@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- High-frequency game telemetry feeding live incremental (DBSP Z-set) views: a GROUP BY aggregate, a top-N
+       leaderboard and a two-table JOIN feed, all maintained from deltas without re-querying the base tables. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <ServerGarbageCollector>false</ServerGarbageCollector>
+    <TieredPGO>true</TieredPGO>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Inside this repository the example builds against the engine source. Outside it, replace this with
+         <PackageReference Include="DataVo.Core" Version="0.5.*" />. -->
+    <ProjectReference Include="..\..\DataVo.Core\DataVo.Core.csproj" />
+  </ItemGroup>
+
+</Project>
