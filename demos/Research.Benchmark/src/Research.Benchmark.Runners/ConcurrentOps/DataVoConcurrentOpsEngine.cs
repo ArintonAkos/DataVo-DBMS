@@ -64,28 +64,10 @@ public sealed class DataVoConcurrentOpsEngine : IConcurrentOpsEngine
         await Task.CompletedTask;
     }
 
-    public async Task<ConcurrentOpsResult> RunAsync(ConcurrentOpsOptions options, CancellationToken cancellationToken = default)
+    public Task<ConcurrentOpsResult> RunAsync(ConcurrentOpsOptions options, CancellationToken cancellationToken = default)
     {
         EnsureInitialized();
-        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        linkedCts.CancelAfter(options.Duration);
-        CancellationToken token = linkedCts.Token;
-
-        var stopwatch = Stopwatch.StartNew();
-        Task<ConcurrentWorkerResult>[] readTasks = Enumerable.Range(0, options.ReaderWorkers)
-            .Select(workerId => Task.Run(() => RunReadWorker(workerId, token), CancellationToken.None))
-            .ToArray();
-        Task<ConcurrentWorkerResult>[] writeTasks = Enumerable.Range(0, options.WriterWorkers)
-            .Select(workerId => Task.Run(() => RunWriteWorker(workerId, token), CancellationToken.None))
-            .ToArray();
-
-        await Task.WhenAll(readTasks.Concat(writeTasks));
-        stopwatch.Stop();
-
-        return ConcurrentOpsMetrics.Build(
-            readTasks.Select(static task => task.Result).ToArray(),
-            writeTasks.Select(static task => task.Result).ToArray(),
-            stopwatch.Elapsed);
+        return Task.FromResult(ConcurrentOpsWorkers.Run(options, cancellationToken, RunReadWorker, RunWriteWorker));
     }
 
     public ValueTask DisposeAsync()
