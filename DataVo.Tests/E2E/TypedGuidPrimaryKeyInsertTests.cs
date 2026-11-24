@@ -30,7 +30,7 @@ public sealed class TypedGuidPrimaryKeyInsertTests : IDisposable
     [MemberData(nameof(Modes))]
     public void TypedBatch_InsertsGuidKeys_AndRejectsDuplicates(StorageMode mode)
     {
-        Guid[] keys = [.. Enumerable.Range(0, 500).Select(_ => Guid.CreateVersion7())];
+        Guid[] keys = [.. Enumerable.Range(0, 500).Select(_ => TestGuids.CreateVersion7())];
         using DataVoContext context = Open(mode);
         Run(context, "CREATE DATABASE G");
         Run(context, "USE G");
@@ -43,7 +43,7 @@ public sealed class TypedGuidPrimaryKeyInsertTests : IDisposable
 
         // A duplicate of an existing key, and a duplicate inside one batch, are both rejected whole.
         Assert.ThrowsAny<Exception>(() => context.InsertTypedBatch("Items", Schema, [[CellValue.From(keys[7]), CellValue.From("dup")]]));
-        Guid fresh = Guid.CreateVersion7();
+        Guid fresh = TestGuids.CreateVersion7();
         Assert.ThrowsAny<Exception>(() => context.InsertTypedBatch("Items", Schema, [[CellValue.From(fresh), CellValue.From("a")], [CellValue.From(fresh), CellValue.From("b")]]));
         Assert.Equal(500, Count(context, "SELECT Id FROM Items"));
     }

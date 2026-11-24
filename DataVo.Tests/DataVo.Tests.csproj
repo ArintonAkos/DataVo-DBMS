@@ -1,7 +1,10 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
+    <!-- Every runtime DataVo.Core ships for, so each package target is tested on its own runtime. -->
+    <!-- Runtimes come from DataVoTestTargets (Directory.Build.props): net10.0 locally, all three in CI. -->
+    <TargetFrameworks>$(DataVoTestTargets)</TargetFrameworks>
+    <LangVersion>latest</LangVersion>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <NoWarn>$(NoWarn);CS8600;CS8605</NoWarn>
@@ -11,9 +14,6 @@
 
   <ItemGroup>
     <PackageReference Include="coverlet.collector" Version="6.0.4" />
-    <PackageReference Include="Microsoft.EntityFrameworkCore" Version="10.0.0" />
-    <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" Version="10.0.0" />
-    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" Version="10.0.0" />
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.0" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
     <PackageReference Include="xunit" Version="2.9.3" />
@@ -24,6 +24,18 @@
     <Using Include="Xunit" />
   </ItemGroup>
 
+  <!-- EF Core 10 and the DataVo EF bridge are net10.0-only, so their tests run on net10.0. -->
+  <ItemGroup Condition="'$(TargetFramework)' == 'net10.0'">
+    <PackageReference Include="Microsoft.EntityFrameworkCore" Version="10.0.0" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" Version="10.0.0" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" Version="10.0.0" />
+    <ProjectReference Include="..\DataVo.EntityFrameworkCore\DataVo.EntityFrameworkCore.csproj" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(TargetFramework)' != 'net10.0'">
+    <Compile Remove="EntityFramework\**" />
+  </ItemGroup>
+
   <ItemGroup>
     <ProjectReference Include="..\DataVo.Core\DataVo.Core.csproj" />
     <!-- Built for CrashRecoveryTests, which runs it as a separate process and kills it. -->
@@ -31,7 +43,6 @@
     <!-- The columnar crash workload's row generator, so the test rebuilds the rows the harness acknowledged. -->
     <Compile Include="..\tests\DataVo.CrashHarness\ColumnarCrashWorkload.cs" Link="Durability\ColumnarCrashWorkload.cs" />
     <ProjectReference Include="..\DataVo.Data\DataVo.Data.csproj" />
-    <ProjectReference Include="..\DataVo.EntityFrameworkCore\DataVo.EntityFrameworkCore.csproj" />
     <ProjectReference Include="..\DataVo.Generators\DataVo.Generators.csproj"
                       OutputItemType="Analyzer"
                       ReferenceOutputAssembly="false" />

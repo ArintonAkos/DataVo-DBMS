@@ -1,6 +1,9 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
+    <!-- Generated code is compiled against each DataVo.Core runtime target. -->
+    <!-- Runtimes come from DataVoTestTargets (Directory.Build.props): net10.0 locally, all three in CI. -->
+    <TargetFrameworks>$(DataVoTestTargets)</TargetFrameworks>
+    <LangVersion>latest</LangVersion>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>

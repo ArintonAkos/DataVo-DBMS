@@ -56,7 +56,7 @@ public sealed class LsmLatestRowStoreTests
     {
         var store = new LsmLatestRowStore();
         ulong sequence = 1;
-        foreach (RowKey key in Keys.Reverse())
+        foreach (RowKey key in Enumerable.Reverse(Keys))
         {
             store.Set(key, Value(key), sequence++);
         }

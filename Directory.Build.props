@@ -7,6 +7,13 @@
     <EnablePackageValidation>true</EnablePackageValidation>
   </PropertyGroup>
 
+  <!-- The runtimes the test projects (and the crash harness they launch) are built for. Local runs default to
+       net10.0 so they work with only the .NET 10 runtime installed; CI sets DataVoTestTargets (an environment
+       variable is enough) to "net8.0;net9.0;net10.0" and runs every package target on its own runtime. -->
+  <PropertyGroup>
+    <DataVoTestTargets Condition="'$(DataVoTestTargets)' == ''">net10.0</DataVoTestTargets>
+  </PropertyGroup>
+
   <PropertyGroup Condition="'$(MSBuildProjectName)' == 'DataVo.Core' Or '$(MSBuildProjectName)' == 'DataVo.Data'">
     <IsPackable>true</IsPackable>
     <Version>0.4.0-rc.1</Version>

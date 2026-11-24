@@ -32,7 +32,7 @@ public sealed class RowKeyTests
         Guid guid = Guid.NewGuid();
         Assert.Equal(guid, RowKey.FromGuid(guid).AsGuid());
 
-        Guid[] byTime = [.. Enumerable.Range(0, 100).Select(i => Guid.CreateVersion7(DateTimeOffset.UnixEpoch.AddMilliseconds(1_700_000_000_000L + (i * 1000L))))];
+        Guid[] byTime = [.. Enumerable.Range(0, 100).Select(i => TestGuids.CreateVersion7(DateTimeOffset.UnixEpoch.AddMilliseconds(1_700_000_000_000L + (i * 1000L))))];
         RowKey[] keys = [.. byTime.Select(RowKey.FromGuid)];
         Assert.Equal(keys, keys.Order());
     }

@@ -4,7 +4,10 @@
        killed, so the test can verify that every acknowledged write survives a hard crash. -->
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <TargetFramework>net10.0</TargetFramework>
+    <!-- The crash tests start the harness built for their own target framework. -->
+    <!-- Runtimes come from DataVoTestTargets (Directory.Build.props): net10.0 locally, all three in CI. -->
+    <TargetFrameworks>$(DataVoTestTargets)</TargetFrameworks>
+    <LangVersion>latest</LangVersion>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>

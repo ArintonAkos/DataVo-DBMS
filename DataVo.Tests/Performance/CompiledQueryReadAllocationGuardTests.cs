@@ -167,7 +167,7 @@ public sealed class CompiledQueryReadAllocationGuardTests
         var cells = new CellValue[2];
         for (int i = 0; i < RowCount; i++)
         {
-            ids[i] = Guid.CreateVersion7();
+            ids[i] = TestGuids.CreateVersion7();
             cells[0] = CellValue.From(ids[i]);
             cells[1] = CellValue.From($"Guid {i}");
             context.InsertTyped("GuidRecords", new ReactiveRowSchema("Id", "Name"), cells);
