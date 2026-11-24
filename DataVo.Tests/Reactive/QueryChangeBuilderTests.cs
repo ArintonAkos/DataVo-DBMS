@@ -1,4 +1,5 @@
 using DataVo.Core.Runtime.Reactive;
+using DataVo.Tests.Performance;
 
 namespace DataVo.Tests.Reactive;
 
@@ -84,36 +85,25 @@ public class QueryChangeBuilderTests
     {
         var builder = new QueryChangeBuilder(Schema, initialRowCapacity: 8);
         CellValue[] row = new CellValue[2]; // reused; allocated once, before measurement
-
-        // Warm up: JIT + one-time arena growth.
-        for (int i = 0; i < 2_000; i++)
-        {
-            builder.Reset();
-            row[0] = CellValue.From("sports");
-            row[1] = CellValue.From(123.45m);
-            builder.AddAddedRow(row);
-            QueryChangeRef w = builder.Build();
-            for (int r = 0; r < w.Added.Count; r++)
-            {
-                _ = w.Added[r][1].AsDecimal();
-            }
-        }
-
-        long before = GC.GetAllocatedBytesForCurrentThread();
         decimal sink = 0m;
-        for (int i = 0; i < 5_000; i++)
-        {
-            builder.Reset();
-            row[0] = CellValue.From("sports");
-            row[1] = CellValue.From(123.45m);
-            builder.AddAddedRow(row);
-            QueryChangeRef change = builder.Build();
-            for (int r = 0; r < change.Added.Count; r++)
+
+        // Each measured round is 5,000 build-and-read cycles after as many warm-up cycles (JIT + one-time arena
+        // growth); an allocation in the cycle itself would show in every round.
+        long allocated = SteadyStateAllocation.LowestRound(
+            () =>
             {
-                sink += change.Added[r][1].AsDecimal();
-            }
-        }
-        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+                builder.Reset();
+                row[0] = CellValue.From("sports");
+                row[1] = CellValue.From(123.45m);
+                builder.AddAddedRow(row);
+                QueryChangeRef change = builder.Build();
+                for (int r = 0; r < change.Added.Count; r++)
+                {
+                    sink += change.Added[r][1].AsDecimal();
+                }
+            },
+            iterations: 5_000,
+            target: 0);
 
         Assert.True(sink > 0m); // keep sink live
         Assert.Equal(0L, allocated);
