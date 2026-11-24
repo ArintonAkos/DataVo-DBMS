@@ -308,6 +308,7 @@ internal sealed partial class AggregateReactiveQuery : IBorrowedReactiveQuery
             key = new string(keySpan);
             state = new GroupState();
             _groups[key] = state;
+            IndexGroup(key, state);
             _groupKeyValues[key] = CaptureGroupValues(row);
         }
 
@@ -368,6 +369,7 @@ internal sealed partial class AggregateReactiveQuery : IBorrowedReactiveQuery
             key = new string(keySpan);
             state = new GroupState();
             _groups[key] = state;
+            IndexGroup(key, state);
             _groupKeyValues[key] = CaptureGroupValues(row);
         }
 
@@ -463,6 +465,7 @@ internal sealed partial class AggregateReactiveQuery : IBorrowedReactiveQuery
         if (state.Count <= 0)
         {
             _groups.Remove(key);
+            UnindexGroup(key);
         }
 
         return key;

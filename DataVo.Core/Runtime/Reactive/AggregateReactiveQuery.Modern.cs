@@ -1,4 +1,4 @@
-#if NET9_0_OR_GREATER
+#if NET8_0_OR_GREATER
 using System.Globalization;
 
 namespace DataVo.Core.Runtime.Reactive;
@@ -40,9 +40,6 @@ internal sealed partial class AggregateReactiveQuery
                 return;
         }
     }
-
-    private bool TryGetGroup(ReadOnlySpan<char> keySpan, out string? key, out GroupState? state) =>
-        _groups.GetAlternateLookup<ReadOnlySpan<char>>().TryGetValue(keySpan, out key, out state);
 
     private void AppendFormattable<T>(ref int pos, T value)
         where T : ISpanFormattable

@@ -1,4 +1,4 @@
-#if !NET9_0_OR_GREATER
+#if !NET8_0_OR_GREATER
 using System.Globalization;
 
 namespace DataVo.Core.Runtime.Reactive;
@@ -25,19 +25,6 @@ internal sealed partial class AggregateReactiveQuery
                 AppendChars(ref pos, Convert.ToString(value, CultureInfo.InvariantCulture) ?? string.Empty);
                 return;
         }
-    }
-
-    private bool TryGetGroup(ReadOnlySpan<char> keySpan, out string? key, out GroupState? state)
-    {
-        key = new string(keySpan);
-        if (_groups.TryGetValue(key, out GroupState? found))
-        {
-            state = found;
-            return true;
-        }
-
-        state = null;
-        return false;
     }
 
     private void AppendFormattable<T>(ref int pos, T value)
