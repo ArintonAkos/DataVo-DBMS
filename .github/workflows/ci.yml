@@ -17,44 +17,77 @@ concurrency:
 env:
   DOTNET_NOLOGO: "1"
   DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+  # Build the test projects for every runtime DataVo ships for (see Directory.Build.props).
+  DataVoTestTargets: "net8.0;net9.0;net10.0"
 
 jobs:
   test:
-    name: Build and test (${{ matrix.os }})
+    name: Tests (${{ matrix.os }}, ${{ matrix.framework }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
-    # Windows has not been validated for the file-lock and crash-recovery suites yet; keep it visible but
-    # non-blocking until it is green.
-    continue-on-error: ${{ matrix.os == 'windows-latest' }}
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
+        # Every runtime DataVo.Core and DataVo.Data ship for. Each leg builds the test projects for that target
+        # and runs them on that real runtime, so the package's net8.0, net9.0 and net10.0 builds are all tested.
+        framework: [net8.0, net9.0, net10.0]
     steps:
       - uses: actions/checkout@v5
 
       - uses: actions/setup-dotnet@v5
         with:
-          dotnet-version: "10.0.x"
+          dotnet-version: |
+            8.0.x
+            9.0.x
+            10.0.x
+
+      - name: Show installed runtimes
+        run: dotnet --list-runtimes
 
       - name: Build
-        run: dotnet build DataVo.Tests/DataVo.Tests.csproj -c Release
+        run: >-
+          dotnet build DataVo.Tests/DataVo.Tests.csproj -c Release -f ${{ matrix.framework }}
 
       - name: Engine tests
         run: >-
-          dotnet test DataVo.Tests/DataVo.Tests.csproj -c Release --no-build
-          --logger "trx;LogFileName=engine.trx" --results-directory artifacts/test-results
+          dotnet test DataVo.Tests/DataVo.Tests.csproj -c Release --no-build -f ${{ matrix.framework }}
+          --logger "trx;LogFileName=engine-${{ matrix.framework }}.trx" --results-directory artifacts/test-results
+
+      # The writer-starvation stress tests must run (not be filtered or skipped) and pass on every OS, Windows
+      # included; the step reads their outcomes from the engine run's TRX.
+      - name: Confirm the writer-starvation stress tests ran and passed
+        shell: bash
+        run: |
+          set -euo pipefail
+          trx="artifacts/test-results/engine-${{ matrix.framework }}.trx"
+          outcomes=$(grep -o 'testName="[^"]*WriterProgressUnderReadLoadTests[^"]*"[^>]*outcome="[A-Za-z]*"' "$trx" \
+            | sed -E 's/testName="([^"]*)".*outcome="([A-Za-z]*)"/\2 \1/')
+          echo "$outcomes"
+          ran=$(printf '%s\n' "$outcomes" | grep -c . || true)
+          passed=$(printf '%s\n' "$outcomes" | grep -c '^Passed ' || true)
+          if [ "$ran" -lt 3 ] || [ "$passed" -ne "$ran" ]; then
+            echo "::error::Expected the 3 writer-starvation tests to run and pass; ran $ran, passed $passed."
+            exit 1
+          fi
 
       - name: Source generator tests
         run: >-
-          dotnet test DataVo.Generators.Tests/DataVo.Generators.Tests.csproj -c Release
-          --logger "trx;LogFileName=generators.trx" --results-directory artifacts/test-results
+          dotnet test DataVo.Generators.Tests/DataVo.Generators.Tests.csproj -c Release -f ${{ matrix.framework }}
+          --logger "trx;LogFileName=generators-${{ matrix.framework }}.trx" --results-directory artifacts/test-results
+
+      # The benchmark harness (and its documentation checks) targets net10.0 only.
+      - name: Benchmark harness tests
+        if: matrix.framework == 'net10.0'
+        run: >-
+          dotnet test demos/Research.Benchmark/tests/Research.Benchmark.Tests/Research.Benchmark.Tests.csproj -c Release
+          --logger "trx;LogFileName=research-benchmark.trx" --results-directory artifacts/test-results
 
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: test-results-${{ matrix.os }}
+          name: test-results-${{ matrix.os }}-${{ matrix.framework }}
           path: artifacts/test-results
           if-no-files-found: ignore
 
