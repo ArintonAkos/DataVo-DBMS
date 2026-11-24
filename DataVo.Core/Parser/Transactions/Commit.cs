@@ -414,10 +414,19 @@ internal class Commit : BaseDbAction
             {
                 var indexFiles = engine.Catalog.GetTableIndexes(tableName, databaseName);
                 var rows = new List<(RowKey RowId, Dictionary<string, object?> OldRow, Dictionary<string, object?> NewRow)>(updates.Count);
+
+                // One read for the whole table's updated rows; reading has no side effects, so it can precede the
+                // per-row conflict checks below, which still run (and throw) in buffer order.
+                var rowIds = new List<RowKey>(updates.Count);
+                foreach (var (rowId, _) in updates)
+                {
+                    rowIds.Add(rowId);
+                }
+
+                var existingRows = engine.StorageContext.GetTableContents(rowIds, tableName, databaseName);
                 foreach (var (rowId, updatedColumns) in updates)
                 {
                     MvccCoordinator.ValidateCanModifyRow(engine, databaseName, tableName, rowId, context.Snapshot, "UPDATE");
-                    var existingRows = engine.StorageContext.GetTableContents([rowId], tableName, databaseName);
                     if (!existingRows.TryGetValue(rowId, out var oldRow)) continue;
 
                     var newRow = new Dictionary<string, object?>(oldRow, StringComparer.OrdinalIgnoreCase);
