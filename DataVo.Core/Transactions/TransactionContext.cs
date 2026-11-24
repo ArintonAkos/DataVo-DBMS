@@ -274,6 +274,36 @@ public class TransactionContext
     }
 
     /// <summary>
+    /// Re-indexes a buffered row (an updated stored row or a buffered insert) after an UPDATE changed some of its
+    /// non-key values in place. Equivalent to <see cref="BufferUpdate"/> or <see cref="ReplaceBufferedInsert"/>
+    /// with every key column unchanged, without building a second copy of the row.
+    /// </summary>
+    /// <param name="tableName">The target table name.</param>
+    /// <param name="rowId">The row's stored key, or its reserved buffered-insert key.</param>
+    /// <param name="row">The buffered row whose values were changed.</param>
+    internal void RefreshBufferedRow(string tableName, RowKey rowId, Dictionary<string, object?> row) =>
+        UpdateBufferedColumnIndexes(tableName, rowId, row);
+
+    /// <summary>Gets the buffered insert at a reserved buffered-row key, if it still exists.</summary>
+    /// <param name="tableName">The target table name.</param>
+    /// <param name="rowId">The reserved key (see <see cref="BufferedRowKey"/>).</param>
+    /// <param name="row">The buffered row, when found.</param>
+    /// <returns><see langword="true"/> when the buffered insert exists.</returns>
+    internal bool TryGetBufferedInsert(string tableName, RowKey rowId, [NotNullWhen(true)] out Dictionary<string, object?>? row)
+    {
+        if (IsBufferedRowKey(rowId)
+            && InsertedRows.TryGetValue(tableName, out List<Dictionary<string, object?>>? rows)
+            && rowId.Low < (ulong)rows.Count)
+        {
+            row = rows[(int)rowId.Low];
+            return true;
+        }
+
+        row = null;
+        return false;
+    }
+
+    /// <summary>
     /// Drops buffered inserts (a DELETE of rows this transaction inserted). Positions above a removed row shift
     /// down, so reserved keys are only meaningful within one statement.
     /// </summary>

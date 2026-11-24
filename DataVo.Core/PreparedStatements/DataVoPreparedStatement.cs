@@ -351,21 +351,44 @@ public sealed partial class DataVoPreparedStatement
         result = null;
         if (_parseException is not null
             || _statements is not { Count: 1 }
-            || _engine.Diagnostics.Enabled
-            || _engine.TransactionManager.HasActiveTransaction(sessionId))
+            || _engine.Diagnostics.Enabled)
         {
             return false;
         }
 
         try
         {
-            return TryExecuteFastPath(parameters, sessionId, out result) && result is not null;
+            return _engine.TransactionManager.HasActiveTransaction(sessionId)
+                ? TryExecuteInTransactionFastPath(parameters, sessionId, out result) && result is not null
+                : TryExecuteFastPath(parameters, sessionId, out result) && result is not null;
         }
         catch (Exception ex)
         {
             result = QueryResult.FromException(ex);
             return true;
         }
+    }
+
+    /// <summary>
+    /// Runs a fast path that is valid inside an explicit transaction. Only single-row primary-key updates have
+    /// one; they buffer into the transaction exactly as the general path does.
+    /// </summary>
+    private bool TryExecuteInTransactionFastPath(
+        ReadOnlySpan<DataVoQueryParameter> parameters,
+        Guid sessionId,
+        out QueryResult? result)
+    {
+        result = null;
+        if (_candidateTransactionalUpdate is null || _engine.Config.EnableAuthorization)
+        {
+            return false;
+        }
+
+        string? databaseName = _engine.Sessions.Get(sessionId);
+        Transactions.TransactionContext? transaction = _engine.TransactionManager.GetContext(sessionId);
+        return !string.IsNullOrWhiteSpace(databaseName)
+            && transaction is not null
+            && TryExecuteTransactionalUpdate(transaction, databaseName!, parameters, out result);
     }
 
     /// <summary>

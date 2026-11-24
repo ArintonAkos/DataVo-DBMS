@@ -52,6 +52,12 @@ public sealed class EngineCatalog
     }
 
     /// <summary>
+    /// Gets a counter that changes whenever any part of the catalog changes, in any table. A plan that depends
+    /// on another table's definition (such as a foreign key that references this table) keys its cache on it.
+    /// </summary>
+    public long Generation => _store.Generation;
+
+    /// <summary>
     /// Determines whether a database exists.
     /// </summary>
     public bool DatabaseExists(string databaseName) => _store.DatabaseExists(databaseName);

@@ -12,6 +12,7 @@ namespace DataVo.Core.Runtime;
 internal sealed class CatalogStore
 {
     private readonly object _syncRoot = new();
+    private long _generation;
     private readonly ConcurrentDictionary<(string Database, string Table), int> _tableSchemaVersions = new(TableSchemaKeyComparer.Instance);
     private readonly ConcurrentDictionary<(string Database, string Table), string> _storedNames = new(TableSchemaKeyComparer.Instance);
     private readonly bool _persistToDisk;
@@ -31,6 +32,7 @@ internal sealed class CatalogStore
 
         _tableShapes.Clear();
         _childForeignKeys.Clear();
+        Interlocked.Increment(ref _generation);
 
         Initialize();
     }
@@ -239,6 +241,12 @@ internal sealed class CatalogStore
             BumpTableSchemaVersion(databaseName, tableName);
         }
     }
+
+    /// <summary>
+    /// Gets a counter that changes whenever any part of the catalog changes (tables, columns, keys, indexes or
+    /// foreign keys anywhere), for caches whose validity depends on more than one table's schema version.
+    /// </summary>
+    public long Generation => Interlocked.Read(ref _generation);
 
     public int GetTableSchemaVersion(string tableName, string databaseName)
     {
@@ -626,6 +634,7 @@ internal sealed class CatalogStore
 
                 _tableShapes.Clear();
         _childForeignKeys.Clear();
+        Interlocked.Increment(ref _generation);
                 _tableSchemaVersions.Clear();
                 return;
             }
@@ -643,6 +652,7 @@ internal sealed class CatalogStore
 
             _tableShapes.Clear();
         _childForeignKeys.Clear();
+        Interlocked.Increment(ref _generation);
             _tableSchemaVersions.Clear();
         }
     }
@@ -656,6 +666,7 @@ internal sealed class CatalogStore
 
             _tableShapes.Clear();
         _childForeignKeys.Clear();
+        Interlocked.Increment(ref _generation);
             return;
         }
 
@@ -668,6 +679,7 @@ internal sealed class CatalogStore
 
             _tableShapes.Clear();
         _childForeignKeys.Clear();
+        Interlocked.Increment(ref _generation);
             SaveDocument();
             Logger.Info("Created Catalog.xml");
             return;
@@ -820,6 +832,7 @@ internal sealed class CatalogStore
         // Every catalog change goes through here; drop parsed table shapes so none can go stale.
         _tableShapes.Clear();
         _childForeignKeys.Clear();
+        Interlocked.Increment(ref _generation);
 
         if (!_persistToDisk)
         {
@@ -841,6 +854,7 @@ internal sealed class CatalogStore
     {
         _tableShapes.Clear();
         _childForeignKeys.Clear();
+        Interlocked.Increment(ref _generation);
         _tableSchemaVersions.AddOrUpdate((databaseName, tableName), 1, static (_, currentVersion) => currentVersion + 1);
     }
 

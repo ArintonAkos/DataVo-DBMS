@@ -122,7 +122,7 @@ internal static class SqlIndexLookupKey
         return true;
     }
 
-    private static bool TryBuildIntegerKey(object literal, out string key)
+    internal static bool TryBuildIntegerKey(object literal, out string key)
     {
         switch (literal)
         {

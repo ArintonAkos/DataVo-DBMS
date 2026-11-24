@@ -53,6 +53,7 @@ public sealed partial class DataVoPreparedStatement
                 break;
             case UpdateStatement update:
                 _candidateUpdate = TryBuildUpdateCandidate(update);
+                _candidateTransactionalUpdate = TryBuildTransactionalUpdateCandidate(update);
                 break;
             case DeleteFromStatement delete:
                 _candidateDelete = TryBuildDeleteCandidate(delete);

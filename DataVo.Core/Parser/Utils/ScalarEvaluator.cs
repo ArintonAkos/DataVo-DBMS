@@ -58,7 +58,7 @@ internal static class ScalarEvaluator
     /// promoted to the widest type involved (decimal &gt; double &gt; long &gt; int); integer division
     /// truncates. Native-AOT safe (no Microsoft.CSharp).
     /// </summary>
-    private static object ApplyArithmetic(string op, object left, object right)
+    internal static object ApplyArithmetic(string op, object left, object right)
     {
         // '+' with a string operand performs concatenation, matching the previous dynamic '+'.
         if (op == Operators.ADD && (left is string || right is string))

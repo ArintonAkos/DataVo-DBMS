@@ -1535,6 +1535,61 @@ public partial class StorageContext(DataVoConfig config) : IDisposable
     }
 
     /// <summary>
+    /// Reads one stored row as a column dictionary, exactly as a by-id read materializes it, but without the MVCC
+    /// visibility pass. The caller must already know the stored version is the one its snapshot sees.
+    /// </summary>
+    /// <param name="rowId">The stored row key.</param>
+    /// <param name="tableName">The owning table.</param>
+    /// <param name="databaseName">The owning database.</param>
+    /// <returns>The row, or <see langword="null"/> when it was deleted.</returns>
+    internal Dictionary<string, object?>? ReadCommittedRowDictionary(RowKey rowId, string tableName, string databaseName)
+    {
+        IReadOnlyList<Column>? columns = _storageEngine is ITypedRowStorageEngine
+            ? ResolveCatalog().GetTableColumnsReadOnly(tableName, databaseName)
+            : null;
+        return TryReadRowDictionary(rowId, tableName, databaseName, columns, selectedColumns: null);
+    }
+
+    /// <summary>
+    /// Reads one row: from the typed backend's own form when it holds the row typed (<paramref name="typedColumns"/>
+    /// is set only for such a backend), otherwise by deserializing its stored bytes. Returns <see langword="null"/>
+    /// when the row was deleted.
+    /// </summary>
+    private Dictionary<string, object?>? TryReadRowDictionary(
+        RowKey rowId,
+        string tableName,
+        string databaseName,
+        IReadOnlyList<Column>? typedColumns,
+        HashSet<string>? selectedColumns)
+    {
+        if (typedColumns is not null
+            && _storageEngine is ITypedRowStorageEngine typedStorage
+            && typedStorage.TryReadTypedRow(databaseName, tableName, RowKeyConversions.ToRowId(rowId), out StoredRow? typedRow)
+            && typedRow is not null)
+        {
+            return CopyStoredRowToLegacyDictionary(typedRow, typedColumns, selectedColumns);
+        }
+
+        byte[] rawRow;
+        try
+        {
+            rawRow = _storageEngine.ReadRow(databaseName, tableName, rowId);
+        }
+        catch (RowDeletedException)
+        {
+            return null;
+        }
+
+        return RowSerializer.Deserialize(
+            databaseName,
+            tableName,
+            rawRow,
+            selectedColumns,
+            ResolveCatalog(),
+            ResolveSerializerSchemaScopeKey());
+    }
+
+    /// <summary>
     /// Reads explicit row identifiers from storage.
     /// </summary>
     private Dictionary<RowKey, Dictionary<string, object?>> ReadRowsById(List<RowKey> rowIds, string tableName, string databaseName,
@@ -1547,35 +1602,15 @@ public partial class StorageContext(DataVoConfig config) : IDisposable
             return parsedTableData;
         }
 
-        if (_storageEngine is ITypedRowStorageEngine typedStorage)
+        if (_storageEngine is ITypedRowStorageEngine)
         {
-            IReadOnlyList<Column> columns = ResolveCatalog().GetTableColumns(tableName, databaseName);
+            IReadOnlyList<Column> columns = ResolveCatalog().GetTableColumnsReadOnly(tableName, databaseName);
             foreach (RowKey rowId in rowIds)
             {
-                if (typedStorage.TryReadTypedRow(databaseName, tableName, RowKeyConversions.ToRowId(rowId), out StoredRow? typedRow)
-                    && typedRow is not null)
+                if (TryReadRowDictionary(rowId, tableName, databaseName, columns, selectedColumns) is { } row)
                 {
-                    parsedTableData[rowId] = CopyStoredRowToLegacyDictionary(typedRow, columns, selectedColumns);
-                    continue;
+                    parsedTableData[rowId] = row;
                 }
-
-                byte[] rawRow;
-                try
-                {
-                    rawRow = _storageEngine.ReadRow(databaseName, tableName, rowId);
-                }
-                catch (RowDeletedException)
-                {
-                    continue;
-                }
-
-                parsedTableData[rowId] = RowSerializer.Deserialize(
-                    databaseName,
-                    tableName,
-                    rawRow,
-                    selectedColumns,
-                    ResolveCatalog(),
-                    ResolveSerializerSchemaScopeKey());
             }
 
             RuntimeQueryDiagnosticsScope.RecordTableRead(tableName, parsedTableData.Count);
