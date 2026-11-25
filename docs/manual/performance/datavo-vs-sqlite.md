@@ -7,7 +7,7 @@ description: Executive decision guide and 1,000,000-row benchmark comparison bet
 
 This guide compares DataVo v0.4 (`StorageMode.Lsm` and `StorageMode.InMemory`) against SQLite 3.50.4 (`WAL`, `synchronous=NORMAL`, plus `sqlite-vec` v0.1.9) across **28 relational SQL shapes** over 1,000,000 orders and **5 filtered nearest-neighbour vector queries**, with DuckDB 1.5.3 as an analytical reference. Every query's output is verified bit-for-bit against an independent oracle before timing begins.
 
-**The short version:** DataVo wins on primary-key ranges (**1.4–1.7×**), secondary-index lookups (**2.4×**), low-to-medium cardinality `GROUP BY` (**3.2–4.7×**), integer-key `INNER`/`LEFT` joins (**2.3–10.3×**), SIMD columnar aggregates (**4.8–13.7×**), and filtered vector search (**3.0–71×**). SQLite wins on unindexed full-table scans (**1.05–1.8×**), unindexed `ORDER BY ... LIMIT` (**1.3×**), `LEFT JOIN` anti-joins (**1.07×**), and high-cardinality indexed `GROUP BY` on LSM (**1.4×**). DuckDB beats both on full-table analytical scans (**3–340×**) and trails both on key lookups and ranges.
+**The short version:** DataVo wins on primary-key ranges (**1.4–1.7×**), secondary-index lookups (**2.4×**), low-to-medium cardinality `GROUP BY` (**2.7–4.8×**), integer-key `INNER`/`LEFT` joins (**2.3–10.3×**), SIMD columnar aggregates (**4.8–13.7×**), and filtered vector search (**3.0–71×**). SQLite wins on unindexed full-table scans (**1.05–1.8×**), unindexed `ORDER BY ... LIMIT` (**1.3×**), `LEFT JOIN` anti-joins (**1.07×**), and high-cardinality indexed `GROUP BY` on LSM (**1.24×**). DuckDB beats both on full-table analytical scans (**3–340×**) and trails both on key lookups and ranges.
 
 ## Executive Decision Guide
 
@@ -21,8 +21,8 @@ Medians compare DataVo LSM (`LsmStrictFsync = false`) against SQLite (`WAL`, `sy
 | Unindexed full-scan filter (`=`, `OR`, `LIKE`) | **SQLite** | 1.05–1.35× | W2–W6 |
 | Numeric `COUNT`/`SUM`/`MIN`/`MAX` with `[Columnar]` index | **DataVo** | 4.8–13.7× | C1, C2, C4, C6 |
 | Numeric aggregate *without* a columnar index (or LSM `DOUBLE` `SUM`) | **SQLite** | 1.2–1.8× | C1–C4, C6 |
-| Full-table `GROUP BY` (4–1,000 groups) | **DataVo** | 3.2–4.7× | G1, G2, C7 |
-| High-cardinality indexed `GROUP BY` (~125k groups, `HAVING` + top-100) | **SQLite** (vs LSM) / **DataVo** (InMemory) | 1.4× / 1.8× | G3 |
+| Full-table `GROUP BY` (4–1,000 groups) | **DataVo** | 2.7–4.8× | G1, G2, C7 |
+| High-cardinality indexed `GROUP BY` (~125k groups, `HAVING` + top-100) | **SQLite** (vs LSM) / **DataVo** (InMemory) | 1.24× / 1.33× | G3 |
 | Unindexed `ORDER BY ... LIMIT 10` | **SQLite** | 1.3× | C8 |
 | 2–3 table `INNER` / `LEFT` joins on integer keys | **DataVo** | 2.3–10.3× | J1–J4, J6, J7 |
 | `LEFT JOIN ... WHERE c.Id IS NULL` (anti-join) | **SQLite** | 1.07× | J5 |
@@ -95,11 +95,13 @@ LSM seeks clustered SSTables sequentially (1.4–1.7× faster than SQLite). InMe
 ::: details GROUP BY (G1–G3)
 | Query | DataVo (LSM) | DataVo (InMemory) | SQLite | DuckDB | SQLite / DataVo |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| **G1** `GROUP BY Status` (4 groups) | 50.5 ms (50.7 ms) | 67.0 ms | 237 ms | 1.12 ms | **4.70×** |
-| **G2** `GROUP BY Bucket` (1,000 groups) | 63.4 ms (65.9 ms) | 51.4 ms | 209 ms | 727 µs | **3.30×** |
-| **G3** `GROUP BY CustomerId HAVING COUNT(*) >= @k ORDER BY N DESC, CustomerId LIMIT 100` (~125k groups) | 44.2 ms (48.1 ms) | 16.7 ms | 30.5 ms | 4.40 ms | 0.691× |
+| **G1** `GROUP BY Status` (4 groups) | 49.8 ms (50.0 ms) | 63.7 ms | 239 ms | 1.15 ms | **4.80×** |
+| **G2** `GROUP BY Bucket` (1,000 groups) | 73.0 ms (78.0 ms) | 48.0 ms | 210 ms | 820 µs | **2.87×** |
+| **G3** `GROUP BY CustomerId HAVING COUNT(*) >= @k ORDER BY N DESC, CustomerId LIMIT 100` (~125k groups) | 32.5 ms (33.2 ms) | 19.8 ms | 26.3 ms | 4.47 ms | 0.809× |
 
-**Mechanisms:** DataVo hashes G1/G2 without boxing (UTF-8 byte keys for `Status`, 26.7 KB allocated) while SQLite sorts into a temporary B-tree. On G3, DataVo streams counts from `ix_orders_customer` (InMemory beats SQLite by 1.8×, 929 KB allocated), while LSM still scans nullable `CustomerId` null flags to count the NULL group.
+v0.5.0 re-run (25 November 2026, `master` @ `dffb4e13`; raw output in [`2026-11-25-v050/`](https://github.com/ArintonAkos/DataVo-DBMS/tree/master/docs/public/benchmarks/2026-11-25-v050)). G3 on LSM improved from 44.2 ms to 32.5 ms since v0.4 because LSM indexes now hold `NULL` keys, so the index-only count no longer scans `CustomerId` null flags.
+
+**Mechanisms:** DataVo hashes G1/G2 without boxing (UTF-8 byte keys for `Status`, 27.2 KB allocated) while SQLite sorts into a temporary B-tree. On G3, DataVo streams counts from `ix_orders_customer` (InMemory beats SQLite by 1.33×, 909 KB allocated); SQLite still leads LSM by 1.24× through its covering index.
 :::
 
 ::: details Columnar Index (C1–C8)
@@ -113,7 +115,7 @@ LSM seeks clustered SSTables sequentially (1.4–1.7× faster than SQLite). InMe
 | **C4** `COUNT(*), SUM(Qty), MIN/MAX(Amount) WHERE Bucket < @b AND Discount IS NOT NULL` | 86.7 ms | **11.9 ms**, pushed | 8.48 ms, pushed | 57.4 ms | 1.38 ms | **4.82×** |
 | **C5** `COUNT(*) WHERE Status = @s AND Amount >= @lo` (string col) | 40.0 ms | 39.9 ms, row scan | 45.9 ms, row scan | 42.7 ms | 984 µs | **1.07×** |
 | **C6** `COUNT(*) WHERE (Qty = 1 OR Qty = 2) AND Amount >= @lo` | 64.1 ms | **4.77 ms**, pushed | 497 µs, pushed | 35.6 ms | 1.69 ms | **7.45×** |
-| **C7** `GROUP BY Bucket`: `COUNT(*)`, `SUM(Qty)` | 63.1 ms | 63.2 ms, row scan | 50.9 ms, row scan | 200 ms | 744 µs | **3.17×** |
+| **C7** `GROUP BY Bucket`: `COUNT(*)`, `SUM(Qty)` (v0.5.0 re-run) | 74.7 ms | 75.1 ms, row scan | 47.4 ms, row scan | 201 ms | 833 µs | **2.67×** |
 | **C8** `ORDER BY Amount DESC, Id LIMIT 10` | 53.0 ms | 52.9 ms, row scan | 46.7 ms, row scan | 41.6 ms | 1.31 ms | 0.786× |
 
 **Why C3 is not pushed on LSM:** When an LSM columnar index has an unflushed tail, floating-point `SUM`/`AVG` falls back to the row scan to preserve bit-identical key-order addition. On InMemory (which is in key order), C3 is pushed at 3.05 ms.
