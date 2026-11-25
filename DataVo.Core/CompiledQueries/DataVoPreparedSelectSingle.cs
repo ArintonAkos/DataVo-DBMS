@@ -72,6 +72,9 @@ public sealed class DataVoPreparedSelectSingle<T>
         };
     }
 
+    /// <summary>How often a point read follows its key to a row that a concurrent update moved before giving up.</summary>
+    private const int MaxMovedRowRetries = 16;
+
     private T? ExecuteIntegerKey(long value)
     {
         if (HasActiveTransactionOrSnapshot(out TransactionContext? transactionContext))
@@ -87,7 +90,24 @@ public sealed class DataVoPreparedSelectSingle<T>
                 _databaseName,
                 out RowKey rowId))
         {
-            return TryProjectRow(rowId, out T? result) ? result : default;
+            // Read without a lock: an update that moves the row re-points the key before it deletes the old row,
+            // so a row found gone is looked up again rather than reported missing.
+            for (int attempt = 0; ; attempt++)
+            {
+                if (TryProjectRow(rowId, out T? result))
+                {
+                    return result;
+                }
+
+                if (attempt == MaxMovedRowRetries
+                    || !_context.Engine.IndexManager.TryLookupIntegerPrimaryKey(value, _indexName, _plan.TableName, _databaseName, out RowKey current)
+                    || current == rowId)
+                {
+                    return default;
+                }
+
+                rowId = current;
+            }
         }
 
         if (value is >= int.MinValue and <= int.MaxValue)
@@ -117,7 +137,23 @@ public sealed class DataVoPreparedSelectSingle<T>
                 _databaseName,
                 out RowKey rowId))
         {
-            return TryProjectRow(rowId, out T? result) ? result : default;
+            // See ExecuteIntegerKey: a row found gone may have moved under the key.
+            for (int attempt = 0; ; attempt++)
+            {
+                if (TryProjectRow(rowId, out T? result))
+                {
+                    return result;
+                }
+
+                if (attempt == MaxMovedRowRetries
+                    || !_context.Engine.IndexManager.TryLookupGuidPrimaryKey(value, _indexName, _plan.TableName, _databaseName, out RowKey current)
+                    || current == rowId)
+                {
+                    return default;
+                }
+
+                rowId = current;
+            }
         }
 
         return ExecuteKey(DataVoCompiledQuery.BuildScalarComparisonKey(value));
