@@ -196,6 +196,55 @@ public class DataVoTableGeneratorTests
         Assert.Contains("Level", diagnostic.GetMessage());
     }
 
+    private const string EmbeddingModel = Header + """
+        [DataVoTable("docs")]
+        public sealed class Doc
+        {
+            [PrimaryKey] public int Id { get; set; }
+            [VectorDimensions(4), Indexed] public ReadOnlyMemory<float> Embedding { get; set; }
+            [VectorDimensions(2)] public ReadOnlyMemory<float>? Summary { get; set; }
+            [VectorDimensions(3)] public float[]? Raw { get; set; }
+        }
+        """;
+
+    [Fact]
+    public void VectorProperties_AreVectorColumnsOfTheirDimensions()
+    {
+        Assert.Empty(Run(EmbeddingModel).Diagnostics.Select(static diagnostic => diagnostic.GetMessage()));
+        string generated = GeneratedText(EmbeddingModel);
+
+        Assert.Contains("Embedding VECTOR(4) NOT NULL", generated);
+        Assert.Contains("Summary VECTOR(2)", generated);
+        Assert.DoesNotContain("Summary VECTOR(2) NOT NULL", generated);
+        Assert.Contains("Raw VECTOR(3)", generated);
+        Assert.Contains("ReadVectorMemory(row[\"Embedding\"], \"Embedding\")", generated);
+        Assert.Contains("ReadNullableVectorMemory(row[\"Summary\"], \"Summary\")", generated);
+        Assert.Contains("ReadNullableVectorArray(row[\"Raw\"], \"Raw\")", generated);
+        Assert.Contains("VectorParameter(\"p0\", entity.Embedding)", generated);
+        Assert.Contains("new string[] { \"Embedding\" }", generated); // [Indexed] -> an HNSW index when the table is ensured
+    }
+
+    [Fact]
+    public void VectorModel_CompilesAsCSharp9WithNoErrors()
+    {
+        (Compilation output, _) = Run(EmbeddingModel, LanguageVersion.CSharp9);
+
+        Assert.Empty(output.GetDiagnostics().Where(static diagnostic => diagnostic.Severity == DiagnosticSeverity.Error));
+    }
+
+    [Theory]
+    [InlineData("public ReadOnlyMemory<float> Embedding { get; set; }", "DATAVOT009")]
+    [InlineData("public float[]? Raw { get; set; }", "DATAVOT009")]
+    [InlineData("[VectorDimensions(0)] public float[]? Raw { get; set; }", "DATAVOT009")]
+    [InlineData("[VectorDimensions(3)] public int Count { get; set; }", "DATAVOT010")]
+    public void VectorDimensions_Misuse_ReportsAnError(string member, string expectedId)
+    {
+        string source = ValidModel.Replace("public string? Name { get; set; }", "public string? Name { get; set; }\n    " + member);
+
+        Diagnostic diagnostic = Assert.Single(Run(source).Diagnostics);
+        Assert.True(expectedId == diagnostic.Id, diagnostic.GetMessage());
+    }
+
     [Fact]
     public void UnrelatedEdit_DoesNotRegenerate()
     {

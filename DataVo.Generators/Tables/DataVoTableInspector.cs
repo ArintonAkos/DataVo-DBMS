@@ -172,7 +172,21 @@ internal static class DataVoTableInspector
                 continue;
             }
 
-            if (MapType(property.Type) is not { } column)
+            int? dimensions = VectorDimensions(property, parameter);
+            bool vectorType = IsVectorType(property.Type);
+            if (vectorType && dimensions is not > 0)
+            {
+                report(DataVoGeneratorDiagnostics.VectorNeedsDimensions, property, [property.Name, property.Type.ToDisplayString()]);
+                continue;
+            }
+
+            if (!vectorType && dimensions is not null)
+            {
+                report(DataVoGeneratorDiagnostics.VectorDimensionsOnNonVector, property, [property.Name, property.Type.ToDisplayString()]);
+                continue;
+            }
+
+            if (MapType(property.Type, dimensions ?? 0) is not { } column)
             {
                 report(DataVoGeneratorDiagnostics.UnsupportedPropertyType, property, [property.Name, property.Type.ToDisplayString()]);
                 continue;
@@ -237,7 +251,28 @@ internal static class DataVoTableInspector
         }
     }
 
-    private static (ColumnType Type, bool IsNullable, bool IsExplicitlyNullable)? MapType(ITypeSymbol type)
+    /// <summary>The <c>[VectorDimensions(n)]</c> of a property (or its constructor parameter), or null.</summary>
+    private static int? VectorDimensions(IPropertySymbol property, IParameterSymbol? parameter)
+    {
+        const string fullName = Annotations + "VectorDimensionsAttribute";
+        AttributeData? attribute = property.GetAttributes().Concat(parameter?.GetAttributes() ?? [])
+            .FirstOrDefault(candidate => candidate.AttributeClass?.ToDisplayString() == fullName);
+        return attribute is null ? null
+            : attribute.ConstructorArguments.Length == 1 && attribute.ConstructorArguments[0].Value is int dimensions ? dimensions
+            : 0;
+    }
+
+    /// <summary>Whether <paramref name="type"/> is <c>float[]</c>, <c>ReadOnlyMemory&lt;float&gt;</c> or its nullable form.</summary>
+    private static bool IsVectorType(ITypeSymbol type)
+    {
+        ITypeSymbol core = type is INamedTypeSymbol { OriginalDefinition.SpecialType: SpecialType.System_Nullable_T } nullable
+            ? nullable.TypeArguments[0]
+            : type;
+        return core is IArrayTypeSymbol { Rank: 1, ElementType.SpecialType: SpecialType.System_Single }
+            || core.ToDisplayString() == "System.ReadOnlyMemory<float>";
+    }
+
+    private static (ColumnType Type, bool IsNullable, bool IsExplicitlyNullable)? MapType(ITypeSymbol type, int dimensions)
     {
         bool nullableValue = type is INamedTypeSymbol { OriginalDefinition.SpecialType: SpecialType.System_Nullable_T };
         ITypeSymbol core = nullableValue ? ((INamedTypeSymbol)type).TypeArguments[0] : type;
@@ -246,7 +281,9 @@ internal static class DataVoTableInspector
         bool explicitlyNullable = nullableValue || type.NullableAnnotation == NullableAnnotation.Annotated;
         bool nullable = explicitlyNullable || (type.IsReferenceType && type.NullableAnnotation == NullableAnnotation.None);
         string prefix = nullable ? "ReadNullable" : "Read";
-        ColumnType? column = core.SpecialType switch
+        ColumnType? column = core is IArrayTypeSymbol { Rank: 1, ElementType.SpecialType: SpecialType.System_Single } && dimensions > 0
+            ? new ColumnType($"VECTOR({dimensions})", prefix + "VectorArray", string.Empty, false, false, IsVector: true)
+            : core.SpecialType switch
         {
             SpecialType.System_Int32 => new ColumnType("INT", prefix + "Int32", string.Empty, true, false),
             SpecialType.System_Int64 => new ColumnType("BIGINT", prefix + "Int64", string.Empty, true, false),
@@ -263,6 +300,7 @@ internal static class DataVoTableInspector
                 "System.DateTime" => new ColumnType("DATETIME", prefix + "DateTime", string.Empty, true, true),
                 "System.DateTimeOffset" => new ColumnType("DATETIME", prefix + "DateTimeOffset", string.Empty, true, true),
                 "System.Numerics.Vector3" => new ColumnType("VECTOR(3)", prefix + "Vector3", string.Empty, true, false, IsVector3: true),
+                "System.ReadOnlyMemory<float>" when dimensions > 0 => new ColumnType($"VECTOR({dimensions})", prefix + "VectorMemory", string.Empty, true, false, IsVector: true),
                 _ => null,
             },
         };

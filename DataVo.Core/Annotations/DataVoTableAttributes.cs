@@ -75,3 +75,21 @@ public sealed class ColumnarAttribute : Attribute;
 /// </example>
 [AttributeUsage(AttributeTargets.Property | AttributeTargets.Parameter, AllowMultiple = false, Inherited = false)]
 public sealed class SpatialIndexAttribute : Attribute;
+
+/// <summary>
+/// Stores a <c>float[]</c>, <see cref="ReadOnlyMemory{T}"/> of <see cref="float"/> or nullable
+/// <see cref="ReadOnlyMemory{T}"/> of <see cref="float"/> property as a <c>VECTOR(n)</c> column of
+/// <paramref name="dimensions"/> floats. Add <see cref="IndexedAttribute"/> for a cosine HNSW index on it.
+/// </summary>
+/// <param name="dimensions">The number of floats in every vector (the <c>n</c> of <c>VECTOR(n)</c>).</param>
+/// <example>
+/// <code>
+/// [VectorDimensions(384), Indexed] public ReadOnlyMemory&lt;float&gt; Embedding { get; set; }
+/// </code>
+/// </example>
+[AttributeUsage(AttributeTargets.Property | AttributeTargets.Parameter, AllowMultiple = false, Inherited = false)]
+public sealed class VectorDimensionsAttribute(int dimensions) : Attribute
+{
+    /// <summary>The number of floats in every vector.</summary>
+    public int Dimensions { get; } = dimensions;
+}

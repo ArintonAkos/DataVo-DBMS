@@ -32,7 +32,7 @@ CREATE TABLE documents (
 | `DATETIME` | `TIMESTAMP`, `DATETIME2`, `TIMESTAMPTZ` | `DateTime` (UTC), `DateTimeOffset` | A point in time stored as 8-byte UTC ticks (100 ns precision, `0001-01-01` to `9999-12-31`). |
 | `GUID` | `UUID`, `UNIQUEIDENTIFIER` | `Guid` | 128-bit UUID. Single `GUID` primary key is clustered on `Lsm`. |
 | `VARCHAR(n)` | `NVARCHAR`, `CHAR`, `NCHAR`, `TEXT`, `STRING` | `string` | UTF-8 variable-length text. Comparisons and sorting are ordinal (case-sensitive). |
-| `VECTOR(n)` | `VEC2`, `VEC3`, `VEC4`, `FLOAT[n]`, `REAL[n]` | `float[]` | Fixed-dimension `n`-element array of 32-bit floats. |
+| `VECTOR(n)` | `VEC2`, `VEC3`, `VEC4`, `FLOAT[n]`, `REAL[n]` | `float[]`, `ReadOnlyMemory<float>` | Fixed-dimension `n`-element array of 32-bit floats. `[DataVoTable]` models declare it with `[VectorDimensions(n)]`. |
 
 ::: info DataVo Extension
 `VECTOR(n)` (with `VEC2`, `VEC3`, `VEC4`, `FLOAT[n]`, and `REAL[n]` shorthands) and `GUID` (`UUID`, `UNIQUEIDENTIFIER`) are first-class DataVo extensions beyond standard SQLite. `VECTOR` is a reserved keyword, so a column cannot be named `Vector`.

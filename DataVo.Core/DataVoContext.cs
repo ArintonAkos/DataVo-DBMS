@@ -940,6 +940,24 @@ public sealed class DataVoContext : IDisposable
     }
 
     /// <summary>
+    /// Executes a nearest-neighbor vector search in the current session database with a query vector held in
+    /// memory, such as a Microsoft.Extensions.AI <c>Embedding&lt;float&gt;.Vector</c>, without copying it to an array.
+    /// </summary>
+    /// <param name="tableName">The table containing the indexed vector column.</param>
+    /// <param name="indexName">The vector index name.</param>
+    /// <param name="queryVector">The query vector.</param>
+    /// <param name="topK">The number of nearest rows to return.</param>
+    /// <returns>The matching table rows in ranked order.</returns>
+    /// <example>
+    /// <code>
+    /// Embedding&lt;float&gt; query = (await generator.GenerateAsync(["lsm durability"]))[0];
+    /// var hits = db.SearchNearest("docs", "ix_docs_embedding", query.Vector, topK: 5);
+    /// </code>
+    /// </example>
+    public List<Dictionary<string, object?>> SearchNearest(string tableName, string indexName, ReadOnlyMemory<float> queryVector, int topK = 10) =>
+        SearchNearest(tableName, indexName, queryVector.Span, topK);
+
+    /// <summary>
     /// Executes a nearest-neighbor vector search in the current session database.
     /// </summary>
     /// <param name="tableName">The table containing the indexed vector column.</param>

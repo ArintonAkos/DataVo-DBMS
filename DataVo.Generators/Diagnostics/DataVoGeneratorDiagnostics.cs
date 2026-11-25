@@ -27,7 +27,7 @@ internal static class DataVoGeneratorDiagnostics
         "DATAVOT002", "DataVo table has several primary keys", "Model '{0}' marks several properties [PrimaryKey]; composite keys are not supported");
 
     public static readonly DiagnosticDescriptor UnsupportedPropertyType = Table(
-        "DATAVOT003", "Unsupported DataVo column type", "Property '{0}' has type '{1}', which DataVo cannot store without losing data. Supported types are int, long, float, double, bool, string, Guid, DataVoDate, DateOnly, DateTime, DateTimeOffset and System.Numerics.Vector3, and their nullable forms.");
+        "DATAVOT003", "Unsupported DataVo column type", "Property '{0}' has type '{1}', which DataVo cannot store without losing data. Supported types are int, long, float, double, bool, string, Guid, DataVoDate, DateOnly, DateTime, DateTimeOffset, System.Numerics.Vector3, and float[] or ReadOnlyMemory<float> with [VectorDimensions(n)], and their nullable forms.");
 
     public static readonly DiagnosticDescriptor NullablePrimaryKey = Table(
         "DATAVOT004", "DataVo primary key is nullable", "Primary key '{0}' cannot be nullable");
@@ -43,6 +43,12 @@ internal static class DataVoGeneratorDiagnostics
 
     public static readonly DiagnosticDescriptor SpatialIndexNeedsVector3 = Table(
         "DATAVOT008", "[SpatialIndex] needs a 3D position", "Property '{0}' is marked [SpatialIndex] but has type '{1}'; only a System.Numerics.Vector3 property can have a spatial index");
+
+    public static readonly DiagnosticDescriptor VectorNeedsDimensions = Table(
+        "DATAVOT009", "Vector column needs its dimensions", "Property '{0}' has type '{1}'; add [VectorDimensions(n)] with a positive number of floats to store it as VECTOR(n)");
+
+    public static readonly DiagnosticDescriptor VectorDimensionsOnNonVector = Table(
+        "DATAVOT010", "[VectorDimensions] needs a vector property", "Property '{0}' is marked [VectorDimensions] but has type '{1}'; only float[] and ReadOnlyMemory<float> properties are vectors");
 
     public static readonly DiagnosticDescriptor LinqCapturedVariable = Linq(
         "DATAVOL001",

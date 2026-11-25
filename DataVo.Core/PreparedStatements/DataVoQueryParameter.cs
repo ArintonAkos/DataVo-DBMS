@@ -239,11 +239,18 @@ public readonly struct DataVoQueryParameter
         _object = obj;
     }
 
-    /// <summary>A vector parameter: its text, as every SQL consumer reads it, and a copy of the floats it came from.</summary>
-    private DataVoQueryParameter(string name, float[] vector)
+    /// <summary>
+    /// Creates a <c>VECTOR</c> parameter from <paramref name="vector"/>: its text, as every SQL consumer reads it, and a
+    /// copy of the floats, bound straight into vector comparisons and inserts without parsing the text back. Pass
+    /// <c>embedding.Vector.Span</c> to bind a Microsoft.Extensions.AI <c>Embedding&lt;float&gt;</c> without
+    /// <c>ToArray()</c>.
+    /// </summary>
+    /// <param name="name">The parameter name.</param>
+    /// <param name="vector">The floats; they are copied, so the caller may reuse the buffer.</param>
+    public DataVoQueryParameter(string name, ReadOnlySpan<float> vector)
         : this(name, DataVoQueryParameterKind.String, 0, default, FormatVector(vector))
     {
-        _vector = (float[])vector.Clone();
+        _vector = vector.ToArray();
     }
 
     /// <summary>
@@ -279,7 +286,9 @@ public readonly struct DataVoQueryParameter
             bool flag => new DataVoQueryParameter(name, flag),
             Guid g => new DataVoQueryParameter(name, g),
             string str => new DataVoQueryParameter(name, str),
-            float[] floats => new DataVoQueryParameter(name, floats),
+            float[] floats => new DataVoQueryParameter(name, (ReadOnlySpan<float>)floats),
+            ReadOnlyMemory<float> memory => new DataVoQueryParameter(name, memory.Span),
+            Memory<float> writable => new DataVoQueryParameter(name, (ReadOnlySpan<float>)writable.Span),
             double[] doubles => new DataVoQueryParameter(name, FormatVectorString(doubles)),
             decimal[] decimals => new DataVoQueryParameter(name, FormatVectorString(decimals)),
             IEnumerable<float> floatSeq => new DataVoQueryParameter(name, FormatVectorString(floatSeq)),
@@ -424,7 +433,7 @@ public readonly struct DataVoQueryParameter
     /// <c>[a, b, ...]</c> with each float in its shortest round-trip form: the same text as
     /// <see cref="FormatVectorString{T}"/>, written into one buffer instead of a string per element.
     /// </summary>
-    private static string FormatVector(float[] values)
+    private static string FormatVector(ReadOnlySpan<float> values)
     {
         var text = new System.Text.StringBuilder((values.Length * 12) + 2);
         Span<char> number = stackalloc char[32];

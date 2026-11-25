@@ -39,9 +39,20 @@ Annotating a model with `[DataVoTable("table_name")]` generates zero-reflection 
 | --- | --- |
 | `[DataVoTable("players")]` | Binds the class to a table and generates `EnsurePlayerTable()`, `GetPlayerById(key)`, `Insert(player)`, and `Update(player)`. |
 | `[PrimaryKey]` | Marks the primary key column used by `Get<Model>ById` and `Update`. |
-| `[Indexed]` | Causes `Ensure<Model>Table()` to create a secondary B-Tree index (or HNSW index on `Vector3`). |
+| `[Indexed]` | Causes `Ensure<Model>Table()` to create a secondary B-Tree index (a spatial HNSW index on `Vector3`, a cosine HNSW index on a vector column). |
 | `[Columnar]` | Adds the column to the table's columnar index (`cx_<table>`) for fast analytical aggregations (`int`, `long`, `float`, `double`, `bool`, and date columns). |
 | `[SpatialIndex]` | Creates a Euclidean HNSW index (`sx_<table>_<column>`) on a `System.Numerics.Vector3` property for 3D spatial queries. |
+| `[VectorDimensions(n)]` | Stores a `float[]`, `ReadOnlyMemory<float>` or `ReadOnlyMemory<float>?` property as a `VECTOR(n)` column. Without it such a property is a compile error (`DATAVOT009`); on any other type it is `DATAVOT010`. |
+
+```csharp
+[DataVoTable("docs")]
+public sealed class Doc
+{
+    [PrimaryKey] public int Id { get; set; }
+    public string Title { get; set; } = "";
+    [VectorDimensions(384), Indexed] public ReadOnlyMemory<float> Embedding { get; set; } // cosine HNSW index
+}
+```
 
 Calling `db.EnsurePlayerTable()` creates the table and all annotated indexes if they do not exist. On compilers without module initializers (such as Unity), call `Ensure<Model>Table()` before accessing `db.Table<Player>()`.
 

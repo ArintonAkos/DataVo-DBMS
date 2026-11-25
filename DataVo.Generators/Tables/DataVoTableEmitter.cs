@@ -293,6 +293,11 @@ internal static class DataVoTableEmitter
             return $"{Support}.Vector3Parameter(\"{name}\", {value})";
         }
 
+        if (column.Type.IsVector)
+        {
+            return $"{Support}.VectorParameter(\"{name}\", {value})";
+        }
+
         if (column.Type.UsesObjectParameter)
         {
             return $"{Parameter}.FromObject(\"{name}\", {value})";

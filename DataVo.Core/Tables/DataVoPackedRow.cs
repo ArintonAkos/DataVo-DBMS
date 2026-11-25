@@ -131,6 +131,21 @@ public readonly ref struct DataVoPackedRow
             float[] other => throw new InvalidOperationException($"Column {name} holds {other.Length} values, but a 3D position needs 3."),
         };
 
+    /// <summary>Reads a required VECTOR(n) column as a float array (a copy).</summary>
+    public float[] ReadVectorArray(int column, string name) =>
+        ReadNullableVectorArray(column, name) ?? throw DataVoGeneratedTableSupport.NullColumn(name);
+
+    /// <summary>Reads a nullable VECTOR(n) column as a float array (a copy).</summary>
+    public float[]? ReadNullableVectorArray(int column, string name) =>
+        !IsNull(column) && FlatRowCodec.ReadVector(_references, _referenceBase, _fields[column].Position) is { } floats ? (float[])floats.Clone() : null;
+
+    /// <summary>Reads a required VECTOR(n) column as <see cref="ReadOnlyMemory{T}"/> of <see cref="float"/>.</summary>
+    public ReadOnlyMemory<float> ReadVectorMemory(int column, string name) => ReadVectorArray(column, name);
+
+    /// <summary>Reads a nullable VECTOR(n) column as <see cref="ReadOnlyMemory{T}"/> of <see cref="float"/>.</summary>
+    public ReadOnlyMemory<float>? ReadNullableVectorMemory(int column, string name) =>
+        ReadNullableVectorArray(column, name) is { } floats ? new ReadOnlyMemory<float>(floats) : (ReadOnlyMemory<float>?)null;
+
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private bool IsNull(int column)
     {

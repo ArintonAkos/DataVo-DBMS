@@ -53,7 +53,9 @@ public static class DataVoGeneratedTableSupport
         VerifyColumns(context, tableName, databaseName, columns);
         foreach (string column in indexedColumns)
         {
-            EnsureIndex(context, tableName, databaseName, column);
+            bool vector = Array.Exists(columns, entry => entry.Name.Equals(column, StringComparison.OrdinalIgnoreCase)
+                && entry.SqlType.StartsWith("VECTOR(", StringComparison.OrdinalIgnoreCase));
+            EnsureIndex(context, tableName, databaseName, column, vector);
         }
 
         foreach ((string column, string indexName) in spatialIndexes)
@@ -297,13 +299,55 @@ public static class DataVoGeneratedTableSupport
     public static DataVoQueryParameter Vector3Parameter(string name, System.Numerics.Vector3? value) =>
         value is { } point ? Vector3Parameter(name, point) : DataVoQueryParameter.Null(name);
 
-    private static void EnsureIndex(DataVoContext context, string tableName, string databaseName, string column)
+    /// <summary>Reads a required VECTOR(n) column as a float array.</summary>
+    public static float[] ReadVectorArray(object? value, string column) => ReadNullableVectorArray(value, column) ?? throw NullColumn(column);
+
+    /// <summary>Reads a nullable VECTOR(n) column as a float array.</summary>
+    public static float[]? ReadNullableVectorArray(object? value, string column) => value switch
+    {
+        null => null,
+        float[] floats => floats,
+        ReadOnlyMemory<float> memory => memory.ToArray(),
+        _ => throw new InvalidOperationException($"Column {column} does not hold a vector."),
+    };
+
+    /// <summary>Reads a required VECTOR(n) column as <see cref="ReadOnlyMemory{T}"/> of <see cref="float"/>.</summary>
+    public static ReadOnlyMemory<float> ReadVectorMemory(object? value, string column) => ReadVectorArray(value, column);
+
+    /// <summary>Reads a nullable VECTOR(n) column as <see cref="ReadOnlyMemory{T}"/> of <see cref="float"/>.</summary>
+    public static ReadOnlyMemory<float>? ReadNullableVectorMemory(object? value, string column) =>
+        ReadNullableVectorArray(value, column) is { } floats ? new ReadOnlyMemory<float>(floats) : (ReadOnlyMemory<float>?)null;
+
+    /// <summary>Binds a float array (or null) to a VECTOR(n) parameter.</summary>
+    /// <param name="name">The parameter name.</param>
+    /// <param name="value">The vector, or null.</param>
+    /// <returns>The parameter.</returns>
+    public static DataVoQueryParameter VectorParameter(string name, float[]? value) =>
+        value is null ? DataVoQueryParameter.Null(name) : new DataVoQueryParameter(name, (ReadOnlySpan<float>)value);
+
+    /// <summary>Binds a <see cref="ReadOnlyMemory{T}"/> vector to a VECTOR(n) parameter without an intermediate array.</summary>
+    /// <param name="name">The parameter name.</param>
+    /// <param name="value">The vector.</param>
+    /// <returns>The parameter.</returns>
+    public static DataVoQueryParameter VectorParameter(string name, ReadOnlyMemory<float> value) => new(name, value.Span);
+
+    /// <summary>Binds a nullable <see cref="ReadOnlyMemory{T}"/> vector to a VECTOR(n) parameter.</summary>
+    /// <param name="name">The parameter name.</param>
+    /// <param name="value">The vector, or null.</param>
+    /// <returns>The parameter.</returns>
+    public static DataVoQueryParameter VectorParameter(string name, ReadOnlyMemory<float>? value) =>
+        value is { } vector ? VectorParameter(name, vector) : DataVoQueryParameter.Null(name);
+
+    /// <summary>Creates the index of an [Indexed] column when missing: a cosine HNSW index for a vector, a B-tree otherwise.</summary>
+    private static void EnsureIndex(DataVoContext context, string tableName, string databaseName, string column, bool vector)
     {
         bool exists = context.Engine.Catalog.GetTableIndexes(tableName, databaseName)
             .Any(index => index.AttributeNames.Count == 1 && index.AttributeNames[0].Equals(column, StringComparison.OrdinalIgnoreCase));
         if (!exists)
         {
-            string sql = $"CREATE INDEX ix_{tableName}_{column} ON {tableName} ({column})";
+            string sql = vector
+                ? $"CREATE INDEX ix_{tableName}_{column} ON {tableName} ({column}) USING HNSW WITH (metric = 'cosine')"
+                : $"CREATE INDEX ix_{tableName}_{column} ON {tableName} ({column})";
             ThrowIfError(context.Execute(sql)[^1], sql);
         }
     }

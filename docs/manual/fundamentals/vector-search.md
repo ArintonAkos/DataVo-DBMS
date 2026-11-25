@@ -102,7 +102,7 @@ DataVo guarantees the requested `LIMIT` whenever enough matching rows exist:
 
 ## C# Direct Vector Search (`SearchNearest`)
 
-When you already have a `float[]`, `ReadOnlySpan<float>`, or vector string in C# and want to query a named index without building SQL text, call `db.SearchNearest(...)`:
+When you already have a `float[]`, `ReadOnlySpan<float>`, `ReadOnlyMemory<float>` (such as a Microsoft.Extensions.AI `Embedding<float>.Vector`), or vector string in C# and want to query a named index without building SQL text, call `db.SearchNearest(...)`. Spans and memory are read in place, with no `ToArray()` copy:
 
 ```csharp
 ReadOnlySpan<float> query = [1f, 0f, 0f];
@@ -113,6 +113,8 @@ List<Dictionary<string, object?>> hits = db.SearchNearest(
     topK: 5);
 ```
 
+Vector parameters bind the same way: `new DataVoQueryParameter("q", embedding.Vector.Span)`, or `DataVoQueryParameter.FromObject("q", embedding.Vector)` with a `ReadOnlyMemory<float>`. For the standard .NET vector store abstraction over DataVo, see [Microsoft.Extensions.VectorData](/manual/client-interfaces/vector-data).
+
 ::: details API Reference
 ```csharp
 public List<Dictionary<string, object?>> SearchNearest(
@@ -120,6 +122,9 @@ public List<Dictionary<string, object?>> SearchNearest(
 
 public List<Dictionary<string, object?>> SearchNearest(
     string tableName, string indexName, ReadOnlySpan<float> queryVector, int topK = 10);
+
+public List<Dictionary<string, object?>> SearchNearest(
+    string tableName, string indexName, ReadOnlyMemory<float> queryVector, int topK = 10);
 
 public List<Dictionary<string, object?>> SearchNearest(
     string tableName, string indexName, string queryVector, int topK = 10);

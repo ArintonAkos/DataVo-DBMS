@@ -265,6 +265,30 @@ public readonly ref struct RowRef
             : DataVoGeneratedTableSupport.ReadVector3(cell.ToObject(), name);
     }
 
+    /// <summary>Reads a required <c>VECTOR(n)</c> cell at <paramref name="ordinal"/> as a float array (a copy). Used by generated code.</summary>
+    [EditorBrowsable(EditorBrowsableState.Never)]
+    public float[] ReadVectorArray(int ordinal, string name) =>
+        ReadNullableVectorArray(ordinal, name) ?? throw DataVoGeneratedTableSupport.NullColumn(name);
+
+    /// <summary>Reads a nullable <c>VECTOR(n)</c> cell at <paramref name="ordinal"/> as a float array (a copy). Used by generated code.</summary>
+    [EditorBrowsable(EditorBrowsableState.Never)]
+    public float[]? ReadNullableVectorArray(int ordinal, string name)
+    {
+        CellValue cell = _values[ordinal];
+        return cell.IsNull ? null
+            : cell.Type == CellType.Vector ? cell.AsVectorReadOnlySpan().ToArray()
+            : DataVoGeneratedTableSupport.ReadNullableVectorArray(cell.ToObject(), name);
+    }
+
+    /// <summary>Reads a required <c>VECTOR(n)</c> cell at <paramref name="ordinal"/> as <see cref="ReadOnlyMemory{T}"/> (a copy). Used by generated code.</summary>
+    [EditorBrowsable(EditorBrowsableState.Never)]
+    public ReadOnlyMemory<float> ReadVectorMemory(int ordinal, string name) => ReadVectorArray(ordinal, name);
+
+    /// <summary>Reads a nullable <c>VECTOR(n)</c> cell at <paramref name="ordinal"/> as <see cref="ReadOnlyMemory{T}"/> (a copy). Used by generated code.</summary>
+    [EditorBrowsable(EditorBrowsableState.Never)]
+    public ReadOnlyMemory<float>? ReadNullableVectorMemory(int ordinal, string name) =>
+        ReadNullableVectorArray(ordinal, name) is { } floats ? new ReadOnlyMemory<float>(floats) : (ReadOnlyMemory<float>?)null;
+
     /// <summary>Reads a nullable <c>VECTOR(3)</c> cell at <paramref name="ordinal"/> as a <see cref="Vector3"/> without cloning. Used by generated code.</summary>
     [EditorBrowsable(EditorBrowsableState.Never)]
     public Vector3? ReadNullableVector3(int ordinal, string name) =>
