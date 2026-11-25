@@ -15,6 +15,7 @@ namespace DataVo.Tests.Transactions;
 /// Progress is checked per time window, so a writer that stalls for a whole window fails the test, not only one
 /// that never gets in.
 /// </summary>
+[Collection(TimingSensitiveCollection.Name)]
 public sealed class WriterProgressUnderReadLoadTests(ITestOutputHelper output)
 {
     private const int InitialRows = 20_000;
