@@ -815,6 +815,9 @@ public sealed partial class LsmStorageEngine : IFixedWidthPatchStorageEngine, IL
     /// <summary>Test hook: overrides the MemTable rotation threshold for tables created afterwards.</summary>
     internal long? MemTableFlushThresholdOverrideBytes { get; set; }
 
+    /// <summary>The engine's commit log, for tests that check its on-disk state.</summary>
+    internal LsmCommitLog CommitLogForTesting => _commitLog;
+
     /// <summary>Diagnostics: row versions held in the managed-heap overlay (published, not yet flushed).</summary>
     internal long OverlayRowCount(string databaseName, string tableName) =>
         GetOrCreateTable(databaseName, tableName).LatestRows.Count;

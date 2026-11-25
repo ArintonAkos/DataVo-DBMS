@@ -14,9 +14,14 @@ internal readonly record struct WalFrameRecord(WalFrameHeader Header, byte[] Pay
 /// appending framed records, forcing them to disk, reading the valid frames back and truncating through a
 /// checkpoint LSN. Appends go through a pooled file handle; a per-path lock orders appends, reads and rewrites.
 /// </summary>
+/// <remarks>
+/// The append offset is tracked in memory under that lock, so an append is one positional write with no
+/// length or directory query; the length is read from the file only on the first append after the file was
+/// opened, rewritten or deleted.
+/// </remarks>
 internal sealed class WalFileStore
 {
-    private static readonly ConcurrentDictionary<string, object> FileLocks =
+    private static readonly ConcurrentDictionary<string, FileState> FileStates =
         new(StringComparer.OrdinalIgnoreCase);
 
     private static readonly FileHandlePool BinaryFrameHandlePool = new(capacity: 128);
@@ -30,6 +35,14 @@ internal sealed class WalFileStore
     public WalFileStore(string filePath)
     {
         FilePath = filePath;
+
+        // Opening the file: it may have been changed since this process last appended to it (a crash test
+        // cutting its tail, a previous owner that was never disposed), so the next append reads its length.
+        FileState state = GetState();
+        lock (state)
+        {
+            state.Forget();
+        }
     }
 
     /// <summary>
@@ -39,24 +52,53 @@ internal sealed class WalFileStore
 
     internal int DurableFlushCount => Volatile.Read(ref _durableFlushCount);
 
+    /// <summary>
+    /// Reads, together under the path lock, the length the next append writes at (-1 when it will read the
+    /// length from the file) and the file's actual length (-1 when there is no file).
+    /// </summary>
+    internal (long Tracked, long OnDisk) ReadLengths()
+    {
+        FileState state = GetState();
+        lock (state)
+        {
+            var file = new FileInfo(FilePath);
+            return (state.Length, file.Exists ? file.Length : -1);
+        }
+    }
+
+    /// <summary>How many appends to this path had to read the file length because no tracked length was known.</summary>
+    internal int LengthReadCount
+    {
+        get
+        {
+            FileState state = GetState();
+            lock (state)
+            {
+                return state.LengthReads;
+            }
+        }
+    }
+
     internal void AppendFrameBytes(ReadOnlySpan<byte> bytes, bool flushToDisk)
     {
-        lock (GetLock())
+        FileState state = GetState();
+        lock (state)
         {
-            EnsureDirectoryExists();
-            AppendFrameBytesCore(bytes, flushToDisk);
+            EnsureDirectoryExists(state);
+            AppendFrameBytesCore(state, bytes, flushToDisk);
         }
     }
 
     internal void FlushToDisk()
     {
-        ExecuteLocked(() =>
+        FileState state = GetState();
+        lock (state)
         {
-            EnsureDirectoryExists();
+            EnsureDirectoryExists(state);
             using FileHandlePool.FileHandleLease lease = BinaryFrameHandlePool.Acquire(FilePath);
             RandomAccessCompat.FlushToDisk(lease.Handle);
             Interlocked.Increment(ref _durableFlushCount);
-        });
+        }
     }
 
     /// <summary>
@@ -72,9 +114,10 @@ internal sealed class WalFileStore
     internal void FlushToDiskConcurrent()
     {
         FileHandlePool.FileHandleLease lease;
-        lock (GetLock())
+        FileState state = GetState();
+        lock (state)
         {
-            EnsureDirectoryExists();
+            EnsureDirectoryExists(state);
             lease = BinaryFrameHandlePool.Acquire(FilePath);
         }
 
@@ -94,11 +137,20 @@ internal sealed class WalFileStore
         }
     }
 
-    private void AppendFrameBytesCore(ReadOnlySpan<byte> bytes, bool flushToDisk)
+    private void AppendFrameBytesCore(FileState state, ReadOnlySpan<byte> bytes, bool flushToDisk)
     {
         using FileHandlePool.FileHandleLease lease = BinaryFrameHandlePool.Acquire(FilePath);
-        long offset = RandomAccessCompat.GetLength(lease.Handle);
+        long offset = state.Length;
+        if (offset < 0)
+        {
+            offset = RandomAccessCompat.GetLength(lease.Handle);
+            state.LengthReads++;
+        }
+
+        // A write that throws may have written part of the frame, so the length is unknown until it succeeds.
+        state.Length = FileState.UnknownLength;
         RandomAccessCompat.Write(lease.Handle, bytes, offset);
+        state.Length = offset + bytes.Length;
         if (flushToDisk)
         {
             RandomAccessCompat.FlushToDisk(lease.Handle);
@@ -147,6 +199,7 @@ internal sealed class WalFileStore
     {
         ExecuteLocked(() =>
         {
+            GetState().Forget(); // the rewrite replaces the file; the next append reads the new length
             if (!File.Exists(FilePath))
             {
                 return;
@@ -228,7 +281,7 @@ internal sealed class WalFileStore
     /// <param name="action">The action to execute.</param>
     public void ExecuteLocked(Action action)
     {
-        lock (GetLock())
+        lock (GetState())
         {
             action();
         }
@@ -242,7 +295,7 @@ internal sealed class WalFileStore
     /// <returns>The function result.</returns>
     public T ExecuteLocked<T>(Func<T> func)
     {
-        lock (GetLock())
+        lock (GetState())
         {
             return func();
         }
@@ -276,32 +329,70 @@ internal sealed class WalFileStore
     /// Closes this file's pooled append handle. Owners call it when they are done with the log, so the
     /// file is not held open (on Windows an open handle also blocks deleting or replacing the file).
     /// </summary>
-    internal void ReleaseFileHandle() => ExecuteLocked(() => BinaryFrameHandlePool.Remove(FilePath));
-
-    private void EnsureDirectoryExists()
+    internal void ReleaseFileHandle() => ExecuteLocked(() =>
     {
-        // Runs on every append; compute the directory once and only create it when it is missing
-        // (it can be deleted underneath us, so the existence check stays).
-        string? directory = _directory ??= Path.GetDirectoryName(FilePath) ?? string.Empty;
+        BinaryFrameHandlePool.Remove(FilePath);
+        GetState().Forget();
+    });
+
+    /// <summary>
+    /// Creates the WAL directory if it is missing, once per opening of the file. Later appends skip the
+    /// check: they write through the pooled handle, and the pool creates the directory whenever it has to
+    /// open the file again.
+    /// </summary>
+    private void EnsureDirectoryExists(FileState state)
+    {
+        if (state.DirectoryEnsured)
+        {
+            return;
+        }
+
+        string directory = Path.GetDirectoryName(FilePath) ?? string.Empty;
         if (directory.Length > 0 && !Directory.Exists(directory))
         {
             Directory.CreateDirectory(directory);
         }
-    }
 
-    private string? _directory;
+        state.DirectoryEnsured = true;
+    }
 
     private void DeleteIfExistsCore()
     {
         BinaryFrameHandlePool.Remove(FilePath);
+        GetState().Forget();
         if (File.Exists(FilePath))
         {
             File.Delete(FilePath);
         }
     }
 
-    private object GetLock()
+    private FileState GetState() => FileStates.GetOrAdd(FilePath, static _ => new FileState());
+
+    /// <summary>
+    /// What appends know about one WAL path. Every store of the path shares it, and it is only read or
+    /// written while locked, because the object is also the path's lock.
+    /// </summary>
+    private sealed class FileState
     {
-        return FileLocks.GetOrAdd(FilePath, _ => new object());
+        public const long UnknownLength = -1;
+
+        /// <summary>The length the appends left the file at, or <see cref="UnknownLength"/>.</summary>
+        public long Length = UnknownLength;
+
+        /// <summary>Whether the directory was checked since the file was last opened, rewritten or deleted.</summary>
+        public bool DirectoryEnsured;
+
+        /// <summary>Appends that had to read the file length.</summary>
+        public int LengthReads;
+
+        /// <summary>
+        /// Called when the pooled handle is closed or the file is rewritten or deleted: the file may change
+        /// while no handle is open, so the next append reads its length and checks its directory again.
+        /// </summary>
+        public void Forget()
+        {
+            Length = UnknownLength;
+            DirectoryEnsured = false;
+        }
     }
 }
