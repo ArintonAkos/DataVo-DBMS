@@ -15,6 +15,11 @@ public class VersionStorageManager : IDisposable
     /// </summary>
     private readonly ConcurrentDictionary<(string, string, RowKey), RowVersion> _versionMetadata = new();
 
+    // Set before the first metadata entry is added and never cleared: until then every "remove this row's
+    // metadata" call of a writer that records no versions returns without even enumerating the map (whose
+    // enumerator is an allocation).
+    private volatile bool _mayHaveVersions;
+
     /// <summary>
     /// Lock for synchronizing version metadata access.
     /// </summary>
@@ -39,6 +44,7 @@ public class VersionStorageManager : IDisposable
         _versionLock.EnterWriteLock();
         try
         {
+            _mayHaveVersions = true;
             _versionMetadata[key] = version;
             _recorded.Enqueue((databaseName, tableName, rowId, xmin));
         }
@@ -65,6 +71,7 @@ public class VersionStorageManager : IDisposable
         _versionLock.EnterWriteLock();
         try
         {
+            _mayHaveVersions = true;
             for (int i = 0; i < rowIds.Count; i++)
             {
                 _versionMetadata[(databaseName, tableName, rowIds[i])] = version;
@@ -83,7 +90,7 @@ public class VersionStorageManager : IDisposable
     /// </summary>
     public void RemoveVersions(string databaseName, string tableName, IReadOnlyList<RowKey> rowIds)
     {
-        if (rowIds.Count == 0 || IsEmptyWithoutLocks(_versionMetadata))
+        if (rowIds.Count == 0 || HasNoVersionMetadata())
         {
             return;
         }
@@ -108,6 +115,7 @@ public class VersionStorageManager : IDisposable
         _versionLock.EnterWriteLock();
         try
         {
+            _mayHaveVersions = true;
             _versionMetadata[(databaseName, tableName, rowId)] = version;
         }
         finally
@@ -130,8 +138,23 @@ public class VersionStorageManager : IDisposable
     }
 
     /// <summary>Forgets the version metadata of one row (see <see cref="RemoveVersions"/>).</summary>
-    public void RemoveVersion(string databaseName, string tableName, RowKey rowId) =>
-        RemoveVersions(databaseName, tableName, [rowId]);
+    public void RemoveVersion(string databaseName, string tableName, RowKey rowId)
+    {
+        if (HasNoVersionMetadata())
+        {
+            return;
+        }
+
+        _versionLock.EnterWriteLock();
+        try
+        {
+            _versionMetadata.TryRemove((databaseName, tableName, rowId), out _);
+        }
+        finally
+        {
+            _versionLock.ExitWriteLock();
+        }
+    }
 
     /// <summary>
     /// Retrieves the current version metadata for a row.
@@ -305,6 +328,8 @@ public class VersionStorageManager : IDisposable
     /// <see cref="ConcurrentDictionary{TKey, TValue}.IsEmpty"/> takes when the map is empty. Like that check, the
     /// answer is a moment-in-time hint for a fast path, not a guarantee.
     /// </summary>
+    private bool HasNoVersionMetadata() => !_mayHaveVersions || IsEmptyWithoutLocks(_versionMetadata);
+
     private static bool IsEmptyWithoutLocks<TKey, TValue>(ConcurrentDictionary<TKey, TValue> map)
         where TKey : notnull
     {
@@ -367,7 +392,7 @@ public class VersionStorageManager : IDisposable
     /// <returns>The number of metadata entries removed.</returns>
     public int VacuumVersions(long? oldestSnapshot)
     {
-        if (_recorded.Count == 0 && IsEmptyWithoutLocks(_versionMetadata))
+        if (_recorded.Count == 0 && HasNoVersionMetadata())
         {
             return 0;
         }
