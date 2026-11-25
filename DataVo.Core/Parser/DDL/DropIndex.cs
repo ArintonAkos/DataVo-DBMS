@@ -33,11 +33,21 @@ internal class DropIndex(DropIndexStatement ast) : BaseDbAction
         {
             string databaseName = GetDatabaseName(session);
 
-            Catalog.DropIndex(_model.IndexName, _model.TableName, databaseName);
-            Indexes.DropIndex(_model.IndexName, _model.TableName, databaseName);
+            // DDL is exclusive: it waits for every row-level writer (they hold the table's intent lock) and
+            // keeps new ones out until the schema change is complete.
+            Locks.AcquireWriteLock(databaseName, _model.TableName);
+            try
+            {
+                Catalog.DropIndex(_model.IndexName, _model.TableName, databaseName);
+                Indexes.DropIndex(_model.IndexName, _model.TableName, databaseName);
 
-            // If it was a columnar index, this drops or rebuilds what storage holds for the table.
-            Engine.Columnar.Find(databaseName, _model.TableName);
+                // If it was a columnar index, this drops or rebuilds what storage holds for the table.
+                Engine.Columnar.Find(databaseName, _model.TableName);
+            }
+            finally
+            {
+                Locks.ReleaseWriteLock(databaseName, _model.TableName);
+            }
 
             Logger.Info($"Index file {_model.IndexName} successfully dropped!");
             Messages.Add($"Index file {_model.IndexName} successfully dropped!");

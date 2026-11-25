@@ -44,6 +44,7 @@ internal class DropDatabase(DropDatabaseStatement ast) : BaseDbAction
             Sessions.Clear();
 
             Indexes.DropDatabaseIndexes(_model.DatabaseName);
+            Locks.ForgetDatabase(_model.DatabaseName);
 
             Logger.Info($"Database {_model.DatabaseName} successfully dropped!");
             Messages.Add($"Database {_model.DatabaseName} successfully dropped!");

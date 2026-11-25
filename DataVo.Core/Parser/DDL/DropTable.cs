@@ -57,10 +57,22 @@ internal class DropTable(DropTableStatement ast) : BaseDbAction
                 return;
             }
 
-            DropAssociatedTableIndexes(databaseName);
+            // DDL is exclusive: it waits for every row-level writer (they hold the table's intent lock) and
+            // keeps new ones out until the schema change is complete.
+            Locks.AcquireWriteLock(databaseName, _model.TableName);
+            try
+            {
+                DropAssociatedTableIndexes(databaseName);
 
-            Catalog.DropTable(_model.TableName, databaseName);
-            Context.DropTable(_model.TableName, databaseName);
+                Catalog.DropTable(_model.TableName, databaseName);
+                Context.DropTable(_model.TableName, databaseName);
+            }
+            finally
+            {
+                Locks.ReleaseWriteLock(databaseName, _model.TableName);
+            }
+
+            Locks.ForgetTable(databaseName, _model.TableName);
 
             Logger.Info($"Table {_model.TableName} successfully dropped!");
             Messages.Add($"Table {_model.TableName} successfully dropped!");
