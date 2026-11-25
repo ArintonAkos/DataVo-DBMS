@@ -88,10 +88,6 @@ else if (benchmarkScenario.Equals("disk-crud-wal", StringComparison.OrdinalIgnor
 {
     int records = ReadIntArg(args, "--records", 50_000);
     int writerWorkers = Math.Max(1, ReadIntArg(args, "--writers", 1));
-    // Optional override for the GroupCommit background checkpoint cadence. A very large value parks the
-    // checkpointer for the measured window (Phase-3-like), enabling a same-session checkpointer-overhead A/B.
-    int checkpointIntervalArg = ReadIntArg(args, "--checkpoint-interval-ms", -1);
-    int? checkpointIntervalMs = checkpointIntervalArg > 0 ? checkpointIntervalArg : null;
     // --legacy-update forces the legacy dictionary update path (disables the zero-alloc byte-patch fast path),
     // so the same session can A/B the update-phase allocation and CPU cost against the zero-alloc default.
     bool zeroAllocUpdate = !HasFlag(args, "--legacy-update");
@@ -117,7 +113,7 @@ else if (benchmarkScenario.Equals("disk-crud-wal", StringComparison.OrdinalIgnor
         // Durability matrix: each DataVo mode has a like-for-like SQLite counterpart.
         //   not power-durable: DataVo (Disk), DataVo (LSM Relaxed) <-> SQLite (WAL, synchronous=NORMAL)
         //   power-durable:     DataVo (Disk+fsync), DataVo (LSM Production) <-> SQLite (WAL, synchronous=FULL)
-        foreach (IDiskCrudEngine engine in DiskCrudEngineMatrix.Create(engineFilter, checkpointIntervalMs, zeroAllocUpdate))
+        foreach (IDiskCrudEngine engine in DiskCrudEngineMatrix.Create(engineFilter, zeroAllocUpdate))
         {
             results.Add(RunDiskScenario(engine));
         }

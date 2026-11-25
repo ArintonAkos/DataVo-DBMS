@@ -17,12 +17,12 @@ public sealed class DataVoDbContextOptionsBuilder
     // ------------------------------------------------------------------ storage mode
 
     /// <summary>
-    /// Configures DataVo to use disk-based (persistent) storage.
-    /// Equivalent to <c>StorageMode=Disk</c> in the connection string.
+    /// Configures DataVo to persist data with the LSM storage engine.
+    /// Equivalent to <c>StorageMode=Lsm</c> in the connection string.
     /// </summary>
-    public DataVoDbContextOptionsBuilder UseDiskStorage()
+    public DataVoDbContextOptionsBuilder UseLsmStorage()
     {
-        _extension.WithStorageMode(DataVoStorageMode.Disk);
+        _extension.WithStorageMode(DataVoStorageMode.Lsm);
         return this;
     }
 
@@ -111,7 +111,7 @@ public sealed record DataVoBootstrapOptions(
     /// <summary>Returns the effective connection string used at runtime.</summary>
     public string? EffectiveConnectionString =>
         StorageMode is not null && DataSource is { Length: > 0 }
-            ? $"StorageMode={(StorageMode == DataVoStorageMode.InMemory ? "InMemory" : "Disk")};DataSource={DataSource}"
+            ? $"StorageMode={(StorageMode == DataVoStorageMode.InMemory ? "InMemory" : "Lsm")};DataSource={DataSource}"
             : ConnectionString;
 
     /// <summary>Whether the bridge is still operating in bridge-only mode.</summary>

@@ -7,13 +7,10 @@ using DataVo.Core.Serialization;
 namespace DataVo.Core.BTree;
 
 /// <summary>
-/// Implements an <see cref="IIndex"/> using an in-memory generic B-Tree that is serialized to JSON on disk.
+/// Implements an <see cref="IIndex"/> using an in-memory generic B-Tree: the scalar index of the in-memory
+/// engine (the LSM engine keeps its scalar indexes in persisted index tables instead).
 /// </summary>
-/// <remarks>
-/// This implementation favors simplicity and debuggability over write efficiency.
-/// Mutations occur in memory and the full structure is serialized when <see cref="Save(string)"/> is called.
-/// </remarks>
-public class JsonBTreeIndex(int minDegree) : IIndex
+public class InMemoryBTreeIndex(int minDegree) : IIndex
 {
     private const int DefaultMinDegree = 50;
     private readonly object _treeLock = new();
@@ -31,9 +28,9 @@ public class JsonBTreeIndex(int minDegree) : IIndex
     public int MinDegree { get; set; } = minDegree;
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="JsonBTreeIndex"/> class using the default minimum degree.
+    /// Initializes a new instance of the <see cref="InMemoryBTreeIndex"/> class using the default minimum degree.
     /// </summary>
-    public JsonBTreeIndex() : this(DefaultMinDegree) { }
+    public InMemoryBTreeIndex() : this(DefaultMinDegree) { }
 
     /// <summary>
     /// Inserts a logical key-to-row mapping into the index.
@@ -334,43 +331,5 @@ public class JsonBTreeIndex(int minDegree) : IIndex
         }
 
         _emptyKeys = 0;
-    }
-
-    /// <summary>
-    /// Serializes the full tree to a JSON file.
-    /// </summary>
-    /// <param name="filePath">The destination file path.</param>
-    public void Save(string filePath)
-    {
-        lock (_treeLock)
-        {
-            string directory = Path.GetDirectoryName(filePath)!;
-            if (!Directory.Exists(directory))
-            {
-                Directory.CreateDirectory(directory);
-            }
-
-            string json = JsonSerializer.Serialize(this, DataVoJsonContext.Default.JsonBTreeIndex);
-            File.WriteAllText(filePath, json);
-        }
-    }
-
-    /// <summary>
-    /// Loads a <see cref="JsonBTreeIndex"/> from a JSON file.
-    /// </summary>
-    /// <param name="filePath">The JSON file to read.</param>
-    /// <returns>The deserialized index instance.</returns>
-    /// <exception cref="FileNotFoundException">Thrown when <paramref name="filePath"/> does not exist.</exception>
-    /// <exception cref="Exception">Thrown when deserialization returns <see langword="null"/>.</exception>
-    public static JsonBTreeIndex Load(string filePath)
-    {
-        if (!File.Exists(filePath))
-        {
-            throw new FileNotFoundException($"B-Tree index file not found: {filePath}");
-        }
-
-        string json = File.ReadAllText(filePath);
-        return JsonSerializer.Deserialize(json, DataVoJsonContext.Default.JsonBTreeIndex)
-             ?? throw new IndexException($"Failed to deserialize B-Tree index from: {filePath}");
     }
 }

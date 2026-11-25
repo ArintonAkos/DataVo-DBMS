@@ -63,7 +63,6 @@ internal class CreateTable(CreateTableStatement ast) : BaseDbAction
             Table table = _model.ToTable();
             table.Clustered = ShouldCluster(table);
             Catalog.CreateTable(table, databaseName);
-            Context.CreateTable(_model.TableName, databaseName);
 
             CreatePrimaryKeyIndex(databaseName);
             CreateUniqueKeyIndexes(databaseName);

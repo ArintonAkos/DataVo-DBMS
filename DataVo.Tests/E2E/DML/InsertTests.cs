@@ -166,7 +166,7 @@ public class InMemoryInsertTests : InsertTestsBase
     public InMemoryInsertTests() : base(new DataVoConfig { StorageMode = StorageMode.InMemory }, "InsertDB_Mem") { }
 }
 
-public class DiskInsertTests : InsertTestsBase
+public class LsmInsertTests : InsertTestsBase
 {
-    public DiskInsertTests() : base(new DataVoConfig { StorageMode = StorageMode.Disk, DiskStoragePath = "./test_datavo_insert" }, "InsertDB_Disk") { }
+    public LsmInsertTests() : base(new DataVoConfig { StorageMode = StorageMode.Lsm, DiskStoragePath = "./test_datavo_lsm_insert" }, "InsertDB_Lsm") { }
 }

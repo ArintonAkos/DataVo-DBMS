@@ -6,7 +6,6 @@ public class ReactiveJoinTests
 {
     [Theory]
     [InlineData(StorageMode.InMemory)]
-    [InlineData(StorageMode.Disk)]
     public void Inner_MaintainsJoin_OnBothSides(StorageMode mode)
     {
         using var ctx = ChangeCaptureIntegrationTests.NewContext(mode, out _);
@@ -37,7 +36,6 @@ public class ReactiveJoinTests
 
     [Theory]
     [InlineData(StorageMode.InMemory)]
-    [InlineData(StorageMode.Disk)]
     public void Left_NullPads_AndTransitionsWithMatches(StorageMode mode)
     {
         using var ctx = ChangeCaptureIntegrationTests.NewContext(mode, out _);
@@ -82,7 +80,6 @@ public class ReactiveJoinTests
 
     [Theory]
     [InlineData(StorageMode.InMemory)]
-    [InlineData(StorageMode.Disk)]
     public void Full_NullPads_BothSides(StorageMode mode)
     {
         using var ctx = ChangeCaptureIntegrationTests.NewContext(mode, out _);

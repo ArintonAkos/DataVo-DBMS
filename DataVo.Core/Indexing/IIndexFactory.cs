@@ -28,12 +28,4 @@ public interface IIndexFactory
     /// <param name="params">Implementation-specific parameters (e.g., vector dimension, M for HNSW).</param>
     /// <returns>A new index instance, ready for use.</returns>
     object CreateIndex(string indexName, string columnName, Dictionary<string, object> @params);
-
-    /// <summary>
-    /// Loads an index from disk using the specified persistence handler.
-    /// </summary>
-    /// <param name="filePath">Path to the serialized index file.</param>
-    /// <param name="persistence">The persistence handler for this index type.</param>
-    /// <returns>The deserialized index instance.</returns>
-    object LoadIndex(string filePath, IIndexPersistence persistence);
 }

@@ -13,7 +13,7 @@ public sealed class StreamQueryTests : IDisposable
 
     private readonly string _directory = Path.Combine(Path.GetTempPath(), $"datavo_stream_{Guid.NewGuid():N}");
 
-    public static TheoryData<StorageMode> Modes => new() { StorageMode.InMemory, StorageMode.Disk, StorageMode.Lsm };
+    public static TheoryData<StorageMode> Modes => new() { StorageMode.InMemory, StorageMode.Lsm };
 
     public void Dispose()
     {
@@ -33,7 +33,6 @@ public sealed class StreamQueryTests : IDisposable
 
     [Theory]
     [InlineData(StorageMode.InMemory, "SELECT Id, Grp FROM Items WHERE Grp > 5")]
-    [InlineData(StorageMode.Disk, "SELECT Id, Grp FROM Items WHERE Grp > 5")]
     [InlineData(StorageMode.Lsm, "SELECT Id, Grp FROM Items WHERE Grp > 5")]
     [InlineData(StorageMode.Lsm, "SELECT Id FROM Items WHERE Id >= 3000 AND Id < 3100")]
     [InlineData(StorageMode.Lsm, "SELECT Id AS RowNo, Note AS Remark FROM Items WHERE Grp <= 2")]
@@ -184,7 +183,6 @@ public sealed class StreamQueryTests : IDisposable
     }
 
     [Theory]
-    [InlineData(StorageMode.Disk)]
     [InlineData(StorageMode.InMemory)]
     public void Vacuum_DuringAStream_StopsItInsteadOfReturningWrongRows(StorageMode mode)
     {

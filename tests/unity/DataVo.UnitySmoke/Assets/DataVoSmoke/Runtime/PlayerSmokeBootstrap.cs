@@ -100,7 +100,6 @@ namespace DataVo.UnitySmoke.Player
             AssertVectorLengthFailure(context);
             RunPackageScenarios();
             AssertSaveDataPersists(StorageMode.Lsm);
-            AssertSaveDataPersists(StorageMode.Disk);
 
             return PlayerSmokeResult.Passed();
         }

@@ -229,7 +229,7 @@ public class TransactionTestsMemory : TransactionTestsBase
     public TransactionTestsMemory() : base(new DataVoConfig { StorageMode = StorageMode.InMemory }, "TxMemDb") { }
 }
 
-public class TransactionTestsDisk : TransactionTestsBase
+public class TransactionTestsLsm : TransactionTestsBase
 {
-    public TransactionTestsDisk() : base(new DataVoConfig { StorageMode = StorageMode.Disk, DiskStoragePath = "TxDiskDb" }, "TxDiskDb") { }
+    public TransactionTestsLsm() : base(new DataVoConfig { StorageMode = StorageMode.Lsm, DiskStoragePath = "TxLsmDb" }, "TxLsmDb") { }
 }

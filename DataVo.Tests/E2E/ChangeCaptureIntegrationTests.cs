@@ -8,7 +8,6 @@ public class ChangeCaptureIntegrationTests
 {
     [Theory]
     [InlineData(StorageMode.InMemory)]
-    [InlineData(StorageMode.Disk)]
     public void Commit_ProducesChangeSet_RollbackDoesNot(StorageMode mode)
     {
         using var ctx = NewContext(mode, out _);
@@ -33,7 +32,6 @@ public class ChangeCaptureIntegrationTests
 
     [Theory]
     [InlineData(StorageMode.InMemory)]
-    [InlineData(StorageMode.Disk)]
     public void Update_CapturesBeforeAndAfter(StorageMode mode)
     {
         using var ctx = NewContext(mode, out _);
@@ -54,7 +52,6 @@ public class ChangeCaptureIntegrationTests
 
     [Theory]
     [InlineData(StorageMode.InMemory)]
-    [InlineData(StorageMode.Disk)]
     public void BulkInsert_CapturesInserts(StorageMode mode)
     {
         using var ctx = NewContext(mode, out _);

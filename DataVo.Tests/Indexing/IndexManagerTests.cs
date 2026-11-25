@@ -7,48 +7,6 @@ namespace DataVo.Tests.Indexing;
 
 public class IndexManagerTests : IDisposable
 {
-    private sealed class FakeManagedIndex : IIndexBase
-    {
-        public string IndexType => "FAIL";
-    }
-
-    private sealed class FailingDeleteFactory : IIndexFactory
-    {
-        public string IndexType => "FAIL";
-
-        public object CreateIndex(string indexName, string columnName, Dictionary<string, object> @params)
-        {
-            return new FakeManagedIndex();
-        }
-
-        public object LoadIndex(string filePath, IIndexPersistence persistence)
-        {
-            return new FakeManagedIndex();
-        }
-    }
-
-    private sealed class FailingDeletePersistence : IIndexPersistence
-    {
-        public string FileExtension => ".fail";
-
-        public void SaveIndex(object index, string filePath) { }
-
-        public object LoadIndex(string filePath) => new object();
-
-        public void Flush(object index) { }
-
-        public bool FileExists(string filePath) => File.Exists(filePath);
-
-        public void EnsureDirectory(string directoryPath)
-        {
-            Directory.CreateDirectory(directoryPath);
-        }
-
-        public bool TryDeleteFile(string filePath) => false;
-
-        public bool TryDeleteDirectory(string directoryPath) => false;
-    }
-
     private sealed class BatchRecordingVectorIndex : IVectorIndex, IBatchVectorIndex
     {
         public static BatchRecordingVectorIndex? LastCreated { get; private set; }
@@ -97,27 +55,6 @@ public class IndexManagerTests : IDisposable
         public object CreateIndex(string indexName, string columnName, Dictionary<string, object> @params)
             => new BatchRecordingVectorIndex();
 
-        public object LoadIndex(string filePath, IIndexPersistence persistence)
-            => new BatchRecordingVectorIndex();
-    }
-
-    private sealed class BatchRecordingVectorPersistence : IIndexPersistence
-    {
-        public string FileExtension => ".batchrec";
-
-        public void SaveIndex(object index, string filePath) { }
-
-        public object LoadIndex(string filePath) => new BatchRecordingVectorIndex();
-
-        public void Flush(object index) { }
-
-        public bool FileExists(string filePath) => File.Exists(filePath);
-
-        public void EnsureDirectory(string directoryPath) => Directory.CreateDirectory(directoryPath);
-
-        public bool TryDeleteFile(string filePath) => true;
-
-        public bool TryDeleteDirectory(string directoryPath) => true;
     }
 
     private readonly string _testDir;
@@ -127,7 +64,7 @@ public class IndexManagerTests : IDisposable
     {
         _testDir = Path.Combine(Path.GetTempPath(), $"datavo_imv2_tests_{Guid.NewGuid():N}");
         Directory.CreateDirectory(_testDir);
-        _manager = new IndexManager(new DataVoConfig { StorageMode = StorageMode.Disk, DiskStoragePath = _testDir }, _testDir);
+        _manager = new IndexManager();
     }
 
     [Fact]
@@ -224,31 +161,9 @@ public class IndexManagerTests : IDisposable
     }
 
     [Fact]
-    public void VectorIndex_WithFlatIndexType_PersistsAndReloads()
-    {
-        _manager.CreateVectorIndex(
-            [
-                (10L, new[] { 10f, 0f }),
-                (20L, new[] { 1f, 1f })
-            ],
-            "idx_flat_persisted",
-            "Embeddings",
-            "DbFlat",
-            metric: "euclidean",
-            indexType: "FLAT");
-
-        using var reloaded = new IndexManager(new DataVoConfig { StorageMode = StorageMode.Disk, DiskStoragePath = _testDir }, _testDir);
-
-        List<RowKey> rowIds = reloaded.SearchVector([1f, 0f], 1, "idx_flat_persisted", "Embeddings", "DbFlat", indexType: "FLAT");
-
-        Assert.Single(rowIds);
-        Assert.Equal(20L, rowIds[0]);
-    }
-
-    [Fact]
     public void VectorIndex_InsertMany_UsesBatchCapabilityWhenAvailable()
     {
-        _manager.RegisterIndexType("BATCHREC", new BatchRecordingVectorFactory(), new BatchRecordingVectorPersistence());
+        _manager.RegisterIndexType("BATCHREC", new BatchRecordingVectorFactory());
         _manager.CreateVectorIndex([], "idx_batch", "Embeddings", "DbBatch", indexType: "BATCHREC");
 
         _manager.InsertManyIntoVectorIndex(
@@ -266,50 +181,6 @@ public class IndexManagerTests : IDisposable
         Assert.Equal(2, index.BatchVectorDimension);
         Assert.Equal([101L, 202L], index.BatchRowIds);
         Assert.Equal([1f, 0f, 0f, 1f], index.BatchVectors);
-    }
-
-    [Fact]
-    public void DropIndex_ThrowsWhenPersistenceDeleteFails()
-    {
-        _manager.RegisterIndexType("FAIL", new FailingDeleteFactory(), new FailingDeletePersistence());
-
-        string tableDirectory = Path.Combine(_testDir, "DbFail", "TblFail");
-        Directory.CreateDirectory(tableDirectory);
-        string failingPath = Path.Combine(tableDirectory, "idx_fail.fail");
-        File.WriteAllText(failingPath, "payload");
-
-        IOException ex = Assert.Throws<IOException>(() =>
-            _manager.DropIndex("idx_fail", "TblFail", "DbFail"));
-
-        Assert.Contains("Failed to delete index file", ex.Message);
-    }
-
-    [Fact]
-    public void FlushInternal_ThrowsWhenPersistenceHandlerMissing()
-    {
-        var cacheField = typeof(IndexManager).GetField("_cache", BindingFlags.Instance | BindingFlags.NonPublic)!;
-        var metadataField = typeof(IndexManager).GetField("_metadata", BindingFlags.Instance | BindingFlags.NonPublic)!;
-
-        var cache = (Dictionary<(string, string, string), IIndexBase>)cacheField.GetValue(_manager)!;
-        var metadata = (Dictionary<(string, string, string), IndexMetadata>)metadataField.GetValue(_manager)!;
-
-        var cacheKey = ("db", "table", "idx");
-        cache[cacheKey] = new FakeManagedIndex();
-        metadata[cacheKey] = new IndexMetadata
-        {
-            IndexName = "idx",
-            DatabaseName = "db",
-            TableName = "table",
-            ColumnName = "col",
-            IndexType = "UNREGISTERED",
-            PersistenceFormat = "none"
-        };
-
-        var flushMethod = typeof(IndexManager).GetMethod("FlushInternal", BindingFlags.Instance | BindingFlags.NonPublic)!;
-
-        var ex = Assert.Throws<TargetInvocationException>(() => flushMethod.Invoke(_manager, [cacheKey]));
-        Assert.IsType<InvalidOperationException>(ex.InnerException);
-        Assert.Contains("No persistence handler registered", ex.InnerException!.Message);
     }
 
     [Fact]

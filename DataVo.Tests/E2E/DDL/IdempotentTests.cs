@@ -67,7 +67,7 @@ public class IdempotentTestsMemory : IdempotentTestsBase
     public IdempotentTestsMemory() : base(new DataVoConfig { StorageMode = StorageMode.InMemory }, "IdempotentMemDb") { }
 }
 
-public class IdempotentTestsDisk : IdempotentTestsBase
+public class IdempotentTestsLsm : IdempotentTestsBase
 {
-    public IdempotentTestsDisk() : base(new DataVoConfig { StorageMode = StorageMode.Disk, DiskStoragePath = "IdempotentDiskDb" }, "IdempotentDiskDb") { }
+    public IdempotentTestsLsm() : base(new DataVoConfig { StorageMode = StorageMode.Lsm, DiskStoragePath = "IdempotentLsmDb" }, "IdempotentLsmDb") { }
 }

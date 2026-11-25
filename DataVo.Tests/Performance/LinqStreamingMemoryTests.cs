@@ -32,7 +32,6 @@ public sealed class LinqStreamingMemoryTests : IDisposable
 
     [Theory]
     [InlineData(StorageMode.Lsm)]
-    [InlineData(StorageMode.Disk)]
     public void CompiledWhere_RetainedHeapStaysFlatWhileEnumerating(StorageMode mode)
     {
         using DataVoContext db = Open(mode);

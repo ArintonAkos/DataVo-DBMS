@@ -6,7 +6,6 @@ public class ReactiveRecursiveCteTests
 {
     [Theory]
     [InlineData(StorageMode.InMemory)]
-    [InlineData(StorageMode.Disk)]
     public void Reachability_GrowsAndShrinks(StorageMode mode)
     {
         using var ctx = ChangeCaptureIntegrationTests.NewContext(mode, out _);

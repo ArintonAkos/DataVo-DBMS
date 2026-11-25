@@ -1,9 +1,5 @@
 using System.Text.Json.Serialization;
-using DataVo.Core.BTree;
 using DataVo.Core.Execution.Volcano;
-using DataVo.Core.Indexing.Flat;
-using DataVo.Core.Indexing.HNSW;
-using DataVo.Core.Transactions;
 
 namespace DataVo.Core.Serialization;
 
@@ -14,12 +10,6 @@ namespace DataVo.Core.Serialization;
 /// deserialize through <c>DataVoJsonContext.Default.&lt;Type&gt;</c>.
 /// </summary>
 [JsonSourceGenerationOptions(WriteIndented = false)]
-[JsonSerializable(typeof(HNSWIndexPersistence.HnswSnapshot))]
-[JsonSerializable(typeof(HNSWIndexPersistence.FallbackSnapshot))]
-[JsonSerializable(typeof(FlatVectorIndexPersistence.FlatSnapshot))]
-[JsonSerializable(typeof(JsonBTreeIndex))]
-[JsonSerializable(typeof(WalEntry))]
-[JsonSerializable(typeof(WalFileStore.WalRecordEnvelope))]
 [JsonSerializable(typeof(TypedExecutionRow))]
 [JsonSerializable(typeof(Dictionary<string, double>), TypeInfoPropertyName = "StringDoubleMap")]
 internal partial class DataVoJsonContext : JsonSerializerContext;

@@ -305,10 +305,21 @@ public class AdoNetTests : IDisposable
     [Fact]
     public void ConnectionStringBuilder_ParsesCorrectly()
     {
-        var builder = new DataVoConnectionStringBuilder("StorageMode=Disk;DataSource=./mydb;WalEnabled=false");
-        Assert.Equal(StorageMode.Disk, builder.StorageMode);
+        var builder = new DataVoConnectionStringBuilder("StorageMode=Lsm;DataSource=./mydb");
+        Assert.Equal(StorageMode.Lsm, builder.StorageMode);
         Assert.Equal("./mydb", builder.DataSource);
-        Assert.False(builder.WalEnabled);
+        Assert.Equal(StorageMode.InMemory, new DataVoConnectionStringBuilder("DataSource=x").StorageMode);
+    }
+
+    [Theory]
+    [InlineData("Disk")]
+    [InlineData("Wasm")]
+    [InlineData("1")]
+    public void ConnectionStringBuilder_RejectsUnknownStorageModes(string mode)
+    {
+        var builder = new DataVoConnectionStringBuilder($"StorageMode={mode};DataSource=./mydb");
+        ArgumentException ex = Assert.Throws<ArgumentException>(() => builder.StorageMode);
+        Assert.Contains("InMemory or Lsm", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]

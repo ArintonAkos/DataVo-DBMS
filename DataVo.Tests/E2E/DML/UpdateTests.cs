@@ -194,11 +194,6 @@ public class InMemoryUpdateTests : UpdateTestsBase
     public InMemoryUpdateTests() : base(new DataVoConfig { StorageMode = StorageMode.InMemory }, "UpdateDB_Mem") { }
 }
 
-public class DiskUpdateTests : UpdateTestsBase
-{
-    public DiskUpdateTests() : base(new DataVoConfig { StorageMode = StorageMode.Disk, DiskStoragePath = "./test_datavo_update" }, "UpdateDB_Disk") { }
-}
-
 public class LsmUpdateTests : UpdateTestsBase
 {
     public LsmUpdateTests() : base(new DataVoConfig { StorageMode = StorageMode.Lsm, DiskStoragePath = "./test_datavo_update_lsm" }, "UpdateDB_Lsm") { }

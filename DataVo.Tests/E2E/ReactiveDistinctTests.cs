@@ -6,7 +6,6 @@ public class ReactiveDistinctTests
 {
     [Theory]
     [InlineData(StorageMode.InMemory)]
-    [InlineData(StorageMode.Disk)]
     public void Distinct_CollapsesAndRetracts(StorageMode mode)
     {
         using var ctx = ChangeCaptureIntegrationTests.NewContext(mode, out _);

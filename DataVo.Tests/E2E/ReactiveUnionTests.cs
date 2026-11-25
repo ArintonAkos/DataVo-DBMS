@@ -7,7 +7,6 @@ public class ReactiveUnionTests
 {
     [Theory]
     [InlineData(StorageMode.InMemory)]
-    [InlineData(StorageMode.Disk)]
     public void Union_Dedups_UnionAll_Keeps(StorageMode mode)
     {
         using var ctx = ChangeCaptureIntegrationTests.NewContext(mode, out _);

@@ -102,7 +102,6 @@ internal class AlterTableDropColumn(AlterTableDropColumnStatement ast) : BaseDbA
     private void RewriteTable(string tableName, string databaseName, List<Dictionary<string, object?>> rows, List<IndexFile> indexes)
     {
         Context.DropTable(tableName, databaseName);
-        Context.CreateTable(tableName, databaseName);
 
         foreach (var index in indexes)
         {

@@ -789,12 +789,11 @@ public sealed class DataVoContext : IDisposable
     /// in the same unit, and their tables are locked with the batch's.
     /// </para>
     /// <para>
-    /// Supported on the in-memory and LSM engines. Every table needs a primary key.
+    /// Every table needs a primary key.
     /// </para>
     /// </remarks>
     /// <param name="batch">The operations to write.</param>
     /// <returns>How many rows were inserted, updated, deleted, or left unchanged.</returns>
-    /// <exception cref="NotSupportedException">The context uses the legacy <c>Disk</c> storage mode.</exception>
     /// <exception cref="InvalidOperationException">The session has an open transaction, or a table has no primary key.</exception>
     /// <exception cref="ArgumentException">A table or column does not exist, a layout lacks a key column, or a key is NULL.</exception>
     /// <example>
@@ -827,10 +826,6 @@ public sealed class DataVoContext : IDisposable
     public DataVoBatchResult ApplyBatch(DataVoWriteBatch batch, Guid sessionId)
     {
         DataVo.Core.Compat.ThrowHelper.ThrowIfNull(batch);
-        if (Engine.Config.StorageMode == StorageMode.Disk)
-        {
-            throw new NotSupportedException("ApplyBatch supports the InMemory and Lsm storage modes; the legacy Disk mode is not supported.");
-        }
 
         if (batch.Count == 0)
         {

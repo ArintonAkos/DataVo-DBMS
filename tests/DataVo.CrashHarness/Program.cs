@@ -4,7 +4,7 @@ using DataVo.Core.StorageEngine.Config;
 using DataVo.Core.StorageEngine.Lsm;
 using DataVo.CrashHarness;
 
-// Usage: DataVo.CrashHarness <directory> <lsm|disk> <firstId> [rows|txn|columnar|mvcc]
+// Usage: DataVo.CrashHarness <directory> lsm <firstId> [rows|txn|columnar|mvcc]
 // Writes until killed. A line is printed only after the write call returned successfully:
 //   INS <id> <value>   row <id> was inserted with <value>
 //   UPD <id> <value>   row <id> was updated to <value>
@@ -16,19 +16,22 @@ using DataVo.CrashHarness;
 //   DIA <F|C> 0 0      a flush or compaction finished (diagnostic)
 if (args.Length is not (3 or 4))
 {
-    Console.Error.WriteLine("usage: DataVo.CrashHarness <directory> <lsm|disk> <firstId> [rows|txn|columnar|mvcc]");
+    Console.Error.WriteLine("usage: DataVo.CrashHarness <directory> lsm <firstId> [rows|txn|columnar|mvcc]");
     return 2;
 }
 
 string workload = args.Length == 4 ? args[3] : "rows";
 
 string directory = args[0];
-bool lsm = string.Equals(args[1], "lsm", StringComparison.OrdinalIgnoreCase);
+if (!string.Equals(args[1], "lsm", StringComparison.OrdinalIgnoreCase))
+{
+    Console.Error.WriteLine($"unknown storage mode '{args[1]}': the crash harness runs the Lsm engine");
+    return 2;
+}
+
 long nextId = long.Parse(args[2], System.Globalization.CultureInfo.InvariantCulture);
 
-var config = lsm
-    ? new DataVoConfig { StorageMode = StorageMode.Lsm, DiskStoragePath = directory, LsmStrictFsync = true }
-    : new DataVoConfig { StorageMode = StorageMode.Disk, DiskStoragePath = directory, SyncDiskWrites = true };
+var config = new DataVoConfig { StorageMode = StorageMode.Lsm, DiskStoragePath = directory, LsmStrictFsync = true };
 
 using var db = new DataVoContext(config);
 Require(db.Execute("USE CrashDb"));

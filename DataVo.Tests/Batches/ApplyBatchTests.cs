@@ -605,16 +605,6 @@ public sealed class ApplyBatchTests : IDisposable
     }
 
     [Fact]
-    public void DiskMode_IsNotSupported()
-    {
-        using DataVoContext context = Create(StorageMode.Disk, NewRoot());
-        var batch = new DataVoWriteBatch();
-        batch.Upsert(Players, 1, "Ann", 1);
-
-        Assert.Throws<NotSupportedException>(() => context.ApplyBatch(batch));
-    }
-
-    [Fact]
     public void OpenTransaction_IsRejected()
     {
         DataVoContext context = Open(StorageMode.InMemory);

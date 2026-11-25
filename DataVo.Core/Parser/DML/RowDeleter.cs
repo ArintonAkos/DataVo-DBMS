@@ -161,21 +161,6 @@ internal static class RowDeleter
             engine.IndexManager.DeleteIndexEntries(entries, indexFile.IndexFileName, tableName, databaseName);
         }
 
-        if (ImplicitWalCommit.IsEnabled(engine))
-        {
-            var operations = new List<WalOperation>(toBeDeleted.Count);
-            foreach (RowKey rowId in toBeDeleted)
-            {
-                operations.Add(new WalOperation
-                {
-                    OperationType = WalOperationType.Delete,
-                    TableName = tableName,
-                    RowId = RowKeyConversions.ToRowId(rowId),
-                });
-            }
-
-            ImplicitWalCommit.CommitIfEnabled(engine, databaseName, statementTxId, operations);
-        }
     }
 
     /// <summary>

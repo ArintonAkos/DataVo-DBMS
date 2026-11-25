@@ -81,7 +81,7 @@ public class InMemoryVacuumTests : VacuumTestsBase
     public InMemoryVacuumTests() : base(new DataVoConfig { StorageMode = StorageMode.InMemory }, "VacuumDB_Mem") { }
 }
 
-public class DiskVacuumTests : VacuumTestsBase
+public class LsmVacuumTests : VacuumTestsBase
 {
-    public DiskVacuumTests() : base(new DataVoConfig { StorageMode = StorageMode.Disk, DiskStoragePath = "./test_datavo_vacuum" }, "VacuumDB_Disk") { }
+    public LsmVacuumTests() : base(new DataVoConfig { StorageMode = StorageMode.Lsm, DiskStoragePath = "./test_datavo_lsm_vacuum" }, "VacuumDB_Lsm") { }
 }

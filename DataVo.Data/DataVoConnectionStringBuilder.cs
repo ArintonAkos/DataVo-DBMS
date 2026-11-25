@@ -5,14 +5,14 @@ namespace DataVo.Data;
 /// <summary>
 /// Parses and constructs connection strings for DataVo database connections.
 /// <para>
-/// Supported keys: <c>StorageMode</c> (InMemory | Disk), <c>DataSource</c> (path for Disk mode),
-/// <c>WalEnabled</c> (true | false).
+/// Supported keys: <c>StorageMode</c> (<c>InMemory</c> | <c>Lsm</c>) and <c>DataSource</c> (the data
+/// directory in Lsm mode, and the database name).
 /// </para>
 /// </summary>
 /// <example>
 /// <code>
-/// var builder = new DataVoConnectionStringBuilder("StorageMode=Disk;DataSource=./mydb");
-/// builder.StorageMode // StorageMode.Disk
+/// var builder = new DataVoConnectionStringBuilder("StorageMode=Lsm;DataSource=./mydb");
+/// builder.StorageMode // StorageMode.Lsm
 /// builder.DataSource  // "./mydb"
 /// </code>
 /// </example>
@@ -38,29 +38,37 @@ public class DataVoConnectionStringBuilder
     }
 
     /// <summary>
-    /// Gets the storage mode. Defaults to <see cref="StorageMode.InMemory"/>.
+    /// Gets the storage mode: <see cref="StorageMode.InMemory"/> (the default) or <see cref="StorageMode.Lsm"/>.
     /// </summary>
-    public StorageMode StorageMode =>
-        _properties.TryGetValue("StorageMode", out string? mode) &&
-        Enum.TryParse<StorageMode>(mode, ignoreCase: true, out var parsed)
-            ? parsed
-            : StorageMode.InMemory;
+    /// <exception cref="ArgumentException">The connection string names any other storage mode.</exception>
+    public StorageMode StorageMode
+    {
+        get
+        {
+            if (!_properties.TryGetValue("StorageMode", out string? mode))
+            {
+                return StorageMode.InMemory;
+            }
+
+            if (string.Equals(mode, nameof(StorageMode.InMemory), StringComparison.OrdinalIgnoreCase))
+            {
+                return StorageMode.InMemory;
+            }
+
+            if (string.Equals(mode, nameof(StorageMode.Lsm), StringComparison.OrdinalIgnoreCase))
+            {
+                return StorageMode.Lsm;
+            }
+
+            throw new ArgumentException($"Unknown StorageMode '{mode}' in the connection string: use InMemory or Lsm.");
+        }
+    }
 
     /// <summary>
-    /// Gets the data source path. Required for Disk mode, used as both
-    /// the <see cref="DataVoConfig.DiskStoragePath"/> and the database name.
+    /// Gets the data source: the <see cref="DataVoConfig.DiskStoragePath"/> in Lsm mode, and the database name.
     /// </summary>
     public string DataSource =>
         _properties.TryGetValue("DataSource", out string? ds) ? ds : "datavo";
-
-    /// <summary>
-    /// Gets whether Write-Ahead Logging is enabled. Defaults to <c>null</c>
-    /// (auto-determined by config: true for Disk, false for InMemory).
-    /// </summary>
-    public bool? WalEnabled =>
-        _properties.TryGetValue("WalEnabled", out string? val) && bool.TryParse(val, out bool result)
-            ? result
-            : null;
 
     /// <summary>
     /// Converts this builder into a <see cref="DataVoConfig"/> suitable for
@@ -68,15 +76,10 @@ public class DataVoConnectionStringBuilder
     /// </summary>
     public DataVoConfig ToConfig()
     {
-        var config = new DataVoConfig
+        return new DataVoConfig
         {
             StorageMode = StorageMode,
             DiskStoragePath = DataSource,
         };
-
-        if (WalEnabled.HasValue)
-            config.WalEnabled = WalEnabled.Value;
-
-        return config;
     }
 }

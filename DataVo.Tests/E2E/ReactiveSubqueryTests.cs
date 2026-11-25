@@ -6,7 +6,6 @@ public class ReactiveSubqueryTests
 {
     [Theory]
     [InlineData(StorageMode.InMemory)]
-    [InlineData(StorageMode.Disk)]
     public void In_Subquery_TracksInnerSet(StorageMode mode)
     {
         using var ctx = ChangeCaptureIntegrationTests.NewContext(mode, out _);

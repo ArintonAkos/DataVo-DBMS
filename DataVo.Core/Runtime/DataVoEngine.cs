@@ -34,7 +34,6 @@ public sealed partial class DataVoEngine : IDisposable
 {
     private static readonly AsyncLocal<DataVoEngine?> ScopedCurrent = new();
     private static readonly object SyncRoot = new();
-    private const int DefaultWalAppenderCapacityBytes = 64 * 1024 * 1024;
     private static DataVoEngine? _fallbackCurrent;
     private readonly ReaderWriterLockSlim _snapshotLock = new(LockRecursionPolicy.NoRecursion);
     private readonly TransactionIdStateStore? _transactionIdStateStore;
@@ -55,7 +54,7 @@ public sealed partial class DataVoEngine : IDisposable
         StorageContext.AttachRuntimeCatalog(Catalog, Id);
         TransactionManager = new TransactionManager();
         LockManager = new LockManager(Config.LockAcquireTimeoutMs);
-        IndexManager = new PolyIndexManager(Config, ResolveIndexRootDirectory());
+        IndexManager = new PolyIndexManager();
         Columnar = new Indexing.Columnar.ColumnarIndexManager(this);
         if (StorageContext.LsmIndexStore is { } lsmIndexStore)
         {
@@ -79,19 +78,7 @@ public sealed partial class DataVoEngine : IDisposable
         Changes = new ChangeCapture();
         Reactive = new ReactiveRegistry(this);
 
-        if (UsesGroupCommitWal(Config))
-        {
-            WalFrameAppender = new WalAppender(DefaultWalAppenderCapacityBytes);
-            WalGroupCommitter = new GroupCommitter(new WalFileStore(Config.ResolveWalFilePath()));
-            WalCheckpointer = new WalCheckpointer(
-                durableLsnProvider: () => WalGroupCommitter.DurableLsn,
-                flushDataToDisk: StorageContext.FlushBackendToDisk,
-                stateStore: new CheckpointStateStore(Config),
-                walStore: new WalFileStore(Config.ResolveWalFilePath()),
-                intervalMs: Config.WalCheckpointIntervalMs);
-        }
-
-        if (Config.StorageMode is StorageMode.Disk or StorageMode.Lsm)
+        if (Config.StorageMode == StorageMode.Lsm)
         {
             _transactionIdStateStore = new TransactionIdStateStore(Config);
             long? persistedHighWaterMark = _transactionIdStateStore.TryReadHighWaterMark();
@@ -202,60 +189,6 @@ public sealed partial class DataVoEngine : IDisposable
     /// </summary>
     public ReactiveRegistry Reactive { get; }
 
-    internal WalAppender? WalFrameAppender { get; }
-
-    internal GroupCommitter? WalGroupCommitter { get; }
-
-    internal WalCheckpointer? WalCheckpointer { get; }
-
-    internal static bool UsesGroupCommitWal(DataVoConfig config)
-    {
-        return config.StorageMode == StorageMode.Disk
-            && config.WalEnabled
-            && config.IoSchedulerMode == IoSchedulerMode.GroupCommit;
-    }
-
-    internal void CommitWalEntryThroughGroupCommit(WalEntry entry)
-    {
-        if (WalFrameAppender == null || WalGroupCommitter == null)
-        {
-            throw new InvalidOperationException("The WAL group committer is not enabled for this engine.");
-        }
-
-        byte[] payload = WalFileStore.SerializeWalEntryPayload(entry);
-        WalFrameReservation reservation = WalFrameAppender.Reserve(
-            WalFrameOperationType.TxnCommit,
-            tableId: 0,
-            rowId: 0,
-            payloadLength: payload.Length);
-        payload.CopyTo(reservation.PayloadSpan);
-        WalFrame frame = reservation.Commit();
-        WalGroupCommitter.CommitAsync(frame).AsTask().GetAwaiter().GetResult();
-    }
-
-    /// <summary>
-    /// Durably records a single zero-allocation update as a binary <see cref="WalFrameOperationType.Update"/>
-    /// frame: the new-row bytes are written straight into the WAL ring buffer with no JSON, no dictionary,
-    /// and no intermediate heap buffer, then flushed through group commit.
-    /// </summary>
-    internal void CommitBinaryUpdateFrameThroughGroupCommit(string databaseName, string tableName, RowKey oldRowId, ReadOnlySpan<byte> newRowBytes)
-    {
-        if (WalFrameAppender == null || WalGroupCommitter == null)
-        {
-            throw new InvalidOperationException("The WAL group committer is not enabled for this engine.");
-        }
-
-        int payloadLength = WalUpdateFramePayload.MeasureSize(databaseName, tableName, newRowBytes.Length);
-        WalFrameReservation reservation = WalFrameAppender.Reserve(
-            WalFrameOperationType.Update,
-            tableId: 0,
-            rowId: RowKeyConversions.ToRowId(oldRowId),
-            payloadLength);
-        WalUpdateFramePayload.Write(reservation.PayloadSpan, databaseName, tableName, RowKeyConversions.ToRowId(oldRowId), newRowBytes);
-        WalFrame frame = reservation.Commit();
-        WalGroupCommitter.CommitAsync(frame).AsTask().GetAwaiter().GetResult();
-    }
-
     /// <summary>
     /// Initializes the active storage runtime and returns an engine wrapper for it.
     /// </summary>
@@ -263,7 +196,7 @@ public sealed partial class DataVoEngine : IDisposable
     /// <returns>A new <see cref="DataVoEngine"/> bound to the initialized storage context.</returns>
     public static DataVoEngine Initialize(DataVoConfig config)
     {
-        // Disk and Lsm directories are served by one shared engine per process (see DataVoEngineRegistry);
+        // Lsm directories are served by one shared engine per process (see DataVoEngineRegistry);
         // every Initialize must be paired with exactly one Dispose.
         DataVoEngine engine = DataVoEngineRegistry.Acquire(config, CreateEngine);
         SetFallback(engine);
@@ -276,19 +209,6 @@ public sealed partial class DataVoEngine : IDisposable
         var engine = new DataVoEngine(storageContext);
 
         SetFallback(engine);
-
-        if (UsesGroupCommitWal(config))
-        {
-            // Binary WAL recovery: replay the uncheckpointed tail, then checkpoint through the recovered
-            // LSN so the replayed effects are durable and the WAL prefix is pruned before serving traffic.
-            long recoveredLsn = new BinaryWalRecovery(config, engine).Recover();
-            engine.WalCheckpointer!.CheckpointTo(recoveredLsn);
-            engine.WalCheckpointer!.Start();
-        }
-        else if (config.StorageMode == StorageMode.Disk && config.WalEnabled)
-        {
-            new RecoveryManager(config, engine).Recover();
-        }
 
         if (config.StorageMode == StorageMode.Lsm)
         {
@@ -558,7 +478,7 @@ public sealed partial class DataVoEngine : IDisposable
         RefreshStorageSchemaScopeNoLock();
         RestoreSessionSelectionNoLock(session, snapshot.SelectedDatabase);
         VersionStorageManager.Clear();
-        IndexManager.ClearRuntimeStateAndDeleteAllIndexes();
+        IndexManager.ClearRuntimeState();
         RebuildAllIndexesFromCatalog();
     }
 
@@ -600,16 +520,6 @@ public sealed partial class DataVoEngine : IDisposable
         {
             _fallbackCurrent = engine;
         }
-    }
-
-    private string ResolveIndexRootDirectory()
-    {
-        if (Config.StorageMode == StorageMode.Disk)
-        {
-            return Config.DiskStoragePath ?? "./datavo_data";
-        }
-
-        return Path.Combine(Path.GetTempPath(), "datavo_indexes", Id.ToString("N"));
     }
 
     private sealed class EngineScope(DataVoEngine? previous) : IDisposable
@@ -785,19 +695,6 @@ public sealed partial class DataVoEngine : IDisposable
         if (_transactionIdStateStore != null)
         {
             _transactionIdStateStore.ForcePersistHighWaterMark(TransactionIdAllocator.GetCurrentHighWaterMark());
-        }
-
-        if (WalGroupCommitter != null)
-        {
-            WalGroupCommitter.DisposeAsync().AsTask().GetAwaiter().GetResult();
-        }
-
-        if (WalCheckpointer != null)
-        {
-            // Final checkpoint: the committer has drained, so DurableLsn is stable. Make the data files
-            // durable, advance the watermark, and prune the WAL so a clean restart replays nothing.
-            WalCheckpointer.Checkpoint();
-            WalCheckpointer.Dispose();
         }
 
         // Graphs are captured before the index manager shuts down and written after the storage engine

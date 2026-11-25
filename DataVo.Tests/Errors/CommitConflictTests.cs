@@ -10,7 +10,7 @@ namespace DataVo.Tests.Errors;
 /// </summary>
 public sealed class CommitConflictTests
 {
-    public static TheoryData<StorageMode> Modes => new() { StorageMode.InMemory, StorageMode.Disk, StorageMode.Lsm };
+    public static TheoryData<StorageMode> Modes => new() { StorageMode.InMemory, StorageMode.Lsm };
 
     [Theory]
     [MemberData(nameof(Modes))]

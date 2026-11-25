@@ -8,22 +8,14 @@ using System.Globalization;
 
 namespace Research.Benchmark.Runners.DiskCrud;
 
-public enum DataVoDiskCrudStorageMode
-{
-    Disk,
-    Lsm
-}
-
 /// <summary>
-/// DataVo disk-CRUD engine: a Disk-mode, WAL-enabled table that bulk-inserts via the typed insert fast lane
-/// and applies point updates via a prepared compiled UPDATE plan (index-accelerated by the integer primary
-/// key). Constructed in two durability modes:
+/// DataVo disk-CRUD engine: an Lsm table that bulk-inserts via the typed insert fast lane and applies point updates
+/// through the fixed-width compiled UPDATE by primary key (batched in one write unit inside an update batch).
+/// Constructed in two durability modes:
 /// <list type="bullet">
-/// <item><b>Disk</b> — default semantics: appends are flushed to the OS page cache on close (process-crash durable).</item>
-/// <item><b>Disk+fsync</b> — <see cref="DataVoConfig.SyncDiskWrites"/> forces an fsync per write (power-crash durable, like SQLite <c>synchronous=FULL</c>).</item>
+/// <item><b>Production</b> — <see cref="DataVoConfig.LsmStrictFsync"/>: every commit-log append is fsync'd (power-crash durable).</item>
+/// <item><b>Relaxed</b> — commit-log appends reach the OS page cache (process-crash durable).</item>
 /// </list>
-/// Each autocommit UPDATE is out-of-place (tombstone old + append new), so the durable mode pays up to two
-/// fsyncs per update — an honest reflection of the engine's current update strategy.
 /// </summary>
 public sealed class DataVoDiskCrudEngine : IDiskCrudEngine
 {
@@ -35,10 +27,7 @@ public sealed class DataVoDiskCrudEngine : IDiskCrudEngine
         whereParameterName: "id");
 
     private readonly bool _durable;
-    private readonly IoSchedulerMode _ioSchedulerMode;
-    private readonly int? _walCheckpointIntervalMs;
     private readonly bool _zeroAllocUpdate;
-    private readonly DataVoDiskCrudStorageMode _storageMode;
     private readonly string _name;
     private string? _workingDirectory;
     private DataVoContext? _context;
@@ -46,36 +35,13 @@ public sealed class DataVoDiskCrudEngine : IDiskCrudEngine
     private bool _updateTransactionActive;
     private List<DataVoFixedWidthUpdateBatchEntry>? _pendingLsmUpdates;
 
-    public DataVoDiskCrudEngine(
-        bool durable,
-        IoSchedulerMode ioSchedulerMode = IoSchedulerMode.Off,
-        int? walCheckpointIntervalMs = null,
-        bool zeroAllocUpdate = true,
-        DataVoDiskCrudStorageMode storageMode = DataVoDiskCrudStorageMode.Disk)
+    public DataVoDiskCrudEngine(bool durable, bool zeroAllocUpdate = true)
     {
         _durable = durable;
-        _ioSchedulerMode = ioSchedulerMode;
-        _walCheckpointIntervalMs = walCheckpointIntervalMs;
         _zeroAllocUpdate = zeroAllocUpdate;
-        _storageMode = storageMode;
-        string poolingSuffix = ioSchedulerMode switch
-        {
-            IoSchedulerMode.PoolingOnly => "+pooled",
-            IoSchedulerMode.GroupCommit => "+groupcommit",
-            _ => string.Empty,
-        };
-        // Surface a non-default checkpoint cadence in the engine label so A/B runs are self-describing.
-        string checkpointSuffix = ioSchedulerMode == IoSchedulerMode.GroupCommit && walCheckpointIntervalMs is int ms
-            ? $"+ckpt{ms}ms"
-            : string.Empty;
-        // The legacy dictionary update path is the A/B baseline; flag it so the two runs are distinguishable.
-        string updateSuffix = zeroAllocUpdate ? string.Empty : "+legacyupd";
-        string name = storageMode == DataVoDiskCrudStorageMode.Lsm
-            ? durable ? "DataVo (LSM Production)" : "DataVo (LSM Relaxed)"
-            : durable
-                ? $"DataVo (Disk{poolingSuffix}{checkpointSuffix}{updateSuffix}+fsync)"
-                : $"DataVo (Disk{poolingSuffix}{checkpointSuffix}{updateSuffix})";
-        _name = DataVoBenchmarkName.Format(name);
+        // The dictionary update path is the A/B baseline; flag it so the two runs are distinguishable.
+        string updateSuffix = zeroAllocUpdate ? string.Empty : " +dictupd";
+        _name = DataVoBenchmarkName.Format(durable ? $"DataVo (LSM Production{updateSuffix})" : $"DataVo (LSM Relaxed{updateSuffix})");
     }
 
     public string Name => _name;
@@ -88,20 +54,11 @@ public sealed class DataVoDiskCrudEngine : IDiskCrudEngine
 
         var config = new DataVoConfig
         {
-            StorageMode = _storageMode == DataVoDiskCrudStorageMode.Lsm ? StorageMode.Lsm : StorageMode.Disk,
+            StorageMode = StorageMode.Lsm,
             DiskStoragePath = workingDirectory,
-            WalEnabled = _storageMode == DataVoDiskCrudStorageMode.Disk,
-            WalFilePath = "datavo.wal",
-            SyncDiskWrites = _storageMode == DataVoDiskCrudStorageMode.Disk && _durable,
-            LsmStrictFsync = _storageMode != DataVoDiskCrudStorageMode.Lsm || _durable,
-            IoSchedulerMode = _storageMode == DataVoDiskCrudStorageMode.Disk ? _ioSchedulerMode : IoSchedulerMode.Off,
+            LsmStrictFsync = _durable,
             EnableZeroAllocCompiledUpdate = _zeroAllocUpdate,
         };
-
-        if (_walCheckpointIntervalMs is int intervalMs)
-        {
-            config.WalCheckpointIntervalMs = intervalMs;
-        }
 
         _context = new DataVoContext(config);
 
@@ -151,14 +108,7 @@ public sealed class DataVoDiskCrudEngine : IDiskCrudEngine
             throw new InvalidOperationException("DataVo disk-CRUD update batch is already active.");
         }
 
-        if (_storageMode == DataVoDiskCrudStorageMode.Lsm)
-        {
-            _pendingLsmUpdates = new List<DataVoFixedWidthUpdateBatchEntry>(65_536);
-        }
-        else
-        {
-            ExecuteOk("BEGIN TRANSACTION");
-        }
+        _pendingLsmUpdates = new List<DataVoFixedWidthUpdateBatchEntry>(65_536);
 
         _updateTransactionActive = true;
     }
@@ -167,42 +117,22 @@ public sealed class DataVoDiskCrudEngine : IDiskCrudEngine
     {
         if (_updateTransactionActive)
         {
-            if (_pendingLsmUpdates is not null)
-            {
-                _pendingLsmUpdates.Add(new DataVoFixedWidthUpdateBatchEntry(
-                    DataVoFixedWidthValue.From(checked((int)id)),
-                    DataVoFixedWidthValue.From(newValue),
-                    DataVoFixedWidthValue.From(newScore)));
-            }
-            else
-            {
-                ExecuteTransactionalUpdate(id, newValue, newScore);
-            }
+            _pendingLsmUpdates!.Add(new DataVoFixedWidthUpdateBatchEntry(
+                DataVoFixedWidthValue.From(checked((int)id)),
+                DataVoFixedWidthValue.From(newValue),
+                DataVoFixedWidthValue.From(newScore)));
 
             return;
         }
 
-        int affected;
-        if (_storageMode == DataVoDiskCrudStorageMode.Lsm)
-        {
-            Span<DataVoFixedWidthValue> assignments = stackalloc DataVoFixedWidthValue[2];
-            assignments[0] = DataVoFixedWidthValue.From(newValue);
-            assignments[1] = DataVoFixedWidthValue.From(newScore);
-            affected = DataVoCompiledQuery.UpdateFixedWidthByPrimaryKey(
-                Ctx(),
-                UpdatePlan,
-                DataVoFixedWidthValue.From(checked((int)id)),
-                assignments);
-        }
-        else
-        {
-            affected = DataVoCompiledQuery.Update(Ctx(), UpdatePlan,
-            [
-                new DataVoCompiledQueryParameter("value", newValue),
-                new DataVoCompiledQueryParameter("score", newScore),
-                new DataVoCompiledQueryParameter("id", checked((int)id)),
-            ]);
-        }
+        Span<DataVoFixedWidthValue> assignments = stackalloc DataVoFixedWidthValue[2];
+        assignments[0] = DataVoFixedWidthValue.From(newValue);
+        assignments[1] = DataVoFixedWidthValue.From(newScore);
+        int affected = DataVoCompiledQuery.UpdateFixedWidthByPrimaryKey(
+            Ctx(),
+            UpdatePlan,
+            DataVoFixedWidthValue.From(checked((int)id)),
+            assignments);
 
         if (affected != 1)
         {
@@ -227,17 +157,9 @@ public sealed class DataVoDiskCrudEngine : IDiskCrudEngine
                     $"DataVo disk-CRUD update batch affected {affected} rows (expected {updates.Count}).");
             }
 
-            _pendingLsmUpdates = null;
-        }
-        else if (_pendingLsmUpdates is not null)
-        {
-            _pendingLsmUpdates = null;
-        }
-        else
-        {
-            ExecuteOk("COMMIT");
         }
 
+        _pendingLsmUpdates = null;
         _updateTransactionActive = false;
     }
 
@@ -245,11 +167,6 @@ public sealed class DataVoDiskCrudEngine : IDiskCrudEngine
     {
         if (_updateTransactionActive && _context is not null)
         {
-            if (_pendingLsmUpdates is null)
-            {
-                try { ExecuteOk("ROLLBACK"); } catch { /* best-effort cleanup */ }
-            }
-
             _pendingLsmUpdates = null;
             _updateTransactionActive = false;
         }
@@ -266,24 +183,6 @@ public sealed class DataVoDiskCrudEngine : IDiskCrudEngine
 
     private DataVoContext Ctx() =>
         _context ?? throw new InvalidOperationException("DataVo disk-CRUD engine has not been initialized.");
-
-    private void ExecuteTransactionalUpdate(long id, int newValue, double newScore)
-    {
-        string score = newScore.ToString("R", CultureInfo.InvariantCulture);
-        QueryResult result = Ctx().Execute(
-            $"UPDATE Records SET Value = {newValue}, Score = {score} WHERE Id = {checked((int)id)}").Last();
-        if (result.IsError)
-        {
-            throw new InvalidOperationException(
-                $"DataVo disk-CRUD transactional update for Id={id} failed: {string.Join(" | ", result.Messages)}");
-        }
-
-        if (!result.Messages.Any(static message => message.Equals("Rows affected: 1", StringComparison.Ordinal)))
-        {
-            throw new InvalidOperationException(
-                $"DataVo disk-CRUD transactional update for Id={id} did not report one affected row ({string.Join(" | ", result.Messages)}).");
-        }
-    }
 
     private void ExecuteOk(string sql)
     {

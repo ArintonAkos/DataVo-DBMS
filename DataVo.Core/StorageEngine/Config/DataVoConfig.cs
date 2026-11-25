@@ -29,7 +29,7 @@ public sealed class DataVoAuthUser
     public string PasswordSalt { get; set; } = string.Empty;
 
     /// <summary>
-    /// Gets or sets the legacy primary role value for compatibility.
+    /// Gets or sets the user's primary built-in role; <see cref="Roles"/> adds further role memberships.
     /// </summary>
     public DatabaseRole Role { get; set; } = DatabaseRole.ReadWrite;
 
@@ -47,9 +47,6 @@ public enum StorageMode
     /// <summary>Stores data only in process memory.</summary>
     InMemory,
 
-    /// <summary>Stores data in on-disk table files.</summary>
-    Disk,
-
     /// <summary>Stores data using an LSM-tree storage engine.</summary>
     Lsm,
 
@@ -61,31 +58,14 @@ public enum StorageMode
 }
 
 /// <summary>
-/// Defines the disk I/O scheduler implementation used by the storage engine.
-/// </summary>
-public enum IoSchedulerMode
-{
-    /// <summary>Use the legacy synchronous disk path.</summary>
-    Off,
-
-    /// <summary>Reuse file handles and positioned I/O while keeping legacy synchronous locking.</summary>
-    PoolingOnly,
-
-    /// <summary>Reserve value for the future asynchronous WAL/group-commit scheduler.</summary>
-    GroupCommit
-}
-
-/// <summary>
 /// Represents the runtime configuration used to initialize a <c>DataVo</c> engine instance.
 /// </summary>
 /// <example>
 /// <code>
 /// var config = new DataVoConfig
 /// {
-///     StorageMode = StorageMode.Disk,
+///     StorageMode = StorageMode.Lsm,
 ///     DiskStoragePath = "./demo-data",
-///     WalEnabled = true,
-///     WalFilePath = "demo.wal"
 /// };
 /// </code>
 /// </example>
@@ -316,11 +296,9 @@ public class DataVoConfig
     private int _hybridRoutingLastSnapshotAtQueryCount;
     private int _hybridRoutingSnapshotEmissions;
 
-    private bool? _walEnabled;
-
     /// <summary>
-    /// The directory path where database files will be stored.
-    /// Only required if StorageMode is Disk.
+    /// The directory that holds an <see cref="StorageMode.Lsm"/> engine's files (SSTables, logs, catalog and
+    /// state). Defaults to <c>./datavo_lsm_data</c>; ignored by the in-memory engine.
     /// </summary>
     public string? DiskStoragePath { get; set; }
 
@@ -329,20 +307,6 @@ public class DataVoConfig
     /// Use -1 for infinite wait.
     /// </summary>
     public int LockAcquireTimeoutMs { get; set; } = 30000;
-
-    /// <summary>
-    /// Gets or sets a value indicating whether disk row writes are flushed to physical storage
-    /// (<c>fsync</c>) before the call returns. Only relevant when <see cref="StorageMode"/> is
-    /// <see cref="StorageMode.Disk"/>.
-    /// <para>
-    /// When <see langword="false"/> (the default), disk appends are flushed to the OS page cache on
-    /// stream close but are not forced to the physical device — durable across a process crash, but a
-    /// power/OS crash can lose the most recent writes. When <see langword="true"/>, every row append,
-    /// tombstone, and compaction is fsync'd, making writes power-crash durable at the cost of one
-    /// device flush per write (comparable to SQLite's <c>synchronous=FULL</c>).
-    /// </para>
-    /// </summary>
-    public bool SyncDiskWrites { get; set; }
 
     /// <summary>
     /// Gets or sets a value indicating whether LSM WAL appends synchronously force bytes to stable storage
@@ -373,38 +337,12 @@ public class DataVoConfig
     public long LsmBlockCacheSizeBytes { get; set; } = 64L * 1024 * 1024;
 
     /// <summary>
-    /// Gets or sets the disk I/O scheduler mode. Phase 1 enables only pooled file handles and
-    /// positioned I/O; group commit is reserved for the WAL-as-commit-point implementation.
-    /// </summary>
-    public IoSchedulerMode IoSchedulerMode { get; set; } = IoSchedulerMode.Off;
-
-    /// <summary>
     /// Gets or sets a value indicating whether the zero-allocation compiled UPDATE fast path is enabled.
-    /// When <see langword="true"/> (the default), eligible fixed-width single-row updates against the
-    /// disk backend byte-patch the serialized row in place and emit a binary WAL Update frame, bypassing
-    /// the dictionary materialization of the legacy update path. When <see langword="false"/>, all updates
-    /// take the legacy dictionary path. Disabling exists for A/B measurement and as a safety fallback.
+    /// When <see langword="true"/> (the default), eligible fixed-width single-row updates on the LSM engine
+    /// byte-patch the serialized row instead of materializing it as a dictionary. When <see langword="false"/>,
+    /// every update takes the dictionary path. Disabling exists for A/B measurement and as a safety fallback.
     /// </summary>
     public bool EnableZeroAllocCompiledUpdate { get; set; } = true;
-
-    /// <summary>
-    /// Gets or sets a value indicating whether write-ahead logging is enabled.
-    /// </summary>
-    public bool WalEnabled
-    {
-        get => _walEnabled ?? StorageMode == StorageMode.Disk;
-        set => _walEnabled = value;
-    }
-
-    /// <summary>
-    /// Gets or sets the WAL file name or path.
-    /// </summary>
-    public string WalFilePath { get; set; } = "datavo.wal";
-
-    /// <summary>
-    /// Gets or sets the number of WAL entries that can accumulate before checkpoint cleanup is considered.
-    /// </summary>
-    public int WalCheckpointThreshold { get; set; } = 1000;
 
     /// <summary>
     /// Gets or sets the file name or path used to persist MVCC transaction ID high-water mark.
@@ -412,48 +350,13 @@ public class DataVoConfig
     public string TransactionIdStateFilePath { get; set; } = "datavo.txid";
 
     /// <summary>
-    /// Gets or sets the file name or path used to persist the binary WAL checkpoint LSN watermark.
-    /// </summary>
-    public string CheckpointStateFilePath { get; set; } = "datavo.ckpt";
-
-    /// <summary>
-    /// Gets or sets the interval, in milliseconds, between background WAL checkpoints in
-    /// <see cref="IoSchedulerMode.GroupCommit"/>. A checkpoint fsyncs the data files, advances the
-    /// persisted checkpoint LSN, and prunes the WAL.
-    /// </summary>
-    public int WalCheckpointIntervalMs { get; set; } = 1000;
-
-    /// <summary>
     /// Resolves the directory that holds this engine's persistent state (data, catalog, and state
     /// files), or <see langword="null"/> for storage modes that keep no on-disk directory.
     /// </summary>
-    /// <returns>The configured or default data directory for Disk and Lsm modes; otherwise <see langword="null"/>.</returns>
-    public string? ResolveDataDirectory() => StorageMode switch
-    {
-        StorageMode.Disk => DiskStoragePath ?? DefaultDiskDirectory,
-        StorageMode.Lsm => DiskStoragePath ?? DefaultLsmDirectory,
-        _ => null,
-    };
-
-    internal const string DefaultDiskDirectory = "./datavo_data";
+    /// <returns>The configured or default data directory in Lsm mode; otherwise <see langword="null"/>.</returns>
+    public string? ResolveDataDirectory() => StorageMode == StorageMode.Lsm ? DiskStoragePath ?? DefaultLsmDirectory : null;
 
     internal const string DefaultLsmDirectory = "./datavo_lsm_data";
-
-    /// <summary>
-    /// Resolves the effective WAL file path for the current configuration.
-    /// </summary>
-    /// <returns>An absolute or base-directory-relative path to the WAL file.</returns>
-    public string ResolveWalFilePath()
-    {
-        if (Path.IsPathRooted(WalFilePath))
-        {
-            return WalFilePath;
-        }
-
-        string baseDirectory = ResolveDataDirectory() ?? Directory.GetCurrentDirectory();
-
-        return Path.Combine(baseDirectory, WalFilePath);
-    }
 
     /// <summary>
     /// Resolves the effective transaction-ID state file path for the current configuration.
@@ -469,22 +372,6 @@ public class DataVoConfig
         string baseDirectory = ResolveDataDirectory() ?? Directory.GetCurrentDirectory();
 
         return Path.Combine(baseDirectory, TransactionIdStateFilePath);
-    }
-
-    /// <summary>
-    /// Resolves the effective checkpoint-LSN state file path for the current configuration.
-    /// </summary>
-    /// <returns>An absolute or base-directory-relative path to the checkpoint state file.</returns>
-    public string ResolveCheckpointStateFilePath()
-    {
-        if (Path.IsPathRooted(CheckpointStateFilePath))
-        {
-            return CheckpointStateFilePath;
-        }
-
-        string baseDirectory = ResolveDataDirectory() ?? Directory.GetCurrentDirectory();
-
-        return Path.Combine(baseDirectory, CheckpointStateFilePath);
     }
 
     /// <summary>

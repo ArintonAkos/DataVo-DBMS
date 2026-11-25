@@ -40,7 +40,7 @@ public class InMemoryCreateTests : CreateTestsBase
     public InMemoryCreateTests() : base(new DataVoConfig { StorageMode = StorageMode.InMemory }, "CreateDB_Mem") { }
 }
 
-public class DiskCreateTests : CreateTestsBase
+public class LsmCreateTests : CreateTestsBase
 {
-    public DiskCreateTests() : base(new DataVoConfig { StorageMode = StorageMode.Disk, DiskStoragePath = "./test_datavo_create" }, "CreateDB_Disk") { }
+    public LsmCreateTests() : base(new DataVoConfig { StorageMode = StorageMode.Lsm, DiskStoragePath = "./test_datavo_lsm_create" }, "CreateDB_Lsm") { }
 }

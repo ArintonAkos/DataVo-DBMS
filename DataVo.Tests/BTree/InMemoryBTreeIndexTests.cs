@@ -2,12 +2,12 @@ using DataVo.Core.BTree;
 
 namespace DataVo.Tests.BTree;
 
-public class JsonBTreeIndexTests
+public class InMemoryBTreeIndexTests
 {
     [Fact]
     public void Insert_SingleEntry_CanBeSearched()
     {
-        var index = new JsonBTreeIndex(3);
+        var index = new InMemoryBTreeIndex(3);
         index.Insert("alice", 1L);
 
         var result = index.Search("alice");
@@ -18,7 +18,7 @@ public class JsonBTreeIndexTests
     [Fact]
     public void Search_NonExistentKey_ReturnsEmpty()
     {
-        var index = new JsonBTreeIndex(3);
+        var index = new InMemoryBTreeIndex(3);
         index.Insert("alice", 1L);
 
         var result = index.Search("bob");
@@ -28,7 +28,7 @@ public class JsonBTreeIndexTests
     [Fact]
     public void Insert_DuplicateKeys_AccumulatesValues()
     {
-        var index = new JsonBTreeIndex(3);
+        var index = new InMemoryBTreeIndex(3);
         index.Insert("color", 1L);
         index.Insert("color", 2L);
         index.Insert("color", 3L);
@@ -43,7 +43,7 @@ public class JsonBTreeIndexTests
     [Fact]
     public void ContainsValue_WorksCorrectly()
     {
-        var index = new JsonBTreeIndex(3);
+        var index = new InMemoryBTreeIndex(3);
         index.Insert("alice", 1L);
 
         Assert.True(index.ContainsValue(1L));
@@ -53,7 +53,7 @@ public class JsonBTreeIndexTests
     [Fact]
     public void Delete_RemovesSpecificValue()
     {
-        var index = new JsonBTreeIndex(3);
+        var index = new InMemoryBTreeIndex(3);
         index.Insert("alice", 1L);
         index.Insert("alice", 2L);
 
@@ -67,7 +67,7 @@ public class JsonBTreeIndexTests
     [Fact]
     public void Delete_LastValue_RemovesKey()
     {
-        var index = new JsonBTreeIndex(3);
+        var index = new InMemoryBTreeIndex(3);
         index.Insert("alice", 1L);
 
         index.Delete("alice", 1L);
@@ -79,7 +79,7 @@ public class JsonBTreeIndexTests
     [Fact]
     public void DeleteValues_RemovesMultipleRowIds()
     {
-        var index = new JsonBTreeIndex(3);
+        var index = new InMemoryBTreeIndex(3);
         index.Insert("key1", 1L);
         index.Insert("key1", 2L);
         index.Insert("key2", 3L);
@@ -103,7 +103,7 @@ public class JsonBTreeIndexTests
     public void Insert_ManyEntries_CausesSplitsAndSearchWorks()
     {
         // Use small degree to force many splits
-        var index = new JsonBTreeIndex(2);
+        var index = new InMemoryBTreeIndex(2);
 
         for (int i = 0; i < 100; i++)
         {
@@ -122,7 +122,7 @@ public class JsonBTreeIndexTests
     [Fact]
     public void Insert_ManyDuplicateKeys_AllValuesRetrieved()
     {
-        var index = new JsonBTreeIndex(2);
+        var index = new InMemoryBTreeIndex(2);
         int count = 50;
 
         for (int i = 0; i < count; i++)

@@ -70,7 +70,7 @@ public class RuntimeDiagnosticsTests
         string path = Path.Combine(Path.GetTempPath(), $"datavo_diag_disk_{Guid.NewGuid():N}");
         try
         {
-            using var context = CreateContext(StorageMode.Disk, path);
+            using var context = CreateContext(StorageMode.Lsm, path);
             context.Diagnostics.Enabled = true;
 
             context.Execute("CREATE TABLE Items (Id INT PRIMARY KEY, Name VARCHAR(50))");
@@ -78,7 +78,7 @@ public class RuntimeDiagnosticsTests
 
             RuntimeQueryStats? stats = context.Diagnostics.LastQuery;
             Assert.NotNull(stats);
-            Assert.Equal(StorageMode.Disk, stats.StorageMode);
+            Assert.Equal(StorageMode.Lsm, stats.StorageMode);
         }
         finally
         {

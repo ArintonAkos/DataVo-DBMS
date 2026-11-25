@@ -45,7 +45,7 @@ internal sealed class DataVoOptionsExtension : IDbContextOptionsExtension
         {
             throw new InvalidOperationException(
                 "DataVo configuration error: UseStorageMode() was set but WithDataSource() was not called. " +
-                "Provide a DataSource name (e.g. UseDataVo(o => o.UseDiskStorage().WithDataSource(\"mydb\"))).");
+                "Provide a DataSource name (e.g. UseDataVo(o => o.UseLsmStorage().WithDataSource(\"mydb\"))).");
         }
 
         // DataVo is currently an EF bridge extension (not a standalone EF provider),
@@ -120,7 +120,7 @@ internal sealed class DataVoOptionsExtension : IDbContextOptionsExtension
     {
         if (StorageMode is not null && DataSource is { Length: > 0 })
         {
-            string modeToken = StorageMode == DataVoStorageMode.InMemory ? "InMemory" : "Disk";
+            string modeToken = StorageMode == DataVoStorageMode.InMemory ? "InMemory" : "Lsm";
             return $"StorageMode={modeToken};DataSource={DataSource}";
         }
 

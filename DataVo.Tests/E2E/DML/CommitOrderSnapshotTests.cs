@@ -15,7 +15,7 @@ public sealed class CommitOrderSnapshotTests : IDisposable
     private readonly Guid _b = Guid.NewGuid();
     private readonly Guid _c = Guid.NewGuid();
 
-    public static TheoryData<StorageMode> Modes => new() { StorageMode.InMemory, StorageMode.Disk, StorageMode.Lsm };
+    public static TheoryData<StorageMode> Modes => new() { StorageMode.InMemory, StorageMode.Lsm };
 
     public void Dispose()
     {

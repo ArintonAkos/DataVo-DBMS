@@ -73,12 +73,11 @@ public sealed class CompiledMinMaxTests : IDisposable
     [InlineData(StorageMode.Lsm, false)]
     [InlineData(StorageMode.Lsm, true)]
     [InlineData(StorageMode.InMemory, false)]
-    [InlineData(StorageMode.Disk, false)]
     public void MinAndMax_OfEveryColumnType_MatchTheRowsInMemory(StorageMode mode, bool flushed)
     {
         using DataVoContext db = Open(mode);
         db.EnsureRefReadingTable();
-        int count = mode == StorageMode.Disk ? 4_200 : 9_500; // more than two blocks of the in-place scan
+        int count = 9_500; // more than two blocks of the in-place scan
         var rows = new List<RefReading>();
         Run(db, "BEGIN");
         for (int i = 1; i <= count; i++)
@@ -192,7 +191,6 @@ public sealed class CompiledMinMaxTests : IDisposable
     [Theory]
     [InlineData(StorageMode.Lsm)]
     [InlineData(StorageMode.InMemory)]
-    [InlineData(StorageMode.Disk)]
     public void MinAndMax_OverAnEmptyTable_ThrowOrReturnNull(StorageMode mode)
     {
         using DataVoContext db = Open(mode);
@@ -232,7 +230,6 @@ public sealed class CompiledMinMaxTests : IDisposable
     [InlineData(StorageMode.Lsm, false)]
     [InlineData(StorageMode.Lsm, true)]
     [InlineData(StorageMode.InMemory, false)]
-    [InlineData(StorageMode.Disk, false)]
     public void NaN_IsBelowEveryNumber_AsItIsForLinq(StorageMode mode, bool flushed)
     {
         using DataVoContext db = Open(mode);

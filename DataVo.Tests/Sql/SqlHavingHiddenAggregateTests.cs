@@ -21,7 +21,6 @@ public sealed class SqlHavingHiddenAggregateTests : IDisposable
         { StorageMode.InMemory, true },
         { StorageMode.Lsm, false },
         { StorageMode.Lsm, true },
-        { StorageMode.Disk, true },
     };
 
     public void Dispose()

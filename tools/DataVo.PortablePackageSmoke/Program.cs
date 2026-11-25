@@ -102,7 +102,6 @@ internal static class PortableSmoke
             "Flat vector lookup returned the wrong nearest row.");
 
         VerifyPersistence(StorageMode.Lsm, Path.Combine(testRoot, "lsm"));
-        VerifyPersistence(StorageMode.Disk, Path.Combine(testRoot, "disk"));
         VerifyCommittedRowsSurviveProcessCrash(StorageMode.Lsm, Path.Combine(testRoot, "lsm-crash"));
 
         Console.WriteLine("Portable candidate .NET-host smoke passed.");

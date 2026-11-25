@@ -26,7 +26,7 @@ public class DataVoProviderBootstrapTests
         var optionsBuilder = new DbContextOptionsBuilder();
 
         optionsBuilder.UseDataVo(
-            "StorageMode=Disk;DataSource=EfBootstrapDisk",
+            "StorageMode=Lsm;DataSource=EfBootstrapDisk",
             dataVoOptions => dataVoOptions.EnableBootstrapDiagnostics());
 
         var snapshot = optionsBuilder.Options.GetDataVoBootstrapOptions();
@@ -63,15 +63,15 @@ public class DataVoProviderBootstrapTests
         var optionsBuilder = new DbContextOptionsBuilder();
 
         optionsBuilder.UseDataVo("DataSource=legacy",
-            o => o.UseDiskStorage().WithDataSource("typed_disk_db"));
+            o => o.UseLsmStorage().WithDataSource("typed_disk_db"));
 
         var snapshot = optionsBuilder.Options.GetDataVoBootstrapOptions();
 
         Assert.NotNull(snapshot);
-        Assert.Equal(DataVoStorageMode.Disk, snapshot!.StorageMode);
+        Assert.Equal(DataVoStorageMode.Lsm, snapshot!.StorageMode);
         Assert.Equal("typed_disk_db", snapshot.DataSource);
         // Typed options take priority over raw connection string.
-        Assert.Equal("StorageMode=Disk;DataSource=typed_disk_db", snapshot.EffectiveConnectionString);
+        Assert.Equal("StorageMode=Lsm;DataSource=typed_disk_db", snapshot.EffectiveConnectionString);
     }
 
     [Fact]

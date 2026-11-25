@@ -12,11 +12,11 @@ namespace DataVo.Tests.E2E;
 /// still receive every key in persistent storage modes.
 /// </summary>
 [BrowserTranslateIgnore("Disk persistence across engine restart is outside browser SQL parity")]
-public sealed class DiskIntegerPrimaryKeyPersistenceTests : IDisposable
+public sealed class LsmIntegerPrimaryKeyPersistenceTests : IDisposable
 {
     private readonly string _path = Path.Combine(Path.GetTempPath(), $"datavo_pk_persist_{Guid.NewGuid():N}");
 
-    public static TheoryData<StorageMode> PersistentModes => new() { StorageMode.Disk, StorageMode.Lsm };
+    public static TheoryData<StorageMode> PersistentModes => new() { StorageMode.Lsm };
 
     [Theory]
     [MemberData(nameof(PersistentModes))]

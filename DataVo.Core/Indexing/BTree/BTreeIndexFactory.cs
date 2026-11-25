@@ -27,19 +27,7 @@ public class BTreeIndexFactory : IIndexFactory
         if (@params.TryGetValue("minDegree", out var val) && val is int degree)
             minDegree = degree;
 
-        // Create a JsonBTreeIndex (in-memory with JSON serialization support)
-        return new JsonBTreeIndex(minDegree);
-    }
-
-    /// <summary>
-    /// Loads an index instance from persisted storage.
-    /// </summary>
-    /// <param name="filePath">The index file path.</param>
-    /// <param name="persistence">Persistence adapter used for deserialization.</param>
-    /// <returns>The loaded index instance.</returns>
-    public object LoadIndex(string filePath, IIndexPersistence persistence)
-    {
-        // Delegate to persistence handler which knows how to deserialize
-        return persistence.LoadIndex(filePath);
+        // Create a InMemoryBTreeIndex (in-memory with JSON serialization support)
+        return new InMemoryBTreeIndex(minDegree);
     }
 }

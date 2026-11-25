@@ -19,7 +19,7 @@ public class FilterUsingIndexAllocationTests : IDisposable
     {
         _dir = Path.Combine(Path.GetTempPath(), $"datavo_fui_{Guid.NewGuid()}");
         Directory.CreateDirectory(_dir);
-        _manager = new IndexManager(new DataVoConfig { StorageMode = StorageMode.Disk, DiskStoragePath = _dir }, _dir);
+        _manager = new IndexManager();
 
         var values = new Dictionary<string, List<RowKey>>();
         for (int i = 0; i < 1000; i++) values[$"k{i}"] = [i];

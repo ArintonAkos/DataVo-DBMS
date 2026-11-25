@@ -15,7 +15,7 @@ public sealed class CommitKeySwapAndForeignKeyTests : IDisposable
     private readonly Guid _tx = Guid.NewGuid();
     private readonly Guid _other = Guid.NewGuid();
 
-    public static TheoryData<StorageMode> Modes => new() { StorageMode.InMemory, StorageMode.Disk, StorageMode.Lsm };
+    public static TheoryData<StorageMode> Modes => new() { StorageMode.InMemory, StorageMode.Lsm };
 
     public void Dispose()
     {

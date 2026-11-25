@@ -16,7 +16,7 @@ public class IndexManagerTests : IDisposable
     {
         _testDir = Path.Combine(Path.GetTempPath(), $"datavo_im_tests_{Guid.NewGuid()}");
         Directory.CreateDirectory(_testDir);
-        _manager = new IndexManager(new DataVoConfig { StorageMode = StorageMode.Disk, DiskStoragePath = _testDir }, _testDir);
+        _manager = new IndexManager();
     }
 
     public void Dispose()

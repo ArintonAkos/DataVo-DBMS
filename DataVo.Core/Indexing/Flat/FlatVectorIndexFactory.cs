@@ -34,14 +34,6 @@ public sealed class FlatVectorIndexFactory : IVectorIndexFactory
         return index;
     }
 
-    /// <summary>
-    /// Loads an existing flat index instance via the configured persistence handler.
-    /// </summary>
-    public object LoadIndex(string filePath, IIndexPersistence persistence)
-    {
-        return persistence.LoadIndex(filePath);
-    }
-
     private static string NormalizeMetric(string metric)
     {
         return metric.ToLower(CultureInfo.InvariantCulture) switch

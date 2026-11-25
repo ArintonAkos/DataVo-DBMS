@@ -255,11 +255,10 @@ public class HNSWIndexTests : IDisposable
         index.Insert(3, [0f, 1f, 0f]);
         index.Insert(4, [0f, 0f, 1f]);
 
-        var persistence = new HNSWIndexPersistence();
-        string filePath = Path.Combine(_tempDir, "idx.vector.json");
-
-        persistence.SaveIndex(index, filePath);
-        var loaded = (HNSWIndex)persistence.LoadIndex(filePath);
+        string filePath = Path.Combine(_tempDir, "idx.hnsw");
+        HnswSnapshotFile.Write(filePath, index, watermark: 0, column: "v");
+        Assert.True(HnswSnapshotFile.TryRead(filePath, "v", out HNSWIndex? reloadedIndex, out _));
+        var loaded = reloadedIndex!;
 
         Assert.Equal("euclidean", loaded.Metric);
         Assert.Equal(10, loaded.M);
@@ -303,10 +302,10 @@ public class HNSWIndexTests : IDisposable
             index.Insert(i + 1, vectors[i]);
         }
 
-        var persistence = new HNSWIndexPersistence();
-        string filePath = Path.Combine(_tempDir, "reload.vector.json");
-        persistence.SaveIndex(index, filePath);
-        var loaded = (HNSWIndex)persistence.LoadIndex(filePath);
+        string filePath = Path.Combine(_tempDir, "idx.hnsw");
+        HnswSnapshotFile.Write(filePath, index, watermark: 0, column: "v");
+        Assert.True(HnswSnapshotFile.TryRead(filePath, "v", out HNSWIndex? reloadedIndex, out _));
+        var loaded = reloadedIndex!;
 
         for (int i = 200; i < 400; i++)
         {

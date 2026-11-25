@@ -66,7 +66,7 @@ public sealed class RowRefStreamTests : IDisposable
 
     private readonly string _directory = Path.Combine(Path.GetTempPath(), $"datavo_rowref_{Guid.NewGuid():N}");
 
-    public static TheoryData<StorageMode> Modes => new() { StorageMode.InMemory, StorageMode.Disk, StorageMode.Lsm };
+    public static TheoryData<StorageMode> Modes => new() { StorageMode.InMemory, StorageMode.Lsm };
 
     public void Dispose()
     {
@@ -160,13 +160,12 @@ public sealed class RowRefStreamTests : IDisposable
     [InlineData(StorageMode.Lsm, false)]
     [InlineData(StorageMode.Lsm, true)]
     [InlineData(StorageMode.InMemory, false)]
-    [InlineData(StorageMode.Disk, false)]
     public void CompiledCount_TestsRowsWhereTheyAreStored_AcrossSeveralBatches(StorageMode mode, bool flushed)
     {
         using DataVoContext db = Open(mode);
         db.EnsureRefUnitTable();
         // More than two blocks of the in-place scan; the legacy disk engine writes one row per file open, so it gets fewer.
-        int Count = mode == StorageMode.Disk ? 4_200 : 9_500;
+        int Count = 9_500;
         var units = new List<RefUnit>();
         Run(db, "BEGIN"); // one commit for the load: a commit per row costs milliseconds on LSM
         for (int i = 1; i <= Count; i++)
@@ -205,12 +204,11 @@ public sealed class RowRefStreamTests : IDisposable
     [InlineData(StorageMode.Lsm, false)]
     [InlineData(StorageMode.Lsm, true)]
     [InlineData(StorageMode.InMemory, false)]
-    [InlineData(StorageMode.Disk, false)]
     public void CompiledSum_AddsAColumnInsideTheScan_AndMatchesTheRowsInMemory(StorageMode mode, bool flushed)
     {
         using DataVoContext db = Open(mode);
         db.EnsureRefUnitTable();
-        int Count = mode == StorageMode.Disk ? 4_200 : 9_500;
+        int Count = 9_500;
         var units = new List<RefUnit>();
         Run(db, "BEGIN"); // one commit for the load: a commit per row costs milliseconds on LSM
         for (int i = 1; i <= Count; i++)
@@ -261,14 +259,13 @@ public sealed class RowRefStreamTests : IDisposable
     [InlineData(StorageMode.Lsm, false)]
     [InlineData(StorageMode.Lsm, true)]
     [InlineData(StorageMode.InMemory, false)]
-    [InlineData(StorageMode.Disk, false)]
     public void FixedWidthTable_IsReadAtFixedOffsets_AndRowsWithNullsStillCountCorrectly(StorageMode mode, bool flushed)
     {
         // Every column has a fixed width, so the scan reads values at offsets fixed for the table. A NULL in Low
         // or Trim shifts everything after it in that row; such rows must take the checked path and agree.
         using DataVoContext db = Open(mode);
         db.EnsureRefGaugeTable();
-        int count = mode == StorageMode.Disk ? 1_500 : 6_000;
+        int count = 6_000;
         var gauges = new List<RefGauge>();
         Run(db, "BEGIN");
         for (int i = 1; i <= count; i++)
@@ -597,7 +594,6 @@ public sealed class RowRefStreamTests : IDisposable
     [InlineData(StorageMode.Lsm, false)]
     [InlineData(StorageMode.Lsm, true)]
     [InlineData(StorageMode.InMemory, false)]
-    [InlineData(StorageMode.Disk, false)]
     public void FullPassOver50000Rows_AllocatesZeroBytes(StorageMode mode, bool flushed)
     {
         const int Rows = 50_000;
@@ -633,17 +629,8 @@ public sealed class RowRefStreamTests : IDisposable
             Assert.Equal(Checksum(Rows), checksum);
         }
 
-        if (mode == StorageMode.Disk)
-        {
-            // The legacy disk engine opens a FileStream for each page (~160 bytes; ~8 KB over 50,000 rows). Its
-            // writers open the file with FileShare.None, so a handle kept open between pages would block them on
-            // Windows. Rows themselves cost nothing: the bound is per page, not per row.
-            Assert.True(allocated < 12_000, $"Disk engine allocated {allocated} bytes across {Rows} rows.");
-        }
-        else
-        {
-            Assert.Equal(0, allocated);
-        }
+        Assert.Equal(0, allocated);
+    
     }
 
     private static long Pass(DataVoTable<RefUnit> table, out int count)

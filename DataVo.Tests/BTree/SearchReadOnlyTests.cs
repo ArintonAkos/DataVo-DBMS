@@ -7,13 +7,13 @@ namespace DataVo.Tests.BTree;
 /// <summary>
 /// L3 read-path allocation tests: a point lookup must return the index's matching row ids
 /// without copying (zero-allocation) while preserving the per-call isolation guarantee that
-/// <see cref="JsonBTreeIndex.Search"/> previously provided via a defensive copy taken under the lock.
+/// <see cref="InMemoryBTreeIndex.Search"/> previously provided via a defensive copy taken under the lock.
 /// </summary>
 public class SearchReadOnlyTests
 {
-    private static JsonBTreeIndex BuildIndex(params (string Key, long RowId)[] entries)
+    private static InMemoryBTreeIndex BuildIndex(params (string Key, long RowId)[] entries)
     {
-        var index = new JsonBTreeIndex(minDegree: 50);
+        var index = new InMemoryBTreeIndex(minDegree: 50);
         foreach (var (key, rowId) in entries)
         {
             index.Insert(key, rowId);
@@ -83,7 +83,7 @@ public class SearchReadOnlyTests
     [Fact]
     public void SearchReadOnly_WarmHit_DoesNotAllocate()
     {
-        var index = new JsonBTreeIndex(minDegree: 50);
+        var index = new InMemoryBTreeIndex(minDegree: 50);
         for (int i = 0; i < 1000; i++) index.Insert($"key{i}", i);
 
         long perCall = BytesPerOp(200_000, () => { _ = index.SearchReadOnly("key500"); });
@@ -98,7 +98,7 @@ public class SearchReadOnlyTests
     [Fact]
     public async Task SearchReadOnly_ConcurrentReadersAndWriters_NoExceptionAndConsistent()
     {
-        var index = new JsonBTreeIndex(minDegree: 8);
+        var index = new InMemoryBTreeIndex(minDegree: 8);
         index.Insert("hot", 0);
 
         var errors = new ConcurrentQueue<Exception>();

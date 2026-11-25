@@ -57,7 +57,7 @@ public class SqlBenchmarkTests : IDisposable
 
 
         // --- 2. DISK PIPELINE BENCHMARK ---
-        var diskConfig = new DataVoConfig { StorageMode = StorageMode.Disk, DiskStoragePath = _diskPath };
+        var diskConfig = new DataVoConfig { StorageMode = StorageMode.Lsm, DiskStoragePath = _diskPath };
         _engine = DataVoEngine.Initialize(diskConfig);
 
         Execute($"CREATE DATABASE {_testDb}");
@@ -120,7 +120,7 @@ public class SqlBenchmarkTests : IDisposable
 
         _engine.Catalog.DropDatabase(_testDb);
 
-        var diskConfig = new DataVoConfig { StorageMode = StorageMode.Disk, DiskStoragePath = _diskPath };
+        var diskConfig = new DataVoConfig { StorageMode = StorageMode.Lsm, DiskStoragePath = _diskPath };
         _engine = DataVoEngine.Initialize(diskConfig);
 
         Execute($"CREATE DATABASE {_testDb}");

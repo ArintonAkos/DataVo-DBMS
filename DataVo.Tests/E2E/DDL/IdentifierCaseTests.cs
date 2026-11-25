@@ -12,7 +12,7 @@ public class IdentifierCaseTests : IDisposable
 {
     private readonly string _directory = Path.Combine(Path.GetTempPath(), $"datavo_case_{Guid.NewGuid():N}");
 
-    public static TheoryData<StorageMode> StorageModes => new() { StorageMode.Lsm, StorageMode.Disk, StorageMode.InMemory };
+    public static TheoryData<StorageMode> StorageModes => new() { StorageMode.Lsm, StorageMode.InMemory };
 
     public void Dispose()
     {
@@ -118,7 +118,6 @@ public class IdentifierCaseTests : IDisposable
 
     [Theory]
     [InlineData(StorageMode.Lsm)]
-    [InlineData(StorageMode.Disk)]
     public void Restart_AfterWritesInMixedCase_KeepsEveryRowInOneTable(StorageMode mode)
     {
         using (DataVoContext writer = Open(mode))
@@ -136,10 +135,7 @@ public class IdentifierCaseTests : IDisposable
         Assert.Equal(2, Ok(reader, "SELECT Id, Extra FROM items").Data.Count);
         Assert.Equal(2, Ok(reader, "SELECT Id, Extra FROM Items").Data.Count);
 
-        // Disk mode keeps its index folders lower-cased by design, so only its table files are compared.
-        string[] tableEntries = mode == StorageMode.Disk
-            ? Directory.GetFiles(_directory, "*.dat", SearchOption.AllDirectories)
-            : Directory.GetDirectories(_directory, "*", SearchOption.AllDirectories);
+        string[] tableEntries = Directory.GetDirectories(_directory, "*", SearchOption.AllDirectories);
         string[] spellings = tableEntries
             .Select(Path.GetFileNameWithoutExtension)
             .Where(IsItemsEntry)
@@ -271,16 +267,9 @@ public class IdentifierCaseTests : IDisposable
 
     private string ShopDirectory(StorageMode mode)
     {
-        // Disk mode's lower-cased index folder is a separate directory on case-sensitive filesystems.
-        string[] matches = mode == StorageMode.Disk
-            ? Directory.GetFiles(_directory, "*.dat", SearchOption.AllDirectories)
-                .Where(path => IsItemsEntry(Path.GetFileNameWithoutExtension(path)))
-                .Select(path => Path.GetDirectoryName(path)!)
-                .Distinct(StringComparer.Ordinal)
-                .ToArray()
-            : Directory.GetDirectories(_directory, "*", SearchOption.AllDirectories)
-                .Where(path => string.Equals(Path.GetFileName(path), "Shop", StringComparison.OrdinalIgnoreCase))
-                .ToArray();
+        string[] matches = Directory.GetDirectories(_directory, "*", SearchOption.AllDirectories)
+            .Where(path => string.Equals(Path.GetFileName(path), "Shop", StringComparison.OrdinalIgnoreCase))
+            .ToArray();
         Assert.True(matches.Length == 1, $"Expected one database directory in {mode}, found: {string.Join(", ", matches)}");
         Assert.Equal("Shop", Path.GetFileName(matches[0]));
         return matches[0];

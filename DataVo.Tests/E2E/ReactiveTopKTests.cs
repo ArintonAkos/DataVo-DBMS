@@ -11,7 +11,6 @@ public class ReactiveTopKTests
 
     [Theory]
     [InlineData(StorageMode.InMemory)]
-    [InlineData(StorageMode.Disk)]
     public void TopK_MaintainsWindow_OnInsertAndDelete(StorageMode mode)
     {
         using var ctx = ChangeCaptureIntegrationTests.NewContext(mode, out _);

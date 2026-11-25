@@ -13,7 +13,7 @@ public class DataVoEfCrudBridgeTests
     public void SaveChangesToDataVo_CanInsertUpdateDeleteTrackedEntity()
     {
         string databaseName = $"datavo_ef_crud_{Guid.NewGuid():N}";
-        string connectionString = $"StorageMode=Disk;DataSource={databaseName}";
+        string connectionString = $"StorageMode=Lsm;DataSource={databaseName}";
         string databasePath = Path.Combine(Directory.GetCurrentDirectory(), databaseName);
 
         try
@@ -66,7 +66,7 @@ public class DataVoEfCrudBridgeTests
     public void SaveChangesToDataVo_InsertsPrincipalBeforeDependent_WhenTrackedTogether()
     {
         string databaseName = $"datavo_ef_fk_{Guid.NewGuid():N}";
-        string connectionString = $"StorageMode=Disk;DataSource={databaseName}";
+        string connectionString = $"StorageMode=Lsm;DataSource={databaseName}";
         string databasePath = Path.Combine(Directory.GetCurrentDirectory(), databaseName);
 
         try
@@ -121,7 +121,7 @@ public class DataVoEfCrudBridgeTests
     public void SaveChanges_NativeEfApi_AutomaticallyWritesToDataVo()
     {
         string databaseName = $"datavo_ef_native_{Guid.NewGuid():N}";
-        string connectionString = $"StorageMode=Disk;DataSource={databaseName}";
+        string connectionString = $"StorageMode=Lsm;DataSource={databaseName}";
         string databasePath = Path.Combine(Directory.GetCurrentDirectory(), databaseName);
 
         try
@@ -171,7 +171,7 @@ public class DataVoEfCrudBridgeTests
     public void SaveChanges_NativeEfApi_WithoutExplicitEnsureCreated_AutomaticallyCreatesSchemaAndWritesToDataVo()
     {
         string databaseName = $"datavo_ef_native_lazy_{Guid.NewGuid():N}";
-        string connectionString = $"StorageMode=Disk;DataSource={databaseName}";
+        string connectionString = $"StorageMode=Lsm;DataSource={databaseName}";
         string databasePath = Path.Combine(Directory.GetCurrentDirectory(), databaseName);
 
         try
@@ -216,7 +216,7 @@ public class DataVoEfCrudBridgeTests
     public async Task SaveChangesAsync_NativeEfApi_WithoutExplicitEnsureCreated_AutomaticallyCreatesSchemaAndWritesToDataVo()
     {
         string databaseName = $"datavo_ef_native_lazy_async_{Guid.NewGuid():N}";
-        string connectionString = $"StorageMode=Disk;DataSource={databaseName}";
+        string connectionString = $"StorageMode=Lsm;DataSource={databaseName}";
         string databasePath = Path.Combine(Directory.GetCurrentDirectory(), databaseName);
 
         try
@@ -259,7 +259,7 @@ public class DataVoEfCrudBridgeTests
 
     /// <summary>
     /// Verifies the native typed fluent API — no raw connection string is needed.
-    /// <c>UseDataVo(o => o.UseDiskStorage().WithDataSource(...))</c> should synthesise the
+    /// <c>UseDataVo(o => o.UseLsmStorage().WithDataSource(...))</c> should synthesise the
     /// connection string and write data to disk via the standard EF APIs.
     /// </summary>
     [Fact]
@@ -270,7 +270,7 @@ public class DataVoEfCrudBridgeTests
 
         try
         {
-            using (var context = CreateContextWithTypedOptions(DataVoStorageMode.Disk, databaseName))
+            using (var context = CreateContextWithTypedOptions(DataVoStorageMode.Lsm, databaseName))
             {
                 context.Database.EnsureCreated();
 
@@ -286,7 +286,7 @@ public class DataVoEfCrudBridgeTests
                 context.SaveChanges();
             }
 
-            string connectionString = $"StorageMode=Disk;DataSource={databaseName}";
+            string connectionString = $"StorageMode=Lsm;DataSource={databaseName}";
             using var connection = new DataVoConnection(connectionString);
             connection.Open();
 

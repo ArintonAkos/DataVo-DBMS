@@ -36,8 +36,8 @@ using DataVo.Core.Indexing;
 /// </para>
 ///
 /// <para>
-/// Implementations (e.g., <c>JsonBTreeIndex</c>, <c>BinaryBTreeIndex</c>, <c>BinaryBPlusTreeIndex</c>)
-/// define the on-disk layout, node splitting strategy, and serialization format.
+/// Implementations (e.g., <c>InMemoryBTreeIndex</c>)
+/// define the node layout and splitting strategy.
 /// </para>
 /// </summary>
 public interface IIndex : IIndexBase
@@ -80,7 +80,7 @@ public interface IIndex : IIndexBase
     /// <summary>
     /// Returns the row IDs associated with the given key without copying, as a read-only view.
     /// Implementations that can expose their backing storage safely (e.g. the in-memory
-    /// <c>JsonBTreeIndex</c>) override this for an allocation-free point lookup; the default
+    /// <c>InMemoryBTreeIndex</c>) override this for an allocation-free point lookup; the default
     /// falls back to the copying <see cref="Search"/>.
     /// </summary>
     /// <example>
@@ -107,10 +107,4 @@ public interface IIndex : IIndexBase
     /// index.ContainsValue(99); // false
     /// </example>
     bool ContainsValue(RowKey rowId);
-
-    /// <summary>
-    /// Persists the index to disk at the specified file path.
-    /// The serialization format is implementation-specific.
-    /// </summary>
-    void Save(string filePath);
 }

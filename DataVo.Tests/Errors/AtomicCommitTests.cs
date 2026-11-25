@@ -16,7 +16,7 @@ public sealed class AtomicCommitTests : IDisposable
     private readonly Guid _other = Guid.NewGuid();
     private readonly Guid _reader = Guid.NewGuid();
 
-    public static TheoryData<StorageMode> Modes => new() { StorageMode.InMemory, StorageMode.Disk, StorageMode.Lsm };
+    public static TheoryData<StorageMode> Modes => new() { StorageMode.InMemory, StorageMode.Lsm };
 
     public void Dispose()
     {

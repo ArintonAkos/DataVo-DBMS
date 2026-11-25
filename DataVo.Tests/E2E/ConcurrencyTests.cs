@@ -327,7 +327,7 @@ public class InMemoryConcurrencyTests : ConcurrencyTestsBase
     public InMemoryConcurrencyTests() : base(new DataVoConfig { StorageMode = StorageMode.InMemory, LockAcquireTimeoutMs = 10_000 }, "ConcurrencyDb_Mem") { }
 }
 
-public class DiskConcurrencyTests : ConcurrencyTestsBase
+public class LsmConcurrencyTests : ConcurrencyTestsBase
 {
-    public DiskConcurrencyTests() : base(new DataVoConfig { StorageMode = StorageMode.Disk, DiskStoragePath = "./test_datavo_concurrency", LockAcquireTimeoutMs = 10_000 }, "ConcurrencyDb_Disk") { }
+    public LsmConcurrencyTests() : base(new DataVoConfig { StorageMode = StorageMode.Lsm, DiskStoragePath = "./test_datavo_lsm_concurrency", LockAcquireTimeoutMs = 10_000 }, "ConcurrencyDb_Lsm") { }
 }

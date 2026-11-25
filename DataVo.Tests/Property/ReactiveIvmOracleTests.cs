@@ -10,7 +10,6 @@ public class ReactiveIvmOracleTests
     [Theory]
     [InlineData(StorageMode.InMemory, 1)]
     [InlineData(StorageMode.InMemory, 2)]
-    [InlineData(StorageMode.Disk, 3)]
     public void Incremental_Equals_Recompute(StorageMode mode, int seed)
     {
         var rng = new Random(seed);
@@ -47,7 +46,6 @@ public class ReactiveIvmOracleTests
 
     [Theory]
     [InlineData(StorageMode.InMemory, 11)]
-    [InlineData(StorageMode.Disk, 12)]
     public void Aggregate_Incremental_Equals_Recompute(StorageMode mode, int seed)
     {
         var rng = new Random(seed);
@@ -101,7 +99,6 @@ public class ReactiveIvmOracleTests
 
     [Theory]
     [InlineData(StorageMode.InMemory, 21)]
-    [InlineData(StorageMode.Disk, 22)]
     public void TopK_Incremental_Equals_Recompute(StorageMode mode, int seed)
     {
         var rng = new Random(seed);
@@ -138,8 +135,6 @@ public class ReactiveIvmOracleTests
     [Theory]
     [InlineData(StorageMode.InMemory, 51)]
     [InlineData(StorageMode.InMemory, 52)]
-    [InlineData(StorageMode.Disk, 53)]
-    [InlineData(StorageMode.Disk, 54)]
     public void Distinct_Incremental_Equals_Recompute(StorageMode mode, int seed)
     {
         var rng = new Random(seed);
@@ -182,8 +177,6 @@ public class ReactiveIvmOracleTests
     [Theory]
     [InlineData(StorageMode.InMemory, 61)]
     [InlineData(StorageMode.InMemory, 62)]
-    [InlineData(StorageMode.Disk, 63)]
-    [InlineData(StorageMode.Disk, 64)]
     public void Union_Incremental_Equals_Recompute(StorageMode mode, int seed)
     {
         var rng = new Random(seed);
@@ -262,8 +255,6 @@ public class ReactiveIvmOracleTests
     [Theory]
     [InlineData(StorageMode.InMemory, 71)]
     [InlineData(StorageMode.InMemory, 72)]
-    [InlineData(StorageMode.Disk, 73)]
-    [InlineData(StorageMode.Disk, 74)]
     public void Subquery_Incremental_Equals_Recompute(StorageMode mode, int seed)
     {
         var rng = new Random(seed);
@@ -329,8 +320,6 @@ public class ReactiveIvmOracleTests
     [Theory]
     [InlineData(StorageMode.InMemory, 81)]
     [InlineData(StorageMode.InMemory, 82)]
-    [InlineData(StorageMode.Disk, 83)]
-    [InlineData(StorageMode.Disk, 84)]
     public void CorrelatedSubquery_Incremental_Equals_Recompute(StorageMode mode, int seed)
     {
         var rng = new Random(seed);
@@ -442,8 +431,6 @@ public class ReactiveIvmOracleTests
     [Theory]
     [InlineData(StorageMode.InMemory, 91)]
     [InlineData(StorageMode.InMemory, 92)]
-    [InlineData(StorageMode.Disk, 93)]
-    [InlineData(StorageMode.Disk, 94)]
     public void RecursiveCte_Incremental_Equals_Recompute(StorageMode mode, int seed)
     {
         var rng = new Random(seed);
@@ -538,8 +525,6 @@ public class ReactiveIvmOracleTests
     [Theory]
     [InlineData(StorageMode.InMemory, 31)]
     [InlineData(StorageMode.InMemory, 32)]
-    [InlineData(StorageMode.Disk, 33)]
-    [InlineData(StorageMode.Disk, 34)]
     public void InnerJoin_Incremental_Equals_Recompute(StorageMode mode, int seed)
     {
         var rng = new Random(seed);
@@ -605,8 +590,6 @@ public class ReactiveIvmOracleTests
     [Theory]
     [InlineData(StorageMode.InMemory, "LEFT", 41)]
     [InlineData(StorageMode.InMemory, "FULL", 42)]
-    [InlineData(StorageMode.Disk, "LEFT", 43)]
-    [InlineData(StorageMode.Disk, "FULL", 44)]
     public void OuterJoin_Incremental_Equals_Recompute(StorageMode mode, string kind, int seed)
     {
         var rng = new Random(seed);

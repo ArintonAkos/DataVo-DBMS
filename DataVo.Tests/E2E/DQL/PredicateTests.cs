@@ -142,7 +142,7 @@ public class PredicateTestsMemory : PredicateTestsBase
     public PredicateTestsMemory() : base(new DataVoConfig { StorageMode = StorageMode.InMemory }, "PredicateDB_Mem") { }
 }
 
-public class PredicateTestsDisk : PredicateTestsBase
+public class PredicateTestsLsm : PredicateTestsBase
 {
-    public PredicateTestsDisk() : base(new DataVoConfig { StorageMode = StorageMode.Disk, DiskStoragePath = "PredicateDB_Disk" }, "PredicateDB_Disk") { }
+    public PredicateTestsLsm() : base(new DataVoConfig { StorageMode = StorageMode.Lsm, DiskStoragePath = "PredicateDB_Lsm" }, "PredicateDB_Lsm") { }
 }

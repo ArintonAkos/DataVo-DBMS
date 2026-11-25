@@ -184,7 +184,7 @@ public class InMemorySelectTests : SelectTestsBase
     public InMemorySelectTests() : base(new DataVoConfig { StorageMode = StorageMode.InMemory }, "SelectDB_Mem") { }
 }
 
-public class DiskSelectTests : SelectTestsBase
+public class LsmSelectTests : SelectTestsBase
 {
-    public DiskSelectTests() : base(new DataVoConfig { StorageMode = StorageMode.Disk, DiskStoragePath = "./test_datavo_select" }, "SelectDB_Disk") { }
+    public LsmSelectTests() : base(new DataVoConfig { StorageMode = StorageMode.Lsm, DiskStoragePath = "./test_datavo_lsm_select" }, "SelectDB_Lsm") { }
 }

@@ -61,7 +61,7 @@ public sealed class LinqCompositionTests : IDisposable
     private readonly string _directory = Path.Combine(Path.GetTempPath(), $"datavo_linq_compose_{Guid.NewGuid():N}");
     private readonly List<Hero> _heroes = [];
 
-    public static TheoryData<StorageMode> Modes => new() { StorageMode.InMemory, StorageMode.Disk, StorageMode.Lsm };
+    public static TheoryData<StorageMode> Modes => new() { StorageMode.InMemory, StorageMode.Lsm };
 
     public void Dispose()
     {

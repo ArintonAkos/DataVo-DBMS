@@ -8,12 +8,12 @@ public static class DataVoBenchmarkContext
 {
     public static BenchmarkDatabase Create(string storage, string scenarioName)
     {
-        if (storage.Equals("disk", StringComparison.OrdinalIgnoreCase))
+        if (storage.Equals("lsm", StringComparison.OrdinalIgnoreCase) || storage.Equals("disk", StringComparison.OrdinalIgnoreCase))
         {
             string path = Path.Combine(Path.GetTempPath(), $"datavo_{scenarioName}_{Guid.NewGuid():N}");
             var context = new DataVoContext(new DataVoConfig
             {
-                StorageMode = StorageMode.Disk,
+                StorageMode = StorageMode.Lsm,
                 DiskStoragePath = path
             });
 

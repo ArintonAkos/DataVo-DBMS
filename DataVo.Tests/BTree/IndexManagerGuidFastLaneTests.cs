@@ -99,7 +99,6 @@ public sealed class IndexManagerGuidFastLaneTests
     }
 
     // These tests cover the process-local lanes. Lanes are complete (authoritative) only for indexes the
-    // manager created or rebuilt itself; a persistent manager additionally mirrors lane writes to disk.
-    private static IndexManager CreateInMemoryManager() =>
-        new(new DataVoConfig { StorageMode = StorageMode.InMemory }, engineStorageRoot: null);
+    // manager created or rebuilt itself.
+    private static IndexManager CreateInMemoryManager() => new();
 }

@@ -22,38 +22,15 @@ using IndexCacheKey = (string Database, string Table, string Index);
 namespace DataVo.Core.Indexing;
 
 /// <summary>
-/// Specifies how index mutations are persisted to disk.
-/// </summary>
-public enum IndexPersistenceMode
-{
-    /// <summary>
-    /// Persist each mutation immediately after it is applied.
-    /// </summary>
-    Immediate,
-
-    /// <summary>
-    /// Buffer mutations in memory and flush them after a configured threshold is reached.
-    /// </summary>
-    Buffered,
-
-    /// <summary>
-    /// Never persist index mutations — the index lives purely in memory. Used by in-memory storage mode,
-    /// where serializing the index to disk on every write is both incorrect (no disk) and O(n) per write.
-    /// </summary>
-    None,
-}
-
-/// <summary>
 /// Central coordinator for all index instances, supporting multiple index types via factory pattern.
 /// </summary>
 /// <remarks>
 /// <para>
-/// This refactored IndexManager:
-/// - Maintains a plugin registry of index factories (BTree, HNSW, B25, etc.)
-/// - Routes index creation/loading to the appropriate factory
-/// - Abstracts persistence through IIndexPersistence implementations
-/// - Manages in-memory cache of loaded indices with unified metadata
-/// - Handles lifecycle management (creation, mutation tracking, flushing)
+/// The IndexManager:
+/// - Maintains a plugin registry of index factories (BTree, HNSW, FLAT)
+/// - Routes index creation to the appropriate factory
+/// - Keeps in-memory indexes (and their integer/GUID fast lanes) with unified metadata
+/// - Routes scalar indexes of the LSM engine to its persisted index tables
 /// </para>
 /// <para>
 /// The factory pattern allows new index types to be registered without modifying
@@ -68,18 +45,11 @@ public partial class IndexManager : IDisposable
         "FLAT"
     };
 
-    private static IndexManager? _instance;
-    private readonly string _indexRootDirectory;
 
     /// <summary>
     /// Factory registry: maps index type name (e.g., "HNSW") to its factory.
     /// </summary>
     private readonly Dictionary<string, IIndexFactory> _factories = [];
-
-    /// <summary>
-    /// Persistence registry: maps index type to its persistence handler.
-    /// </summary>
-    private readonly Dictionary<string, IIndexPersistence> _persistenceHandlers = [];
 
     /// <summary>
     /// Unified index cache: maps CacheKey -> loaded index instance.
@@ -90,21 +60,6 @@ public partial class IndexManager : IDisposable
     /// Metadata storage: maps CacheKey -> index metadata.
     /// </summary>
     private readonly Dictionary<IndexCacheKey, IndexMetadata> _metadata = new(CacheKeyComparer.Instance);
-
-    /// <summary>
-    /// Tracks paths for cache entries: maps CacheKey -> file path.
-    /// </summary>
-    private readonly Dictionary<IndexCacheKey, string> _cachePaths = new(CacheKeyComparer.Instance);
-
-    /// <summary>
-    /// Tracks dirty (modified) indices that need flushing.
-    /// </summary>
-    private readonly HashSet<IndexCacheKey> _dirtyIndices = new(CacheKeyComparer.Instance);
-
-    /// <summary>
-    /// Tracks mutation count per index for buffered persistence.
-    /// </summary>
-    private readonly Dictionary<IndexCacheKey, int> _pendingMutations = new(CacheKeyComparer.Instance);
 
     /// <summary>
     /// Fast lane for integer primary keys: logical integer key -> physical row id.
@@ -133,57 +88,18 @@ public partial class IndexManager : IDisposable
     /// <summary>
     /// Indexes whose fast lanes hold every key of the scalar index: the index was created (empty or
     /// seeded) or rebuilt by this manager, so every later write flowed through the lanes. Only then
-    /// does a lane miss prove a key is absent. A lane created lazily over an index loaded from disk
-    /// sees only keys written since startup, so callers must fall back to the scalar index.
+    /// does a lane miss prove a key is absent. A lane created lazily sees only keys written since, so
+    /// callers must fall back to the scalar index.
     /// </summary>
     private readonly ConcurrentDictionary<IndexCacheKey, byte> _completeLaneIndexes = new(CacheKeyComparer.Instance);
 
-    private IndexPersistenceMode _persistenceMode = IndexPersistenceMode.Immediate;
-    private int _flushMutationThreshold = 256;
 
     /// <summary>
-    /// Initializes a new polymorphic index manager with default configuration.
+    /// Initializes a new index manager with the built-in BTREE, HNSW and FLAT index types registered.
     /// </summary>
     public IndexManager()
-        : this(config: null, engineStorageRoot: null)
     {
-    }
-
-    /// <summary>
-    /// Initializes a new polymorphic index manager with optional configuration.
-    /// </summary>
-    public IndexManager(DataVoConfig? config, string? engineStorageRoot)
-    {
-        _indexRootDirectory = ResolveIndexRootDirectory(config, engineStorageRoot);
-        Directory.CreateDirectory(_indexRootDirectory);
         EnsureDefaultRegistrations();
-
-        // In-memory contexts never persist indexes: serializing the whole index to disk on every write is
-        // both wrong (no disk) and O(n) per write (O(n^2) bulk load). Disk mode keeps immediate persistence.
-        if (config?.StorageMode == StorageMode.InMemory)
-        {
-            _persistenceMode = IndexPersistenceMode.None;
-        }
-
-        // Lsm engines rebuild every index from the durable rows on open, so persisting index files
-        // would only add per-write I/O and a second copy that could drift from the data after a crash.
-        if (config?.StorageMode == StorageMode.Lsm)
-        {
-            _persistenceMode = IndexPersistenceMode.None;
-        }
-    }
-
-    /// <summary>
-    /// Persists the index now only in <see cref="IndexPersistenceMode.Immediate"/> mode. In
-    /// <see cref="IndexPersistenceMode.Buffered"/> mode the threshold flush handles it; in
-    /// <see cref="IndexPersistenceMode.None"/> mode the index is never serialized.
-    /// </summary>
-    private void FlushIfImmediate(IndexCacheKey cacheKey)
-    {
-        if (_persistenceMode == IndexPersistenceMode.Immediate)
-        {
-            FlushInternal(cacheKey);
-        }
     }
 
     private ILsmIndexStore? _lsmStore;
@@ -293,29 +209,15 @@ public partial class IndexManager : IDisposable
     }
 
     /// <summary>
-    /// Gets the singleton instance (for backward compatibility).
-    /// </summary>
-    public static IndexManager Instance
-    {
-        get
-        {
-            _instance ??= new IndexManager();
-            return _instance;
-        }
-    }
-
-    /// <summary>
-    /// Registers an index type's factory and persistence handler.
+    /// Registers an index type's factory.
     /// </summary>
     /// <param name="indexType">Type identifier (e.g., "BTREE", "HNSW").</param>
     /// <param name="factory">Factory for creating indices of this type.</param>
-    /// <param name="persistence">Persistence handler for this type.</param>
-    public void RegisterIndexType(string indexType, IIndexFactory factory, IIndexPersistence persistence)
+    public void RegisterIndexType(string indexType, IIndexFactory factory)
     {
         lock (_lock)
         {
             _factories[indexType.ToUpper()] = factory;
-            _persistenceHandlers[indexType.ToUpper()] = persistence;
         }
     }
 
@@ -360,142 +262,13 @@ public partial class IndexManager : IDisposable
 
             _cache[CacheKeyOf(metadata)] = index;
             _metadata[CacheKeyOf(metadata)] = metadata;
-            _dirtyIndices.Add(CacheKeyOf(metadata));
 
             return index;
         }
     }
 
     /// <summary>
-    /// Loads an index from disk or memory cache.
-    /// </summary>
-    public object? TryLoadIndex(IndexMetadata metadata, string? overridePath = null)
-    {
-        lock (_lock)
-        {
-            // Check if already loaded
-            if (_cache.TryGetValue(CacheKeyOf(metadata), out IIndexBase? cached))
-                return cached;
-
-            var type = metadata.IndexType.ToUpper();
-            if (!_persistenceHandlers.TryGetValue(type, out var persistence))
-                throw new NotSupportedException($"Index type '{metadata.IndexType}' has no persistence handler");
-
-            var filePath = overridePath ?? BuildIndexPath(metadata);
-            if (!persistence.FileExists(filePath))
-                return null;
-
-            object rawIndex = persistence.LoadIndex(filePath);
-            IIndexBase index = EnsureIndexBase(rawIndex, metadata.IndexType, CacheKeyOf(metadata));
-            _cache[CacheKeyOf(metadata)] = index;
-            _metadata[CacheKeyOf(metadata)] = metadata;
-            _cachePaths[CacheKeyOf(metadata)] = filePath;
-
-            return index;
-        }
-    }
-
-    /// <summary>
-    /// Marks an index as dirty (requiring flush to disk).
-    /// </summary>
-    public void MarkDirty(IndexCacheKey cacheKey)
-    {
-        lock (_lock)
-            MarkDirtyNoLock(cacheKey);
-
-        TrackMutation(cacheKey);
-    }
-
-    private void MarkDirtyNoLock(IndexCacheKey cacheKey)
-    {
-        _dirtyIndices.Add(cacheKey);
-    }
-
-    /// <summary>
-    /// Tracks a mutation and flushes if threshold exceeded (buffered mode).
-    /// </summary>
-    private void TrackMutation(IndexCacheKey cacheKey)
-    {
-        if (_persistenceMode != IndexPersistenceMode.Buffered)
-            return;
-
-        lock (_lock)
-        {
-            _pendingMutations.TryGetValue(cacheKey, out var count);
-            _pendingMutations[cacheKey] = count + 1;
-
-            if (_pendingMutations[cacheKey] >= _flushMutationThreshold)
-            {
-                FlushInternal(cacheKey);
-                _pendingMutations[cacheKey] = 0;
-            }
-        }
-    }
-
-    private void TrackMutations(IndexCacheKey cacheKey, int count)
-    {
-        if (_persistenceMode != IndexPersistenceMode.Buffered || count <= 0)
-            return;
-
-        lock (_lock)
-        {
-            _pendingMutations.TryGetValue(cacheKey, out var current);
-            int next = current + count;
-            _pendingMutations[cacheKey] = next;
-
-            if (next >= _flushMutationThreshold)
-            {
-                FlushInternal(cacheKey);
-                _pendingMutations[cacheKey] = 0;
-            }
-        }
-    }
-
-    /// <summary>
-    /// Flushes all dirty indices to disk.
-    /// </summary>
-    public void FlushAll()
-    {
-        lock (_lock)
-        {
-            foreach (var cacheKey in _dirtyIndices.ToList())
-                FlushInternal(cacheKey);
-        }
-    }
-
-    private void FlushInternal(IndexCacheKey cacheKey)
-    {
-        // In-memory contexts never serialize indexes. Guard here (not just at the call sites) so no flush
-        // path — explicit FlushAll, dirty-on-read flushes, disposal — ever serializes an in-memory index.
-        if (_persistenceMode == IndexPersistenceMode.None)
-        {
-            _dirtyIndices.Remove(cacheKey);
-            return;
-        }
-
-        if (!_cache.TryGetValue(cacheKey, out IIndexBase? index))
-            return;
-        if (!_metadata.TryGetValue(cacheKey, out var metadata))
-            return;
-
-        var type = metadata.IndexType.ToUpper();
-        if (!_persistenceHandlers.TryGetValue(type, out var persistence))
-            throw new InvalidOperationException($"No persistence handler registered for index type '{metadata.IndexType}' ({cacheKey}).");
-
-        var filePath = _cachePaths.TryGetValue(cacheKey, out var path)
-            ? path
-            : BuildIndexPath(metadata);
-
-        persistence.SaveIndex(index, filePath);
-        persistence.Flush(index);
-
-        _cachePaths[cacheKey] = filePath;
-        _dirtyIndices.Remove(cacheKey);
-        metadata.ModifiedAtUtc = DateTime.UtcNow;
-    }
-
-    /// <summary>
-    /// Gets an index from cache (no disk loading).
+    /// Gets an index from cache.
     /// </summary>
     public IIndexBase? TryGetCached(IndexCacheKey cacheKey)
     {
@@ -513,66 +286,27 @@ public partial class IndexManager : IDisposable
     }
 
     /// <summary>
-    /// Removes an index from cache and optionally deletes its disk file.
+    /// Removes an index and its fast lanes from the cache.
     /// </summary>
-    public void RemoveIndex(IndexCacheKey cacheKey, bool deleteFile = false)
+    public void RemoveIndex(IndexCacheKey cacheKey)
     {
         lock (_lock)
         {
-            _metadata.TryGetValue(cacheKey, out var metadata);
-
             _cache.Remove(cacheKey);
             _metadata.Remove(cacheKey);
-            _dirtyIndices.Remove(cacheKey);
-            _pendingMutations.Remove(cacheKey);
             _integerPrimaryKeyMaps.TryRemove(cacheKey, out _);
             _guidPrimaryKeyMaps.TryRemove(cacheKey, out _);
             _integerIndexMaps.Remove(cacheKey);
             _guidIndexMaps.Remove(cacheKey);
             _completeLaneIndexes.TryRemove(cacheKey, out _);
 
-            if (deleteFile && _cachePaths.TryGetValue(cacheKey, out var path))
-            {
-                string? indexType = metadata?.IndexType;
-                if (!string.IsNullOrWhiteSpace(indexType)
-                    && _persistenceHandlers.TryGetValue(indexType.ToUpperInvariant(), out var persistence))
-                {
-                    if (!persistence.TryDeleteFile(path) && File.Exists(path))
-                    {
-                        throw new InvalidOperationException($"Failed to delete index file '{path}'.");
-                    }
-                }
-                else
-                {
-                    File.Delete(path);
-                }
-            }
-
-            _cachePaths.Remove(cacheKey);
-        }
-    }
-
-    /// <summary>
-    /// Sets persistence mode and mutation threshold.
-    /// </summary>
-    public void SetPersistenceMode(IndexPersistenceMode mode, int flushThreshold = 256)
-    {
-        if (flushThreshold <= 0)
-        {
-            throw new ArgumentOutOfRangeException(nameof(flushThreshold), "Flush threshold must be greater than zero.");
-        }
-
-        lock (_lock)
-        {
-            _persistenceMode = mode;
-            _flushMutationThreshold = flushThreshold;
         }
     }
 
     /// <summary>
     /// Creates or replaces a scalar BTree index.
     /// </summary>
-    public void CreateIndex(Dictionary<string, List<RowKey>> values, string indexName, string tableName, string databaseName, IndexType? indexType = null) =>
+    public void CreateIndex(Dictionary<string, List<RowKey>> values, string indexName, string tableName, string databaseName) =>
         CreateIndex(values, nullKeyRows: [], indexName, tableName, databaseName);
 
     /// <summary>Creates a scalar index from gathered <paramref name="contents"/>, NULL-key rows included.</summary>
@@ -599,10 +333,7 @@ public partial class IndexManager : IDisposable
             }
         }
 
-        _cachePaths[CacheKeyOf(metadata)] = BuildIndexPath(metadata);
         SeedCompleteLanes(CacheKeyOf(metadata), values, indexName.Equals($"_PK_{tableName}", StringComparison.OrdinalIgnoreCase));
-        MarkDirty(CacheKeyOf(metadata));
-        FlushIfImmediate(CacheKeyOf(metadata));
     }
 
     /// <summary>
@@ -724,7 +455,7 @@ public partial class IndexManager : IDisposable
             return false; // persisted indexes are rebuilt through CreateIndex/RebuildIndex
         }
 
-        if (MirrorsFastLanesToScalarIndex || rows.Count == 0)
+        if (rows.Count == 0)
         {
             return false;
         }
@@ -835,10 +566,10 @@ public partial class IndexManager : IDisposable
     /// <summary>
     /// Rebuilds an existing scalar BTree index from supplied values.
     /// </summary>
-    public void RebuildIndex(Dictionary<string, List<RowKey>> values, string indexName, string tableName, string databaseName, IndexType? indexType = null)
+    public void RebuildIndex(Dictionary<string, List<RowKey>> values, string indexName, string tableName, string databaseName)
     {
         DropIndex(indexName, tableName, databaseName);
-        CreateIndex(values, indexName, tableName, databaseName, indexType);
+        CreateIndex(values, indexName, tableName, databaseName);
     }
 
     /// <summary>Rebuilds a scalar index from gathered <paramref name="contents"/>, NULL-key rows included.</summary>
@@ -855,63 +586,7 @@ public partial class IndexManager : IDisposable
     {
         _lsmStore?.DropIndexTable(databaseName, tableName, indexName);
 
-        var cacheKey = GetCacheKey(indexName, tableName, databaseName);
-        RemoveIndex(cacheKey);
-
-        string[] tableDirectories =
-        [
-            Path.Combine(_indexRootDirectory, databaseName, tableName),
-            Path.Combine(_indexRootDirectory, databaseName.ToLowerInvariant(), tableName.ToLowerInvariant())
-        ];
-
-        foreach (string tableDirectory in tableDirectories.Distinct(StringComparer.OrdinalIgnoreCase))
-        {
-            if (!Directory.Exists(tableDirectory))
-            {
-                continue;
-            }
-
-            foreach (var persistence in _persistenceHandlers.Values.Distinct())
-            {
-                string[] candidatePaths =
-                [
-                    Path.Combine(tableDirectory, $"{indexName}{persistence.FileExtension}"),
-                    Path.Combine(tableDirectory, $"{indexName.ToLowerInvariant()}{persistence.FileExtension}")
-                ];
-
-                foreach (string filePath in candidatePaths.Distinct(StringComparer.OrdinalIgnoreCase))
-                {
-                    if (!persistence.TryDeleteFile(filePath) && File.Exists(filePath))
-                    {
-                        throw new IOException($"Failed to delete index file '{filePath}'.");
-                    }
-                }
-            }
-        }
-
-        // Delete legacy-formatted scalar index files if they exist.
-        string[] legacyScalarPaths =
-        [
-            Path.Combine(_indexRootDirectory, databaseName, $"{tableName}_{indexName}_index.btree"),
-            Path.Combine(_indexRootDirectory, databaseName.ToLowerInvariant(), $"{tableName.ToLowerInvariant()}_{indexName.ToLowerInvariant()}_index.btree")
-        ];
-
-        foreach (string legacyScalarPath in legacyScalarPaths.Distinct(StringComparer.OrdinalIgnoreCase))
-        {
-            if (!File.Exists(legacyScalarPath))
-            {
-                continue;
-            }
-
-            try
-            {
-                File.Delete(legacyScalarPath);
-            }
-            catch (Exception ex)
-            {
-                throw new InvalidOperationException($"Failed to delete legacy index file '{legacyScalarPath}'.", ex);
-            }
-        }
+        RemoveIndex(GetCacheKey(indexName, tableName, databaseName));
     }
 
     /// <summary>
@@ -919,25 +594,6 @@ public partial class IndexManager : IDisposable
     /// </summary>
     public void DropDatabaseIndexes(string databaseName)
     {
-        string databaseDirectory = Path.Combine(_indexRootDirectory, databaseName);
-        if (Directory.Exists(databaseDirectory))
-        {
-            bool deleted = false;
-            foreach (var persistence in _persistenceHandlers.Values.Distinct())
-            {
-                if (persistence.TryDeleteDirectory(databaseDirectory))
-                {
-                    deleted = true;
-                    break;
-                }
-            }
-
-            if (!deleted)
-            {
-                Directory.Delete(databaseDirectory, recursive: true);
-            }
-        }
-
         List<IndexCacheKey> keysToRemove;
         lock (_lock)
         {
@@ -978,41 +634,20 @@ public partial class IndexManager : IDisposable
     }
 
     /// <summary>
-    /// Clears all loaded index state for this engine and removes persisted index files.
+    /// Clears every loaded index and fast lane of this engine.
     /// </summary>
-    public void ClearRuntimeStateAndDeleteAllIndexes()
+    public void ClearRuntimeState()
     {
         lock (_lock)
         {
             _cache.Clear();
             _metadata.Clear();
-            _cachePaths.Clear();
-            _dirtyIndices.Clear();
-            _pendingMutations.Clear();
             _integerPrimaryKeyMaps.Clear();
             _integerIndexMaps.Clear();
             _guidPrimaryKeyMaps.Clear();
             _guidIndexMaps.Clear();
             _completeLaneIndexes.Clear();
         }
-
-        if (!Directory.Exists(_indexRootDirectory))
-        {
-            Directory.CreateDirectory(_indexRootDirectory);
-            return;
-        }
-
-        foreach (string directory in Directory.GetDirectories(_indexRootDirectory))
-        {
-            Directory.Delete(directory, recursive: true);
-        }
-
-        foreach (string filePath in Directory.GetFiles(_indexRootDirectory))
-        {
-            File.Delete(filePath);
-        }
-
-        Directory.CreateDirectory(_indexRootDirectory);
     }
 
     /// <summary>
@@ -1043,8 +678,7 @@ public partial class IndexManager : IDisposable
         string indexName,
         string tableName,
         string databaseName,
-        Dictionary<string, List<RowKey>> rebuildData,
-        IndexType? indexType = null)
+        Dictionary<string, List<RowKey>> rebuildData)
     {
         if (IsIndexHealthy(indexName, tableName, databaseName))
         {
@@ -1053,7 +687,7 @@ public partial class IndexManager : IDisposable
 
         try
         {
-            RebuildIndex(rebuildData, indexName, tableName, databaseName, indexType);
+            RebuildIndex(rebuildData, indexName, tableName, databaseName);
             return IsIndexHealthy(indexName, tableName, databaseName);
         }
         catch
@@ -1063,52 +697,18 @@ public partial class IndexManager : IDisposable
     }
 
     /// <summary>
-    /// Builds the standard index file path.
-    /// </summary>
-    private string BuildIndexPath(IndexMetadata metadata)
-    {
-        var type = metadata.IndexType.ToUpper();
-        if (!_persistenceHandlers.TryGetValue(type, out var persistence))
-            throw new NotSupportedException($"Unknown index type: {type}");
-
-        string normalizedDatabase = metadata.DatabaseName.ToLowerInvariant();
-        string normalizedTable = metadata.TableName.ToLowerInvariant();
-        string normalizedIndexName = metadata.IndexName.ToLowerInvariant();
-
-        var dir = Path.Combine(_indexRootDirectory, normalizedDatabase, normalizedTable);
-        persistence.EnsureDirectory(dir);
-
-        var filename = $"{normalizedIndexName}{persistence.FileExtension}";
-        return Path.Combine(dir, filename);
-    }
-
-    private static string ResolveIndexRootDirectory(DataVoConfig? config, string? engineStorageRoot)
-    {
-        if (!string.IsNullOrEmpty(engineStorageRoot))
-            return engineStorageRoot;
-
-        if (config == null)
-            return "databases";
-
-        if (config.StorageMode == StorageMode.Disk)
-            return config.DiskStoragePath ?? "./datavo_data";
-
-        return Path.Combine(Path.GetTempPath(), "datavo_indexes", Guid.NewGuid().ToString("N"));
-    }
-
-    /// <summary>
-    /// Flushes managed indexes and releases delegated manager resources.
+    /// Releases the loaded indexes.
     /// </summary>
     public void Dispose()
     {
-        FlushAll();
+        ClearRuntimeState();
     }
 
     private void EnsureDefaultRegistrations()
     {
-        RegisterIndexType("BTREE", new BTreeIndexFactory(), new BTreeIndexPersistence());
-        RegisterIndexType("HNSW", new HNSWIndexFactory(), new HNSWIndexPersistence());
-        RegisterIndexType("FLAT", new FlatVectorIndexFactory(), new FlatVectorIndexPersistence());
+        RegisterIndexType("BTREE", new BTreeIndexFactory());
+        RegisterIndexType("HNSW", new HNSWIndexFactory());
+        RegisterIndexType("FLAT", new FlatVectorIndexFactory());
     }
 
     private static IndexCacheKey GetCacheKey(string indexName, string tableName, string databaseName)
@@ -1200,9 +800,6 @@ public partial class IndexManager : IDisposable
             }
         }
 
-        _cachePaths[cacheKey] = BuildIndexPath(metadata);
-        MarkDirty(cacheKey);
-        FlushIfImmediate(cacheKey);
     }
 
     /// <summary>
@@ -1235,8 +832,6 @@ public partial class IndexManager : IDisposable
             vectorIndex.Insert(rowId, vector.ToArray());
         }
 
-        MarkDirty(cacheKey);
-        FlushIfImmediate(cacheKey);
     }
 
     internal void InsertManyIntoVectorIndex(
@@ -1288,8 +883,6 @@ public partial class IndexManager : IDisposable
             }
         }
 
-        MarkDirty(cacheKey);
-        FlushIfImmediate(cacheKey);
     }
 
     /// <summary>
@@ -1308,8 +901,6 @@ public partial class IndexManager : IDisposable
         var cacheKey = GetCacheKey(indexName, tableName, databaseName);
         var vectorIndex = GetOrLoadVectorIndex(indexName, tableName, databaseName, indexType);
         vectorIndex.Delete(toBeDeletedIds);
-        MarkDirty(cacheKey);
-        FlushIfImmediate(cacheKey);
     }
 
     /// <summary>
@@ -1354,8 +945,7 @@ public partial class IndexManager : IDisposable
         {
             _cache[cacheKey] = index;
             _metadata[cacheKey] = metadata;
-            _cachePaths[cacheKey] = BuildIndexPath(metadata);
-        }
+            }
     }
 
     /// <summary>
@@ -1421,11 +1011,8 @@ public partial class IndexManager : IDisposable
             IIndex index = GetOrLoadScalarIndex(indexName, tableName, databaseName);
             index.Insert(value, rowId);
             MirrorScalarEntryIntoLanesNoLock(cacheKey, value, rowId);
-            MarkDirtyNoLock(cacheKey);
-            FlushIfImmediate(cacheKey);
         }
 
-        TrackMutation(GetCacheKey(indexName, tableName, databaseName));
     }
 
     /// <summary>
@@ -1603,11 +1190,8 @@ public partial class IndexManager : IDisposable
                 MirrorScalarEntryIntoLanesNoLock(cacheKey, value, rowId);
             }
 
-            MarkDirtyNoLock(cacheKey);
-            FlushIfImmediate(cacheKey);
         }
 
-        TrackMutations(cacheKey, entries.Count);
     }
 
     /// <summary>
@@ -1654,40 +1238,12 @@ public partial class IndexManager : IDisposable
 
         var cacheKey = GetCacheKey(indexName, tableName, databaseName);
         ConcurrentInt64Int64Map map = _integerPrimaryKeyMaps.GetOrAdd(cacheKey, static _ => new ConcurrentInt64Int64Map());
-        if (!MirrorsFastLanesToScalarIndex)
+        for (int i = 0; i < entries.Count; i++)
         {
-            for (int i = 0; i < entries.Count; i++)
-            {
-                (long key, RowKey rowId) = entries[i];
-                map.Set(key, RowKeyConversions.ToRowId(rowId)); // reads stay lock-free
-            }
-
-            return;
+            (long key, RowKey rowId) = entries[i];
+            map.Set(key, RowKeyConversions.ToRowId(rowId)); // reads stay lock-free
         }
-
-        lock (_lock)
-        {
-            IIndex index = GetOrLoadScalarIndex(indexName, tableName, databaseName);
-            for (int i = 0; i < entries.Count; i++)
-            {
-                (long key, RowKey rowId) = entries[i];
-                RowKey? replaced = map.TryGetValue(key, out long previous) ? previous : null;
-                map.Set(key, RowKeyConversions.ToRowId(rowId));
-                MirrorLaneEntryNoLock(index, FormatIntegerKey(key), rowId, replaced);
-            }
-
-            MarkDirtyNoLock(cacheKey);
-            FlushIfImmediate(cacheKey);
-        }
-
-        TrackMutations(cacheKey, entries.Count);
     }
-
-    /// <summary>
-    /// Fast lanes are process-local caches. When indexes persist (Disk/Lsm), every lane write must also
-    /// reach the authoritative scalar index, or a reopened engine would not see the key at all.
-    /// </summary>
-    private bool MirrorsFastLanesToScalarIndex => _persistenceMode != IndexPersistenceMode.None;
 
     /// <summary>
     /// Idempotently records (key, rowId) in the scalar index; callers that also write the scalar index
@@ -1779,42 +1335,21 @@ public partial class IndexManager : IDisposable
 
         var cacheKey = GetCacheKey(indexName, tableName, databaseName);
         ConcurrentInt64Int64Map map = _integerPrimaryKeyMaps.GetOrAdd(cacheKey, static _ => new ConcurrentInt64Int64Map());
-        if (!MirrorsFastLanesToScalarIndex)
+        // The lane stores integer row ids (in-memory and disk modes only use those).
+        long[] laneValues = System.Buffers.ArrayPool<long>.Shared.Rent(rowIds.Length);
+        try
         {
-            // The lane stores integer row ids (in-memory and disk modes only use those).
-            long[] laneValues = System.Buffers.ArrayPool<long>.Shared.Rent(rowIds.Length);
-            try
+            for (int i = 0; i < rowIds.Length; i++)
             {
-                for (int i = 0; i < rowIds.Length; i++)
-                {
-                    laneValues[i] = RowKeyConversions.ToRowId(rowIds[i]);
-                }
-
-                map.SetRange(keys, laneValues.AsSpan(0, rowIds.Length));
-            }
-            finally
-            {
-                System.Buffers.ArrayPool<long>.Shared.Return(laneValues);
+                laneValues[i] = RowKeyConversions.ToRowId(rowIds[i]);
             }
 
-            return;
+            map.SetRange(keys, laneValues.AsSpan(0, rowIds.Length));
         }
-
-        lock (_lock)
+        finally
         {
-            IIndex index = GetOrLoadScalarIndex(indexName, tableName, databaseName);
-            for (int i = 0; i < keys.Length; i++)
-            {
-                RowKey? replaced = map.TryGetValue(keys[i], out long previous) ? previous : null;
-                map.Set(keys[i], RowKeyConversions.ToRowId(rowIds[i]));
-                MirrorLaneEntryNoLock(index, FormatIntegerKey(keys[i]), rowIds[i], replaced);
-            }
-
-            MarkDirtyNoLock(cacheKey);
-            FlushIfImmediate(cacheKey);
+            System.Buffers.ArrayPool<long>.Shared.Return(laneValues);
         }
-
-        TrackMutations(cacheKey, keys.Length);
     }
 
     /// <summary>
@@ -1872,7 +1407,7 @@ public partial class IndexManager : IDisposable
 
             // Without persistence the lane is the only copy of these entries, which is right only while
             // the lane is complete; a partial lane is never read, so the scalar index must get them too.
-            if (!MirrorsFastLanesToScalarIndex && IsLaneComplete(cacheKey))
+            if (IsLaneComplete(cacheKey))
             {
                 return;
             }
@@ -1884,11 +1419,8 @@ public partial class IndexManager : IDisposable
                 MirrorLaneEntryNoLock(index, FormatIntegerKey(key), rowId, replacedRowId: null);
             }
 
-            MarkDirtyNoLock(cacheKey);
-            FlushIfImmediate(cacheKey);
         }
 
-        TrackMutations(cacheKey, entries.Count);
     }
 
     /// <summary>
@@ -1933,33 +1465,11 @@ public partial class IndexManager : IDisposable
         ConcurrentDictionary<Guid, RowKey> map = _guidPrimaryKeyMaps.GetOrAdd(
             cacheKey,
             static _ => new ConcurrentDictionary<Guid, RowKey>(GuidSimdEqualityComparer.Instance));
-        if (!MirrorsFastLanesToScalarIndex)
+        for (int i = 0; i < entries.Count; i++)
         {
-            for (int i = 0; i < entries.Count; i++)
-            {
-                (Guid key, RowKey rowId) = entries[i];
-                map[key] = rowId;
-            }
-
-            return;
+            (Guid key, RowKey rowId) = entries[i];
+            map[key] = rowId;
         }
-
-        lock (_lock)
-        {
-            IIndex index = GetOrLoadScalarIndex(indexName, tableName, databaseName);
-            for (int i = 0; i < entries.Count; i++)
-            {
-                (Guid key, RowKey rowId) = entries[i];
-                RowKey? replaced = map.TryGetValue(key, out RowKey previous) ? previous : null;
-                map[key] = rowId;
-                MirrorLaneEntryNoLock(index, FormatGuidKey(key), rowId, replaced);
-            }
-
-            MarkDirtyNoLock(cacheKey);
-            FlushIfImmediate(cacheKey);
-        }
-
-        TrackMutations(cacheKey, entries.Count);
     }
 
     /// <summary>
@@ -2017,7 +1527,7 @@ public partial class IndexManager : IDisposable
 
             // Without persistence the lane is the only copy of these entries, which is right only while
             // the lane is complete; a partial lane is never read, so the scalar index must get them too.
-            if (!MirrorsFastLanesToScalarIndex && IsLaneComplete(cacheKey))
+            if (IsLaneComplete(cacheKey))
             {
                 return;
             }
@@ -2029,11 +1539,8 @@ public partial class IndexManager : IDisposable
                 MirrorLaneEntryNoLock(index, FormatGuidKey(key), rowId, replacedRowId: null);
             }
 
-            MarkDirtyNoLock(cacheKey);
-            FlushIfImmediate(cacheKey);
         }
 
-        TrackMutations(cacheKey, entries.Count);
     }
 
     /// <summary>
@@ -2134,7 +1641,7 @@ public partial class IndexManager : IDisposable
     private void MirrorLaneRemoval(IndexCacheKey cacheKey, string indexName, string tableName, string databaseName, RowKey rowId)
     {
         // As for inserts: without persistence only a complete lane is the sole copy of its entries.
-        if (!MirrorsFastLanesToScalarIndex && IsLaneComplete(cacheKey))
+        if (IsLaneComplete(cacheKey))
         {
             return;
         }
@@ -2142,11 +1649,8 @@ public partial class IndexManager : IDisposable
         lock (_lock)
         {
             GetOrLoadScalarIndex(indexName, tableName, databaseName).DeleteValues([rowId]);
-            MarkDirtyNoLock(cacheKey);
-            FlushIfImmediate(cacheKey);
         }
 
-        TrackMutation(cacheKey);
     }
 
     /// <summary>
@@ -2575,11 +2079,8 @@ public partial class IndexManager : IDisposable
             }
 
             index.DeleteValues(toBeDeletedIds);
-            MarkDirtyNoLock(cacheKey);
-            FlushIfImmediate(cacheKey);
         }
 
-        TrackMutation(cacheKey);
     }
 
     /// <summary>
@@ -2648,7 +2149,6 @@ public partial class IndexManager : IDisposable
             }
         }
 
-        TrackMutation(cacheKey);
     }
 
     /// <summary>
@@ -2685,7 +2185,6 @@ public partial class IndexManager : IDisposable
             }
         }
 
-        TrackMutation(cacheKey);
     }
 
     /// <summary>Removes pairs from a loaded scalar tree; returns <see langword="false"/> when the tree is not loaded.</summary>
@@ -2697,7 +2196,7 @@ public partial class IndexManager : IDisposable
             return false;
         }
 
-        if (index is JsonBTreeIndex json)
+        if (index is InMemoryBTreeIndex json)
         {
             foreach ((string key, RowKey rowId) in entries)
             {
@@ -2709,8 +2208,6 @@ public partial class IndexManager : IDisposable
             index.DeleteValues([.. entries.Select(entry => entry.RowId)]);
         }
 
-        MarkDirtyNoLock(cacheKey);
-        FlushIfImmediate(cacheKey);
         return true;
     }
 
@@ -3043,13 +2540,6 @@ public partial class IndexManager : IDisposable
             return scalar;
         }
 
-        IndexMetadata metadata = CreateScalarMetadata(indexName, tableName, databaseName);
-        object? loaded = TryLoadIndex(metadata);
-        if (loaded is IIndex loadedScalar)
-        {
-            return loadedScalar;
-        }
-
         throw new IndexException($"Index {indexName} on table {tableName} does not exist!");
     }
 
@@ -3061,8 +2551,7 @@ public partial class IndexManager : IDisposable
             DatabaseName = databaseName,
             TableName = tableName,
             ColumnName = string.Empty,
-            IndexType = "BTREE",
-            PersistenceFormat = "json"
+            IndexType = "BTREE"
         };
     }
 
@@ -3080,12 +2569,6 @@ public partial class IndexManager : IDisposable
         }
 
         var metadata = CreateVectorMetadata(indexName, tableName, databaseName, indexType, metric: null);
-
-        var loaded = TryLoadIndex(metadata);
-        if (loaded is IVectorIndex vectorIndex)
-        {
-            return vectorIndex;
-        }
 
         if (TryRebuildVectorIndexFromStorage(indexName, tableName, databaseName, indexType, out IVectorIndex? rebuilt, out Exception? rebuildError) && rebuilt != null)
         {
@@ -3167,7 +2650,6 @@ public partial class IndexManager : IDisposable
             TableName = tableName,
             ColumnName = string.Empty,
             IndexType = indexType.ToUpperInvariant(),
-            PersistenceFormat = "json",
             Parameters = parameters,
         };
     }

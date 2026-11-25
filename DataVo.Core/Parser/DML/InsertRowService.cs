@@ -498,22 +498,6 @@ internal sealed partial class InsertRowService(
             recorder?.RecordInsert(tableName, rowId, acceptedRows[i]);
         }
 
-        if (ImplicitWalCommit.IsEnabled(engine))
-        {
-            var operations = new List<WalOperation>(acceptedRows.Count);
-            foreach (Dictionary<string, object?> row in acceptedRows)
-            {
-                operations.Add(new WalOperation
-                {
-                    OperationType = WalOperationType.Insert,
-                    TableName = tableName,
-                    RowData = new Dictionary<string, object?>(row, row.Comparer),
-                });
-            }
-
-            ImplicitWalCommit.CommitIfEnabled(engine, databaseName, statementTxId, operations);
-        }
-
         return new InsertRowsResult(rowIds, acceptedRows.Count, messages);
     }
 
@@ -603,22 +587,6 @@ internal sealed partial class InsertRowService(
             // eager dict); the owned dict is materialized lazily only if an owned subscriber reads it
             // (Slice 5 P3, lever 4). normalizedCells is never mutated after this point.
             recorder.RecordTypedInsert(tableName, rowId, TypedRow.FromOwnedCells(columns, normalizedCells));
-        }
-
-        if (ImplicitWalCommit.IsEnabled(engine))
-        {
-            ImplicitWalCommit.CommitIfEnabled(
-                engine,
-                databaseName,
-                statementTxId,
-                [
-                    new WalOperation
-                    {
-                        OperationType = WalOperationType.Insert,
-                        TableName = tableName,
-                        RowData = ImplicitWalCommit.MaterializeTypedRow(columns, normalizedCells),
-                    }
-                ]);
         }
 
         return rowId;
@@ -923,22 +891,6 @@ internal sealed partial class InsertRowService(
             {
                 recorder.RecordTypedInsert(tableName, rowIds[i], TypedRow.FromOwnedCells(columns, ownedRows[i]));
             }
-        }
-
-        if (ImplicitWalCommit.IsEnabled(engine))
-        {
-            var operations = new List<WalOperation>(rows.Count);
-            for (int i = 0; i < rows.Count; i++)
-            {
-                operations.Add(new WalOperation
-                {
-                    OperationType = WalOperationType.Insert,
-                    TableName = tableName,
-                    RowData = ImplicitWalCommit.MaterializeTypedRow(columns, rows[i]),
-                });
-            }
-
-            ImplicitWalCommit.CommitIfEnabled(engine, databaseName, statementTxId, operations);
         }
 
         return rowIds;

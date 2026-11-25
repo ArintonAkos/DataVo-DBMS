@@ -6,7 +6,6 @@ public class ReactiveCorrelatedSubqueryTests
 {
     [Theory]
     [InlineData(StorageMode.InMemory)]
-    [InlineData(StorageMode.Disk)]
     public void CorrelatedExists_TracksPerKey(StorageMode mode)
     {
         using var ctx = ChangeCaptureIntegrationTests.NewContext(mode, out _);

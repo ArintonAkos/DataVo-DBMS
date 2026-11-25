@@ -135,7 +135,7 @@ public static class DataVoDbContextOptionsExtensions
     /// </summary>
     /// <param name="optionsBuilder">The builder being configured.</param>
     /// <param name="connectionString">
-    /// A DataVo connection string, e.g. <c>"StorageMode=Disk;DataSource=mydb"</c>.
+    /// A DataVo connection string, e.g. <c>"StorageMode=Lsm;DataSource=mydb"</c>.
     /// </param>
     /// <param name="dataVoOptionsAction">
     /// Optional action to configure additional DataVo-specific options such as
@@ -158,7 +158,7 @@ public static class DataVoDbContextOptionsExtensions
     /// Use this overload to specify <see cref="DataVoStorageMode"/> and a data-source name
     /// without writing a raw connection string.
     /// <code>
-    /// UseDataVo(o => o.UseDiskStorage().WithDataSource("mydb"))
+    /// UseDataVo(o => o.UseLsmStorage().WithDataSource("mydb"))
     /// UseDataVo(o => o.UseInMemoryStorage().WithDataSource("testdb"))
     /// </code>
     /// </summary>

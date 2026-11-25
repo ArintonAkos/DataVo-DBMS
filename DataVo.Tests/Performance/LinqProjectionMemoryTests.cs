@@ -25,7 +25,7 @@ public sealed class LinqProjectionMemoryTests : IDisposable
 
     private readonly string _directory = Path.Combine(Path.GetTempPath(), $"datavo_linq_projection_{Guid.NewGuid():N}");
 
-    public static TheoryData<StorageMode> Modes => new() { StorageMode.InMemory, StorageMode.Disk, StorageMode.Lsm };
+    public static TheoryData<StorageMode> Modes => new() { StorageMode.InMemory, StorageMode.Lsm };
 
     public void Dispose()
     {
@@ -66,7 +66,7 @@ public sealed class LinqProjectionMemoryTests : IDisposable
             documents.OrderByDescending(static d => d.Kind).ThenBy(static d => d.Id).Take(10).Select(static d => d.Id).ToList());
         Assert.True(models - ids > bodies * 9 / 10, $"the sorted projection allocated {ids:N0} B against {models:N0} B for models: the text column was decoded");
         // The legacy Disk engine copies each stored row's bytes while it scans, so its top-N saves less.
-        long budget = mode == StorageMode.Disk ? models / 2 : models / 20;
+        long budget = models / 20;
         Assert.True(top < budget, $"the top-10 projection allocated {top:N0} B against {models:N0} B for models");
     }
 

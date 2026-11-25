@@ -34,7 +34,7 @@ internal sealed class DataVoDatabaseCreator : IDatabaseCreator
     /// executes them against the configured DataVo storage.
     ///
     /// Returns <c>true</c> when storage appears newly created, <c>false</c> when it already
-    /// existed (disk mode only). In-memory mode always returns <c>true</c>.
+    /// existed (Lsm mode only). In-memory mode always returns <c>true</c>.
     /// </remarks>
     public bool EnsureCreated()
     {
@@ -44,7 +44,7 @@ internal sealed class DataVoDatabaseCreator : IDatabaseCreator
         _currentDbContext.Context.EnsureDataVoCreated(connectionString);
 
         var builder = new DataVoConnectionStringBuilder(connectionString);
-        if (builder.StorageMode != Core.StorageEngine.Config.StorageMode.Disk)
+        if (builder.StorageMode != Core.StorageEngine.Config.StorageMode.Lsm)
         {
             return true;
         }
@@ -115,7 +115,7 @@ internal sealed class DataVoDatabaseCreator : IDatabaseCreator
             throw new InvalidOperationException(
                 "No DataVo connection string is configured. " +
                 "Call UseDataVo(connectionString) or the typed fluent API " +
-                "(e.g. UseDataVo(o => o.UseStorageMode(DataVoStorageMode.Disk).WithDataSource(\"mydb\"))).");
+                "(e.g. UseDataVo(o => o.UseStorageMode(DataVoStorageMode.Lsm).WithDataSource(\"mydb\"))).");
         }
 
         return connectionString;
@@ -126,7 +126,7 @@ internal sealed class DataVoDatabaseCreator : IDatabaseCreator
         // Parse DataSource from the connection string to locate the storage directory.
         var builder = new DataVoConnectionStringBuilder(connectionString);
 
-        if (builder.StorageMode != Core.StorageEngine.Config.StorageMode.Disk)
+        if (builder.StorageMode != Core.StorageEngine.Config.StorageMode.Lsm)
         {
             return true;
         }
@@ -138,7 +138,7 @@ internal sealed class DataVoDatabaseCreator : IDatabaseCreator
             return false;
         }
 
-        // DataVo stores disk databases in a directory named after the DataSource relative to cwd.
+        // DataVo stores Lsm databases in a directory named after the DataSource relative to cwd.
         string directoryPath = Path.IsPathRooted(dataSource)
             ? dataSource
             : Path.Combine(Directory.GetCurrentDirectory(), dataSource);
@@ -155,7 +155,7 @@ internal sealed class DataVoDatabaseCreator : IDatabaseCreator
     private static bool StorageExists(string connectionString)
     {
         var builder = new DataVoConnectionStringBuilder(connectionString);
-        if (builder.StorageMode != Core.StorageEngine.Config.StorageMode.Disk)
+        if (builder.StorageMode != Core.StorageEngine.Config.StorageMode.Lsm)
         {
             return false;
         }

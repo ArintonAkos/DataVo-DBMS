@@ -210,7 +210,6 @@ public sealed class PackedKeyLookupTests : IDisposable
 
     [Theory]
     [InlineData(StorageMode.Lsm)]
-    [InlineData(StorageMode.Disk)]
     public void Lookup_OnATableThatIsNotInMemory_GoesThroughTheStatement(StorageMode mode)
     {
         using DataVoContext db = Open(mode);

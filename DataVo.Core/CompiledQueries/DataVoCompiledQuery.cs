@@ -657,7 +657,7 @@ public static class DataVoCompiledQuery
 
         // Reactive change capture needs after-image materialization the byte-patch path deliberately skips.
         if (!engine.Config.EnableZeroAllocCompiledUpdate
-            || (engine.Config.StorageMode != StorageMode.Disk && engine.Config.StorageMode != StorageMode.Lsm)
+            || engine.Config.StorageMode != StorageMode.Lsm
             || engine.Changes.Enabled
             || MvccCoordinator.RecordsVersions(engine))
         {
@@ -740,11 +740,6 @@ public static class DataVoCompiledQuery
             // The primary key is unchanged, so the fast-lane entry just re-points to the new row id (upsert).
             engine.IndexManager.InsertIntegerPrimaryKeys([(primaryKey, newRowId)], schema.PkIndexName, plan.TableName, databaseName);
 
-            if (ImplicitWalCommit.IsEnabled(engine))
-            {
-                engine.CommitBinaryUpdateFrameThroughGroupCommit(databaseName, plan.TableName, rowId, rowBytes);
-            }
-
             affected = 1;
             return true;
         }
@@ -766,7 +761,7 @@ public static class DataVoCompiledQuery
         DataVoEngine engine = context.Engine;
 
         if (!engine.Config.EnableZeroAllocCompiledUpdate
-            || (engine.Config.StorageMode != StorageMode.Disk && engine.Config.StorageMode != StorageMode.Lsm)
+            || engine.Config.StorageMode != StorageMode.Lsm
             || engine.Changes.Enabled
             || MvccCoordinator.RecordsVersions(engine))
         {
@@ -860,11 +855,6 @@ public static class DataVoCompiledQuery
             MvccCoordinator.RegisterUpdateVersion(engine, databaseName, plan.TableName, rowId, newRowId, statementTxId);
             engine.IndexManager.InsertIntegerPrimaryKeys([(primaryKey, newRowId)], schema.PkIndexName, plan.TableName, databaseName);
 
-            if (ImplicitWalCommit.IsEnabled(engine))
-            {
-                engine.CommitBinaryUpdateFrameThroughGroupCommit(databaseName, plan.TableName, rowId, rowBytes);
-            }
-
             affected = 1;
             return true;
         }
@@ -906,7 +896,7 @@ public static class DataVoCompiledQuery
         plan = StoredTablePlan(engine, plan, databaseName);
 
         if (!engine.Config.EnableZeroAllocCompiledUpdate
-            || (engine.Config.StorageMode != StorageMode.Disk && engine.Config.StorageMode != StorageMode.Lsm)
+            || engine.Config.StorageMode != StorageMode.Lsm
             || engine.Changes.Enabled
             || MvccCoordinator.RecordsVersions(engine))
         {
@@ -1003,11 +993,6 @@ public static class DataVoCompiledQuery
 
             MvccCoordinator.RegisterUpdateVersion(engine, databaseName, plan.TableName, rowId, newRowId, statementTxId);
             engine.IndexManager.InsertIntegerPrimaryKeys([(primaryKey, newRowId)], schema.PkIndexName, plan.TableName, databaseName);
-
-            if (ImplicitWalCommit.IsEnabled(engine))
-            {
-                engine.CommitBinaryUpdateFrameThroughGroupCommit(databaseName, plan.TableName, rowId, rowBytes);
-            }
 
             affected = 1;
             return true;
@@ -2097,22 +2082,6 @@ public static class DataVoCompiledQuery
                 context.Engine.StorageContext.DeleteFromTable(oldRowIds.ToList(), tableName, databaseName);
             }
 
-            if (ImplicitWalCommit.IsEnabled(context.Engine))
-            {
-                var operations = new List<WalOperation>(newRows.Count);
-                for (int i = 0; i < newRows.Count; i++)
-                {
-                    operations.Add(new WalOperation
-                    {
-                        OperationType = WalOperationType.Update,
-                        TableName = tableName,
-                        RowId = RowKeyConversions.ToRowId(oldRowIds[i]),
-                        UpdatedColumns = new Dictionary<string, object?>(newRows[i], newRows[i].Comparer),
-                    });
-                }
-
-                ImplicitWalCommit.CommitIfEnabled(context.Engine, databaseName, statementTxId, operations);
-            }
         }
         finally
         {

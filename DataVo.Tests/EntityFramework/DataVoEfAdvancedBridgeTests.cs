@@ -14,7 +14,7 @@ public class DataVoEfAdvancedBridgeTests
     public void LoadFromDataVo_PullsExternalRowsIntoLinqQueryPipeline()
     {
         string db = $"datavo_ef_read_{Guid.NewGuid():N}";
-        string cs = $"StorageMode=Disk;DataSource={db}";
+        string cs = $"StorageMode=Lsm;DataSource={db}";
         string path = Path.Combine(Directory.GetCurrentDirectory(), db);
 
         try
@@ -52,7 +52,7 @@ public class DataVoEfAdvancedBridgeTests
     public void EnsureCreatedAndLoad_ReturnsTrueThenFalse_ForDiskStorage()
     {
         string db = $"datavo_ef_idempotent_{Guid.NewGuid():N}";
-        string cs = $"StorageMode=Disk;DataSource={db}";
+        string cs = $"StorageMode=Lsm;DataSource={db}";
         string path = Path.Combine(Directory.GetCurrentDirectory(), db);
 
         try
@@ -78,7 +78,7 @@ public class DataVoEfAdvancedBridgeTests
     public void ExecuteDataVoSqlRaw_CanMutateAndReadBackData()
     {
         string db = $"datavo_ef_raw_{Guid.NewGuid():N}";
-        string cs = $"StorageMode=Disk;DataSource={db}";
+        string cs = $"StorageMode=Lsm;DataSource={db}";
         string path = Path.Combine(Directory.GetCurrentDirectory(), db);
 
         try
@@ -105,7 +105,7 @@ public class DataVoEfAdvancedBridgeTests
     public void ExecuteDataVoSqlRaw_DuplicateKey_ThrowsTypedDataVoEfException()
     {
         string db = $"datavo_ef_raw_err_{Guid.NewGuid():N}";
-        string cs = $"StorageMode=Disk;DataSource={db}";
+        string cs = $"StorageMode=Lsm;DataSource={db}";
         string path = Path.Combine(Directory.GetCurrentDirectory(), db);
 
         try
@@ -134,7 +134,7 @@ public class DataVoEfAdvancedBridgeTests
     public void SaveChanges_DuplicatePrimaryKey_ThrowsTypedInsertException()
     {
         string db = $"datavo_ef_dup_{Guid.NewGuid():N}";
-        string cs = $"StorageMode=Disk;DataSource={db}";
+        string cs = $"StorageMode=Lsm;DataSource={db}";
         string path = Path.Combine(Directory.GetCurrentDirectory(), db);
 
         try
@@ -167,7 +167,7 @@ public class DataVoEfAdvancedBridgeTests
     {
         var options = new DbContextOptionsBuilder<AdvancedContext>()
             .UseInMemoryDatabase($"ef_missing_ds_{Guid.NewGuid():N}")
-            .UseDataVo(o => o.UseDiskStorage())
+            .UseDataVo(o => o.UseLsmStorage())
             .Options;
 
         var ex = Assert.Throws<InvalidOperationException>(() =>
@@ -194,7 +194,7 @@ public class DataVoEfAdvancedBridgeTests
     public void DataVoCanConnect_ReturnsTrueWhenConfigured_AndFalseWhenNotConfigured()
     {
         string db = $"datavo_ef_connect_{Guid.NewGuid():N}";
-        string cs = $"StorageMode=Disk;DataSource={db}";
+        string cs = $"StorageMode=Lsm;DataSource={db}";
         string path = Path.Combine(Directory.GetCurrentDirectory(), db);
 
         try
@@ -224,7 +224,7 @@ public class DataVoEfAdvancedBridgeTests
     public void ExecuteSqlOnDataVo_ParameterizedBoolAndString_Works()
     {
         string db = $"datavo_ef_param_{Guid.NewGuid():N}";
-        string cs = $"StorageMode=Disk;DataSource={db}";
+        string cs = $"StorageMode=Lsm;DataSource={db}";
         string path = Path.Combine(Directory.GetCurrentDirectory(), db);
 
         try
@@ -266,7 +266,7 @@ public class DataVoEfAdvancedBridgeTests
     public void LoadFromDataVo_CalledTwice_DoesNotDuplicateTrackedRows()
     {
         string db = $"datavo_ef_reload_{Guid.NewGuid():N}";
-        string cs = $"StorageMode=Disk;DataSource={db}";
+        string cs = $"StorageMode=Lsm;DataSource={db}";
         string path = Path.Combine(Directory.GetCurrentDirectory(), db);
 
         try
@@ -315,7 +315,7 @@ public class DataVoEfAdvancedBridgeTests
     public void LoadFromDataVo_ConvertsNullableAndGuidAndEnumValues()
     {
         string db = $"datavo_ef_conv_{Guid.NewGuid():N}";
-        string cs = $"StorageMode=Disk;DataSource={db}";
+        string cs = $"StorageMode=Lsm;DataSource={db}";
         string path = Path.Combine(Directory.GetCurrentDirectory(), db);
         Guid id = Guid.NewGuid();
 
@@ -350,7 +350,7 @@ public class DataVoEfAdvancedBridgeTests
     public async Task SaveChangesAsync_PersistsToDataVoAndCanBeReadByAnotherContext()
     {
         string db = $"datavo_ef_async_{Guid.NewGuid():N}";
-        string cs = $"StorageMode=Disk;DataSource={db}";
+        string cs = $"StorageMode=Lsm;DataSource={db}";
         string path = Path.Combine(Directory.GetCurrentDirectory(), db);
 
         try
@@ -380,7 +380,7 @@ public class DataVoEfAdvancedBridgeTests
     public void QueryFromDataVo_GuardedSyncQuery_RefreshesAndAppliesShape()
     {
         string db = $"datavo_ef_guarded_sync_{Guid.NewGuid():N}";
-        string cs = $"StorageMode=Disk;DataSource={db}";
+        string cs = $"StorageMode=Lsm;DataSource={db}";
         string path = Path.Combine(Directory.GetCurrentDirectory(), db);
 
         try
@@ -416,7 +416,7 @@ public class DataVoEfAdvancedBridgeTests
     public async Task QueryFromDataVoAsync_GuardedAsyncQuery_RefreshesAndAppliesShape()
     {
         string db = $"datavo_ef_guarded_async_{Guid.NewGuid():N}";
-        string cs = $"StorageMode=Disk;DataSource={db}";
+        string cs = $"StorageMode=Lsm;DataSource={db}";
         string path = Path.Combine(Directory.GetCurrentDirectory(), db);
 
         try
@@ -451,7 +451,7 @@ public class DataVoEfAdvancedBridgeTests
     public void UserStyleLinq_AfterLoadFromDataVo_WhereOrderByTake_Works()
     {
         string db = $"datavo_userstyle_linq_basic_{Guid.NewGuid():N}";
-        string cs = $"StorageMode=Disk;DataSource={db}";
+        string cs = $"StorageMode=Lsm;DataSource={db}";
         string path = Path.Combine(Directory.GetCurrentDirectory(), db);
 
         try
@@ -493,7 +493,7 @@ public class DataVoEfAdvancedBridgeTests
     public void UserStyleLinq_AfterLoadFromDataVo_IncludeNavigation_Works()
     {
         string db = $"datavo_userstyle_linq_include_{Guid.NewGuid():N}";
-        string cs = $"StorageMode=Disk;DataSource={db}";
+        string cs = $"StorageMode=Lsm;DataSource={db}";
         string path = Path.Combine(Directory.GetCurrentDirectory(), db);
 
         try
@@ -531,7 +531,7 @@ public class DataVoEfAdvancedBridgeTests
     public void UserStyleLinq_AfterLoadFromDataVo_ProjectionSelect_Works()
     {
         string db = $"datavo_userstyle_linq_projection_{Guid.NewGuid():N}";
-        string cs = $"StorageMode=Disk;DataSource={db}";
+        string cs = $"StorageMode=Lsm;DataSource={db}";
         string path = Path.Combine(Directory.GetCurrentDirectory(), db);
 
         try
@@ -573,7 +573,7 @@ public class DataVoEfAdvancedBridgeTests
     public void UserStyleLinq_DiskContext_FloatRoundtrip_Works()
     {
         string db = $"datavo_userstyle_linq_float_disk_{Guid.NewGuid():N}";
-        string cs = $"StorageMode=Disk;DataSource={db}";
+        string cs = $"StorageMode=Lsm;DataSource={db}";
         string path = Path.Combine(Directory.GetCurrentDirectory(), db);
 
         try
@@ -624,7 +624,7 @@ public class DataVoEfAdvancedBridgeTests
     public void QueryFromDataVo_WhenQueryShapeThrows_WrapsAsTypedQueryOperation()
     {
         string db = $"datavo_ef_guarded_err_{Guid.NewGuid():N}";
-        string cs = $"StorageMode=Disk;DataSource={db}";
+        string cs = $"StorageMode=Lsm;DataSource={db}";
         string path = Path.Combine(Directory.GetCurrentDirectory(), db);
 
         try
@@ -650,7 +650,7 @@ public class DataVoEfAdvancedBridgeTests
     public void QueryFromDataVo_GroupByShape_IsBlockedWithTypedQueryOperation()
     {
         string db = $"datavo_ef_guarded_block_sync_{Guid.NewGuid():N}";
-        string cs = $"StorageMode=Disk;DataSource={db}";
+        string cs = $"StorageMode=Lsm;DataSource={db}";
         string path = Path.Combine(Directory.GetCurrentDirectory(), db);
 
         try
@@ -684,7 +684,7 @@ public class DataVoEfAdvancedBridgeTests
     public async Task QueryFromDataVoAsync_GroupByShape_IsBlockedWithTypedQueryOperation()
     {
         string db = $"datavo_ef_guarded_block_async_{Guid.NewGuid():N}";
-        string cs = $"StorageMode=Disk;DataSource={db}";
+        string cs = $"StorageMode=Lsm;DataSource={db}";
         string path = Path.Combine(Directory.GetCurrentDirectory(), db);
 
         try
@@ -753,7 +753,7 @@ public class DataVoEfAdvancedBridgeTests
     public void AnyFromDataVo_CountFromDataVo_FirstOrDefaultFromDataVo_WorkForMatchAndNoMatch()
     {
         string db = $"datavo_ef_guarded_aggr_sync_{Guid.NewGuid():N}";
-        string cs = $"StorageMode=Disk;DataSource={db}";
+        string cs = $"StorageMode=Lsm;DataSource={db}";
         string path = Path.Combine(Directory.GetCurrentDirectory(), db);
 
         try
@@ -793,7 +793,7 @@ public class DataVoEfAdvancedBridgeTests
     public async Task AnyCountFirstOrDefaultFromDataVoAsync_WorkForMatchAndNoMatch()
     {
         string db = $"datavo_ef_guarded_aggr_async_{Guid.NewGuid():N}";
-        string cs = $"StorageMode=Disk;DataSource={db}";
+        string cs = $"StorageMode=Lsm;DataSource={db}";
         string path = Path.Combine(Directory.GetCurrentDirectory(), db);
 
         try
@@ -833,7 +833,7 @@ public class DataVoEfAdvancedBridgeTests
     public void AggregateHelpers_BlockUnsupportedShapeWithTypedQueryOperation()
     {
         string db = $"datavo_ef_guarded_aggr_block_{Guid.NewGuid():N}";
-        string cs = $"StorageMode=Disk;DataSource={db}";
+        string cs = $"StorageMode=Lsm;DataSource={db}";
         string path = Path.Combine(Directory.GetCurrentDirectory(), db);
 
         try
@@ -937,7 +937,7 @@ public class DataVoEfAdvancedBridgeTests
     public void ProjectFromDataVo_ReturnsProjectedDtos()
     {
         string db = $"datavo_proj_{Guid.NewGuid():N}";
-        string cs = $"StorageMode=Disk;DataSource={db}";
+        string cs = $"StorageMode=Lsm;DataSource={db}";
         string path = Path.Combine(Directory.GetCurrentDirectory(), db);
 
         try
@@ -968,7 +968,7 @@ public class DataVoEfAdvancedBridgeTests
     public async Task ProjectFromDataVoAsync_ReturnsProjectedDtos()
     {
         string db = $"datavo_proj_async_{Guid.NewGuid():N}";
-        string cs = $"StorageMode=Disk;DataSource={db}";
+        string cs = $"StorageMode=Lsm;DataSource={db}";
         string path = Path.Combine(Directory.GetCurrentDirectory(), db);
 
         try
@@ -999,7 +999,7 @@ public class DataVoEfAdvancedBridgeTests
     public void ProjectFromDataVo_WithQueryShape_ReturnsFilteredProjection()
     {
         string db = $"datavo_proj_filtered_{Guid.NewGuid():N}";
-        string cs = $"StorageMode=Disk;DataSource={db}";
+        string cs = $"StorageMode=Lsm;DataSource={db}";
         string path = Path.Combine(Directory.GetCurrentDirectory(), db);
 
         try
@@ -1052,7 +1052,7 @@ public class DataVoEfAdvancedBridgeTests
     public void ProjectFromDataVo_BlockedShapeOperator_ThrowsDataVoEfException()
     {
         string db = $"datavo_proj_blocked_{Guid.NewGuid():N}";
-        string cs = $"StorageMode=Disk;DataSource={db}";
+        string cs = $"StorageMode=Lsm;DataSource={db}";
         string path = Path.Combine(Directory.GetCurrentDirectory(), db);
 
         try
@@ -1117,7 +1117,7 @@ public class DataVoEfAdvancedBridgeTests
     public void ExplainQueryFromDataVo_WhereOrderByTake_WithTranslationPreview_ReportsNativePreviewAndQueryExecutes()
     {
         string db = $"datavo_translate_preview_{Guid.NewGuid():N}";
-        string cs = $"StorageMode=Disk;DataSource={db}";
+        string cs = $"StorageMode=Lsm;DataSource={db}";
         string path = Path.Combine(Directory.GetCurrentDirectory(), db);
 
         try
@@ -1163,7 +1163,7 @@ public class DataVoEfAdvancedBridgeTests
     public void ExplainQueryFromDataVo_VectorDistanceWhereOrderBy_WithTranslationPreview_ReportsNativePreviewAndQueryExecutes()
     {
         string db = $"datavo_translate_vector_{Guid.NewGuid():N}";
-        string cs = $"StorageMode=Disk;DataSource={db}";
+        string cs = $"StorageMode=Lsm;DataSource={db}";
         string path = Path.Combine(Directory.GetCurrentDirectory(), db);
 
         try
@@ -1216,7 +1216,7 @@ public class DataVoEfAdvancedBridgeTests
     public void ExplainQueryFromDataVo_Include_WithTranslationPreview_ReportsGuardedFallbackAndQueryExecutes()
     {
         string db = $"datavo_translate_fallback_{Guid.NewGuid():N}";
-        string cs = $"StorageMode=Disk;DataSource={db}";
+        string cs = $"StorageMode=Lsm;DataSource={db}";
         string path = Path.Combine(Directory.GetCurrentDirectory(), db);
 
         try
@@ -1256,7 +1256,7 @@ public class DataVoEfAdvancedBridgeTests
     public void ExplainQueryFromDataVo_GroupBy_WithTranslationPreview_ReportsBlocked_AndExecutionThrows()
     {
         string db = $"datavo_translate_blocked_{Guid.NewGuid():N}";
-        string cs = $"StorageMode=Disk;DataSource={db}";
+        string cs = $"StorageMode=Lsm;DataSource={db}";
         string path = Path.Combine(Directory.GetCurrentDirectory(), db);
 
         try
@@ -1317,7 +1317,7 @@ public class DataVoEfAdvancedBridgeTests
     public void QueryFromDataVo_WhereOrderBySkipTake_WithTranslationPreview_ExecutesViaNativeSubset()
     {
         string db = $"datavo_translate_skip_take_{Guid.NewGuid():N}";
-        string cs = $"StorageMode=Disk;DataSource={db}";
+        string cs = $"StorageMode=Lsm;DataSource={db}";
         string path = Path.Combine(Directory.GetCurrentDirectory(), db);
 
         try
@@ -1411,7 +1411,7 @@ public class DataVoEfAdvancedBridgeTests
     public void QueryFromDataVo_StringMethodsInWhere_WithTranslationPreview_ExecutesViaNativeSubset()
     {
         string db = $"datavo_native_where_string_{Guid.NewGuid():N}";
-        string cs = $"StorageMode=Disk;DataSource={db}";
+        string cs = $"StorageMode=Lsm;DataSource={db}";
         string path = Path.Combine(Directory.GetCurrentDirectory(), db);
 
         try
@@ -1462,7 +1462,7 @@ public class DataVoEfAdvancedBridgeTests
     public void QueryFromDataVo_CoalescePredicate_WithTranslationPreview_ExecutesViaNativeSubset()
     {
         string db = $"datavo_native_where_coalesce_{Guid.NewGuid():N}";
-        string cs = $"StorageMode=Disk;DataSource={db}";
+        string cs = $"StorageMode=Lsm;DataSource={db}";
         string path = Path.Combine(Directory.GetCurrentDirectory(), db);
 
         try
@@ -1497,7 +1497,7 @@ public class DataVoEfAdvancedBridgeTests
     public void ProjectFromDataVo_SimpleSelect_WithTranslationPreview_ExecutesAndReturnsProjectedRows()
     {
         string db = $"datavo_native_project_{Guid.NewGuid():N}";
-        string cs = $"StorageMode=Disk;DataSource={db}";
+        string cs = $"StorageMode=Lsm;DataSource={db}";
         string path = Path.Combine(Directory.GetCurrentDirectory(), db);
 
         try
@@ -1531,7 +1531,7 @@ public class DataVoEfAdvancedBridgeTests
     public void ProjectFromDataVo_ComputedSelect_WithTranslationPreview_ExecutesAndReturnsProjectedRows()
     {
         string db = $"datavo_native_project_computed_{Guid.NewGuid():N}";
-        string cs = $"StorageMode=Disk;DataSource={db}";
+        string cs = $"StorageMode=Lsm;DataSource={db}";
         string path = Path.Combine(Directory.GetCurrentDirectory(), db);
 
         try
@@ -1583,7 +1583,7 @@ public class DataVoEfAdvancedBridgeTests
     public void QueryFromDataVo_NestedPredicateMix_WithTranslationPreview_ExecutesViaNativeSubset()
     {
         string db = $"datavo_native_where_nested_{Guid.NewGuid():N}";
-        string cs = $"StorageMode=Disk;DataSource={db}";
+        string cs = $"StorageMode=Lsm;DataSource={db}";
         string path = Path.Combine(Directory.GetCurrentDirectory(), db);
 
         try
@@ -1620,7 +1620,7 @@ public class DataVoEfAdvancedBridgeTests
     public void QueryFromDataVo_StringStartsWithEmptyPrefix_WithTranslationPreview_ExecutesViaNativeSubset()
     {
         string db = $"datavo_native_where_quote_{Guid.NewGuid():N}";
-        string cs = $"StorageMode=Disk;DataSource={db}";
+        string cs = $"StorageMode=Lsm;DataSource={db}";
         string path = Path.Combine(Directory.GetCurrentDirectory(), db);
 
         try
@@ -1653,7 +1653,7 @@ public class DataVoEfAdvancedBridgeTests
     public void QueryFromDataVo_CoalesceOnRightComparison_WithTranslationPreview_ExecutesViaNativeSubset()
     {
         string db = $"datavo_native_where_coalesce_right_{Guid.NewGuid():N}";
-        string cs = $"StorageMode=Disk;DataSource={db}";
+        string cs = $"StorageMode=Lsm;DataSource={db}";
         string path = Path.Combine(Directory.GetCurrentDirectory(), db);
 
         try
@@ -1702,7 +1702,7 @@ public class DataVoEfAdvancedBridgeTests
     public void QueryFromDataVo_ToLowerPredicate_WithTranslationPreview_ExecutesViaNativeSubset()
     {
         string db = $"datavo_where_tolower_fallback_{Guid.NewGuid():N}";
-        string cs = $"StorageMode=Disk;DataSource={db}";
+        string cs = $"StorageMode=Lsm;DataSource={db}";
         string path = Path.Combine(Directory.GetCurrentDirectory(), db);
 
         try
@@ -1767,7 +1767,7 @@ public class DataVoEfAdvancedBridgeTests
     public void QueryFromDataVo_CapturedSkipTakeAndThenBy_WithTranslationPreview_ExecutesViaNativeSubset()
     {
         string db = $"datavo_native_capture_paging_{Guid.NewGuid():N}";
-        string cs = $"StorageMode=Disk;DataSource={db}";
+        string cs = $"StorageMode=Lsm;DataSource={db}";
         string path = Path.Combine(Directory.GetCurrentDirectory(), db);
 
         try
@@ -1828,7 +1828,7 @@ public class DataVoEfAdvancedBridgeTests
     public void ProjectFromDataVo_MethodAndConditionalProjection_WithTranslationPreview_ExecutesAndReturnsProjectedRows()
     {
         string db = $"datavo_native_project_complex_{Guid.NewGuid():N}";
-        string cs = $"StorageMode=Disk;DataSource={db}";
+        string cs = $"StorageMode=Lsm;DataSource={db}";
         string path = Path.Combine(Directory.GetCurrentDirectory(), db);
 
         try

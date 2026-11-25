@@ -12,7 +12,7 @@ public class DataVoDatabaseFacadeBridgeTests
     public void DatabaseFacade_EnsureDataVoCreatedAndDeleted_UsesUseDataVoConnection()
     {
         string databaseName = $"datavo_ef_dbfacade_{Guid.NewGuid():N}";
-        string connectionString = $"StorageMode=Disk;DataSource={databaseName}";
+        string connectionString = $"StorageMode=Lsm;DataSource={databaseName}";
 
         using (var context = CreateContext(connectionString))
         {
@@ -35,7 +35,7 @@ public class DataVoDatabaseFacadeBridgeTests
     public void DatabaseFacade_StandardEnsureCreated_RoutesToDataVo()
     {
         string databaseName = $"datavo_ef_creator_{Guid.NewGuid():N}";
-        string connectionString = $"StorageMode=Disk;DataSource={databaseName}";
+        string connectionString = $"StorageMode=Lsm;DataSource={databaseName}";
 
         using var context = CreateContext(connectionString);
 

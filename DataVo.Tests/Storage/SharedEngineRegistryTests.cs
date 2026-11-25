@@ -14,7 +14,7 @@ public sealed class SharedEngineRegistryTests : IDisposable
 {
     private readonly string _path = TestStorageDirectories.Create("shared");
 
-    public static TheoryData<StorageMode> PersistentModes => new() { StorageMode.Disk, StorageMode.Lsm };
+    public static TheoryData<StorageMode> PersistentModes => new() { StorageMode.Lsm };
 
     [Theory]
     [MemberData(nameof(PersistentModes))]
@@ -57,7 +57,7 @@ public sealed class SharedEngineRegistryTests : IDisposable
     {
         using FileStream foreignLock = LockDirectory();
 
-        var ex = Assert.Throws<DatabaseInUseException>(() => Open(StorageMode.Disk));
+        var ex = Assert.Throws<DatabaseInUseException>(() => Open(StorageMode.Lsm));
         Assert.Contains("locked by another process", ex.Message, StringComparison.Ordinal);
         Assert.Equal(Path.GetFullPath(_path), ex.Directory);
     }
@@ -65,11 +65,11 @@ public sealed class SharedEngineRegistryTests : IDisposable
     [Fact]
     public void IncompatibleConfigOnOpenDirectory_IsRejected()
     {
-        using var first = Open(StorageMode.Disk);
+        using var first = Open(StorageMode.Lsm);
 
         var ex = Assert.Throws<DatabaseInUseException>(() => new DataVoContext(new DataVoConfig
         {
-            StorageMode = StorageMode.Disk,
+            StorageMode = StorageMode.Lsm,
             DiskStoragePath = _path,
             EnableAuthorization = true,
         }));
@@ -79,10 +79,10 @@ public sealed class SharedEngineRegistryTests : IDisposable
     [Fact]
     public void EquivalentPathSpelling_SharesEngine()
     {
-        using var first = Open(StorageMode.Disk);
+        using var first = Open(StorageMode.Lsm);
         using var second = new DataVoContext(new DataVoConfig
         {
-            StorageMode = StorageMode.Disk,
+            StorageMode = StorageMode.Lsm,
             DiskStoragePath = _path + Path.DirectorySeparatorChar,
             LsmStrictFsync = false,
         });
@@ -103,7 +103,7 @@ public sealed class SharedEngineRegistryTests : IDisposable
     public void ConcurrentAdoConnections_ToSameDataSource_ShareEngine()
     {
         string dataSource = $"datavo_shared_ado_{Guid.NewGuid():N}";
-        string connectionString = $"StorageMode=Disk;DataSource={dataSource}";
+        string connectionString = $"StorageMode=Lsm;DataSource={dataSource}";
         try
         {
             using var writer = new DataVoConnection(connectionString);
@@ -179,7 +179,7 @@ public sealed class SharedEngineRegistryTests : IDisposable
     {
     }
 
-    private DataVoConfig NewDiskConfig() => new() { StorageMode = StorageMode.Disk, DiskStoragePath = _path };
+    private DataVoConfig NewDiskConfig() => new() { StorageMode = StorageMode.Lsm, DiskStoragePath = _path };
 
     private DataVoContext Open(StorageMode mode) =>
         new(new DataVoConfig { StorageMode = mode, DiskStoragePath = _path, LsmStrictFsync = false });

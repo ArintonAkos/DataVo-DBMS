@@ -74,7 +74,7 @@ public class InMemoryExplainTests : ExplainTestsBase
     public InMemoryExplainTests() : base(new DataVoConfig { StorageMode = StorageMode.InMemory }, "ExplainDB_Mem") { }
 }
 
-public class DiskExplainTests : ExplainTestsBase
+public class LsmExplainTests : ExplainTestsBase
 {
-    public DiskExplainTests() : base(new DataVoConfig { StorageMode = StorageMode.Disk, DiskStoragePath = "./test_datavo_explain" }, "ExplainDB_Disk") { }
+    public LsmExplainTests() : base(new DataVoConfig { StorageMode = StorageMode.Lsm, DiskStoragePath = "./test_datavo_lsm_explain" }, "ExplainDB_Lsm") { }
 }

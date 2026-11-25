@@ -36,10 +36,10 @@ public class DataVoEfSchemaTests
         {
             using (var context = CreateContext())
             {
-                context.EnsureDataVoCreated($"StorageMode=Disk;DataSource={databaseName}");
+                context.EnsureDataVoCreated($"StorageMode=Lsm;DataSource={databaseName}");
             }
 
-            using var connection = new DataVoConnection($"StorageMode=Disk;DataSource={databaseName}");
+            using var connection = new DataVoConnection($"StorageMode=Lsm;DataSource={databaseName}");
             connection.Open();
 
             using (var insertBlog = connection.CreateCommand())

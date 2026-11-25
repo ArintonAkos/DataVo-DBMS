@@ -22,15 +22,8 @@ public sealed class CrashRecoveryTests(ITestOutputHelper output)
 {
     private const int CrashCycles = 6;
 
-    // Disk is legacy: an autocommit UPDATE there is still two separate durable steps (tombstone the old
-    // row, append the new one), so a crash between them can lose a committed row. Lsm writes every
-    // statement as one commit-log frame and must pass.
-    private const string DiskNotCrashSafe =
-        "Disk mode is legacy and not crash-safe for UPDATE (non-atomic tombstone + append); see WAL And Durability docs.";
-
     [Theory]
     [InlineData("lsm")]
-    [InlineData("disk", Skip = DiskNotCrashSafe)]
     public void AcknowledgedWrites_SurviveRepeatedHardCrashes(string mode)
     {
         string directory = TestStorageDirectories.Create($"crash_{mode}");
@@ -563,9 +556,11 @@ public sealed class CrashRecoveryTests(ITestOutputHelper output)
         return result.Data.ToDictionary(row => Convert.ToInt64(row["Id"]), row => Convert.ToInt64(row["Value"]));
     }
 
-    private static DataVoContext Open(string directory, string mode) => new(mode == "lsm"
-        ? new DataVoConfig { StorageMode = StorageMode.Lsm, DiskStoragePath = directory, LsmStrictFsync = true }
-        : new DataVoConfig { StorageMode = StorageMode.Disk, DiskStoragePath = directory, SyncDiskWrites = true });
+    private static DataVoContext Open(string directory, string mode)
+    {
+        Assert.Equal("lsm", mode);
+        return new DataVoContext(new DataVoConfig { StorageMode = StorageMode.Lsm, DiskStoragePath = directory, LsmStrictFsync = true });
+    }
 
     private static string HarnessPath()
     {

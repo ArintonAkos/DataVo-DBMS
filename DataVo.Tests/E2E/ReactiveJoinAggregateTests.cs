@@ -6,7 +6,6 @@ public class ReactiveJoinAggregateTests
 {
     [Theory]
     [InlineData(StorageMode.InMemory)]
-    [InlineData(StorageMode.Disk)]
     public void VipExposureByMarketCategory_IsMaintainedIncrementally(StorageMode mode)
     {
         using var ctx = ChangeCaptureIntegrationTests.NewContext(mode, out _);

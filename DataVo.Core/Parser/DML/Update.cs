@@ -490,22 +490,6 @@ internal class Update(UpdateStatement ast) : BaseDbAction
                 Context.DeleteFromTable(oldRowIds, _model.TableName, databaseName);
             }
 
-            if (ImplicitWalCommit.IsEnabled(Engine))
-            {
-                var operations = new List<WalOperation>(newRows.Count);
-                for (int i = 0; i < newRows.Count; i++)
-                {
-                    operations.Add(new WalOperation
-                    {
-                        OperationType = WalOperationType.Update,
-                        TableName = _model.TableName,
-                        RowId = RowKeyConversions.ToRowId(oldRowIds[i]),
-                        UpdatedColumns = new Dictionary<string, object?>(newRows[i], newRows[i].Comparer),
-                    });
-                }
-
-                ImplicitWalCommit.CommitIfEnabled(Engine, databaseName, statementTxId, operations);
-            }
         }
         finally
         {

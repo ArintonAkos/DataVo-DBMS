@@ -130,10 +130,10 @@ public class HNSWParallelBuildTests
         Directory.CreateDirectory(directory);
         try
         {
-            var persistence = new HNSWIndexPersistence();
-            string path = Path.Combine(directory, "idx.vector.json");
-            persistence.SaveIndex(original, path);
-            var loaded = (HNSWIndex)persistence.LoadIndex(path);
+            string path = Path.Combine(directory, "idx.hnsw");
+            HnswSnapshotFile.Write(path, original, watermark: 0, column: "v");
+            Assert.True(HnswSnapshotFile.TryRead(path, "v", out HNSWIndex? reloadedIndex, out _));
+            var loaded = reloadedIndex!;
 
             loaded.InsertBatchParallel(ids[1_000..], vectors[(1_000 * dimension)..], dimension);
 

@@ -11,7 +11,7 @@ namespace DataVo.Core.Runtime;
 internal static class DataVoConfigSharing
 {
     /// <summary>
-    /// Settings deliberately excluded from the fingerprint because a shareable (Disk/Lsm) engine never
+    /// Settings deliberately excluded from the fingerprint because a shareable (Lsm) engine never
     /// reads them: the storage backend comes from <see cref="DataVoConfig.StorageMode"/> instead.
     /// </summary>
     internal static readonly IReadOnlyList<string> IgnoredProperties =
@@ -95,19 +95,12 @@ internal static class DataVoConfigSharing
         Add(nameof(DataVoConfig.EnableHybridOrderByAdaptiveInitialTopK), config.EnableHybridOrderByAdaptiveInitialTopK);
         Add(nameof(DataVoConfig.DiskStoragePath), ResolvePersistentRoot(config) ?? config.DiskStoragePath);
         Add(nameof(DataVoConfig.LockAcquireTimeoutMs), config.LockAcquireTimeoutMs);
-        Add(nameof(DataVoConfig.SyncDiskWrites), config.SyncDiskWrites);
         Add(nameof(DataVoConfig.LsmStrictFsync), config.LsmStrictFsync);
         Add(nameof(DataVoConfig.LsmReadMode), config.LsmReadMode);
         Add(nameof(DataVoConfig.LsmBlockCacheSizeBytes), config.LsmBlockCacheSizeBytes);
         Add(nameof(DataVoConfig.ClusteredPrimaryKeys), config.ClusteredPrimaryKeys);
-        Add(nameof(DataVoConfig.IoSchedulerMode), config.IoSchedulerMode);
         Add(nameof(DataVoConfig.EnableZeroAllocCompiledUpdate), config.EnableZeroAllocCompiledUpdate);
-        Add(nameof(DataVoConfig.WalEnabled), config.WalEnabled);
-        Add(nameof(DataVoConfig.WalFilePath), Path.GetFullPath(config.ResolveWalFilePath()));
-        Add(nameof(DataVoConfig.WalCheckpointThreshold), config.WalCheckpointThreshold);
         Add(nameof(DataVoConfig.TransactionIdStateFilePath), Path.GetFullPath(config.ResolveTransactionIdStateFilePath()));
-        Add(nameof(DataVoConfig.CheckpointStateFilePath), Path.GetFullPath(config.ResolveCheckpointStateFilePath()));
-        Add(nameof(DataVoConfig.WalCheckpointIntervalMs), config.WalCheckpointIntervalMs);
 
         return values;
     }

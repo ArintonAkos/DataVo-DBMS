@@ -16,7 +16,6 @@ namespace DataVo.UnitySmoke.EditorTests
     public sealed class AdapterImportTests
     {
         [TestCase(StorageMode.Lsm)]
-        [TestCase(StorageMode.Disk)]
         public void SaveData_Survives_Closing_And_Reopening(StorageMode mode)
         {
             string path = System.IO.Path.Combine(Application.temporaryCachePath, "DataVoSave_" + mode + "_" + Guid.NewGuid().ToString("N"));

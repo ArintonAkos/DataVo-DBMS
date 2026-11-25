@@ -4,12 +4,12 @@ using DataVo.Core.BTree;
 namespace DataVo.Tests.BTree;
 
 /// <summary>Row-id removal edits the tree in place (no full rebuild) and keeps lookups exact.</summary>
-public sealed class JsonBTreeIndexDeleteTests
+public sealed class InMemoryBTreeIndexDeleteTests
 {
     [Fact]
     public void DeleteValues_RemovesRowIdsAcrossKeys_AndEmptyKeysAreAbsent()
     {
-        JsonBTreeIndex index = Build(keys: 500, rowsPerKey: 3);
+        InMemoryBTreeIndex index = Build(keys: 500, rowsPerKey: 3);
 
         index.DeleteValues([1, 2, 3, 1500]); // key "k0000" loses all its rows; "k0499" loses one
 
@@ -23,7 +23,7 @@ public sealed class JsonBTreeIndexDeleteTests
     [Fact]
     public void RemoveValue_RemovesExactlyOneMapping()
     {
-        JsonBTreeIndex index = Build(keys: 500, rowsPerKey: 2);
+        InMemoryBTreeIndex index = Build(keys: 500, rowsPerKey: 2);
 
         Assert.True(index.RemoveValue("k0100", 201));
         Assert.False(index.RemoveValue("k0100", 201));
@@ -37,7 +37,7 @@ public sealed class JsonBTreeIndexDeleteTests
     [Fact]
     public void ManyRemovals_TriggerCompaction_WithoutLosingLiveEntries()
     {
-        JsonBTreeIndex index = Build(keys: 10_000, rowsPerKey: 1);
+        InMemoryBTreeIndex index = Build(keys: 10_000, rowsPerKey: 1);
 
         for (int i = 1; i <= 9_000; i++)
         {
@@ -55,7 +55,7 @@ public sealed class JsonBTreeIndexDeleteTests
     [Fact]
     public void PublishedValueList_IsNotMutatedByDeletes()
     {
-        JsonBTreeIndex index = Build(keys: 10, rowsPerKey: 3);
+        InMemoryBTreeIndex index = Build(keys: 10, rowsPerKey: 3);
         IReadOnlyList<RowKey> before = index.SearchReadOnly("k0005");
 
         index.DeleteValues([before[0]]);
@@ -64,9 +64,9 @@ public sealed class JsonBTreeIndexDeleteTests
         Assert.Equal(2, index.SearchReadOnly("k0005").Count);
     }
 
-    private static JsonBTreeIndex Build(int keys, int rowsPerKey)
+    private static InMemoryBTreeIndex Build(int keys, int rowsPerKey)
     {
-        var index = new JsonBTreeIndex(minDegree: 4);
+        var index = new InMemoryBTreeIndex(minDegree: 4);
         long rowId = 1;
         for (int k = 0; k < keys; k++)
         {

@@ -8,7 +8,6 @@ public class ReactiveAggregateTests
 {
     [Theory]
     [InlineData(StorageMode.InMemory)]
-    [InlineData(StorageMode.Disk)]
     public void Count_Sum_Avg_MaintainedPerGroup(StorageMode mode)
     {
         using var ctx = ChangeCaptureIntegrationTests.NewContext(mode, out _);
@@ -38,7 +37,6 @@ public class ReactiveAggregateTests
 
     [Theory]
     [InlineData(StorageMode.InMemory)]
-    [InlineData(StorageMode.Disk)]
     public void EmptyingGroup_EmitsRemoved(StorageMode mode)
     {
         using var ctx = ChangeCaptureIntegrationTests.NewContext(mode, out _);
@@ -56,7 +54,6 @@ public class ReactiveAggregateTests
 
     [Theory]
     [InlineData(StorageMode.InMemory)]
-    [InlineData(StorageMode.Disk)]
     public void Max_RecoversNextValue_OnDelete(StorageMode mode)
     {
         using var ctx = ChangeCaptureIntegrationTests.NewContext(mode, out _);

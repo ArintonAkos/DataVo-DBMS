@@ -208,7 +208,7 @@ public class InMemoryJoinTests : JoinTestsBase
     public InMemoryJoinTests() : base(new DataVoConfig { StorageMode = StorageMode.InMemory }, "JoinDB_Mem") { }
 }
 
-public class DiskJoinTests : JoinTestsBase
+public class LsmJoinTests : JoinTestsBase
 {
-    public DiskJoinTests() : base(new DataVoConfig { StorageMode = StorageMode.Disk, DiskStoragePath = "./test_datavo_join" }, "JoinDB_Disk") { }
+    public LsmJoinTests() : base(new DataVoConfig { StorageMode = StorageMode.Lsm, DiskStoragePath = "./test_datavo_lsm_join" }, "JoinDB_Lsm") { }
 }

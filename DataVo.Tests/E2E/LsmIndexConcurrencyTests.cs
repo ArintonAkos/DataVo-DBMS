@@ -10,14 +10,14 @@ namespace DataVo.Tests.E2E;
 /// Concurrent disk-mode DML and secondary-index integrity tests covering overlapping updates/deletes,
 /// duplicate primary-key races, composite indexes, and high-contention hot-key mutations.
 /// </summary>
-public class DiskIndexConcurrencyTests : SqlExecutionTestsBase
+public class LsmIndexConcurrencyTests : SqlExecutionTestsBase
 {
-    public DiskIndexConcurrencyTests()
+    public LsmIndexConcurrencyTests()
         : base(new DataVoConfig
         {
-            StorageMode = StorageMode.Disk,
+            StorageMode = StorageMode.Lsm,
             DiskStoragePath = "./test_datavo_index_concurrency"
-        }, "IndexConcurrencyDb_Disk")
+        }, "IndexConcurrencyDb_Lsm")
     {
     }
 

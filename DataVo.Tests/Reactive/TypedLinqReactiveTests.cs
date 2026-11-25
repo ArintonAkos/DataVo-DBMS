@@ -33,7 +33,7 @@ public sealed class TypedLinqReactiveTests : IDisposable
 {
     private readonly string _directory = Path.Combine(Path.GetTempPath(), $"datavo_linq_reactive_{Guid.NewGuid():N}");
 
-    public static TheoryData<StorageMode> Modes => new() { StorageMode.InMemory, StorageMode.Disk, StorageMode.Lsm };
+    public static TheoryData<StorageMode> Modes => new() { StorageMode.InMemory, StorageMode.Lsm };
 
     public void Dispose()
     {
@@ -50,7 +50,6 @@ public sealed class TypedLinqReactiveTests : IDisposable
         {
             StorageMode = mode,
             DiskStoragePath = dbDir,
-            WalFilePath = Path.Combine(dbDir, "wal.log"),
         };
 
         var ctx = new DataVoContext(config);

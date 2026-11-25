@@ -82,7 +82,7 @@ public class InMemoryDropTests : DropTestsBase
     public InMemoryDropTests() : base(new DataVoConfig { StorageMode = StorageMode.InMemory }, "DropDB_Mem") { }
 }
 
-public class DiskDropTests : DropTestsBase
+public class LsmDropTests : DropTestsBase
 {
-    public DiskDropTests() : base(new DataVoConfig { StorageMode = StorageMode.Disk, DiskStoragePath = "./test_datavo_drop" }, "DropDB_Disk") { }
+    public LsmDropTests() : base(new DataVoConfig { StorageMode = StorageMode.Lsm, DiskStoragePath = "./test_datavo_lsm_drop" }, "DropDB_Lsm") { }
 }

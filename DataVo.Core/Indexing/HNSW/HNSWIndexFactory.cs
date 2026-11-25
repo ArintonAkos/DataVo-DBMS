@@ -100,15 +100,6 @@ public class HNSWIndexFactory : IVectorIndexFactory
         return BrowserRuntimeFlags.ForceVectorFallback;
     }
 
-    /// <summary>
-    /// Loads an existing HNSW index instance via the configured persistence handler.
-    /// </summary>
-    public object LoadIndex(string filePath, IIndexPersistence persistence)
-    {
-        // Delegate to persistence handler
-        return persistence.LoadIndex(filePath);
-    }
-
     private static string NormalizeMetric(string metric)
     {
         return metric.ToLowerInvariant() switch

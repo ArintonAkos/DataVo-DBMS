@@ -59,39 +59,16 @@ internal class Commit : BaseDbAction
         long commitStamp = Engine.CommitClock.AcquireStamp(context.TransactionId);
 
         var lockedResources = AcquireWriteLocks(databaseName, context);
-        DataVoConfig config = Context.Config;
-        bool walEnabled = config.StorageMode == StorageMode.Disk && config.WalEnabled;
-        WalEntry? walEntry = walEnabled ? WalEntry.FromTransactionContext(databaseName, context) : null;
-        WalWriter? walWriter = walEnabled ? new WalWriter(config) : null;
 
         try
         {
-            // Every check that can reject the commit runs before anything is logged or applied, so a failed COMMIT
-            // never reaches the WAL, storage, the indexes or the version metadata.
+            // Every check that can reject the commit runs before anything is applied, so a failed COMMIT never
+            // reaches storage, the indexes or the version metadata.
             ValidateBeforeApply(context, databaseName);
 
             AnnounceBufferedChanges(context, databaseName);
 
-            if (walWriter != null && walEntry != null)
-            {
-                walWriter.Append(walEntry);
-            }
-
-            try
-            {
-                FlushContext(context, databaseName, Engine, commitStamp);
-            }
-            catch when (walWriter != null && walEntry != null)
-            {
-                // The flush was undone: retire the logged entry so recovery does not replay a rejected commit.
-                walWriter.MarkCheckpointed(walEntry.TransactionId);
-                throw;
-            }
-
-            if (walWriter != null && walEntry != null)
-            {
-                walWriter.MarkCheckpointed(walEntry.TransactionId);
-            }
+            FlushContext(context, databaseName, Engine, commitStamp);
         }
         finally
         {

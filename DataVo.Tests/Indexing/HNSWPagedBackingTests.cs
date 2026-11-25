@@ -108,10 +108,10 @@ public class HNSWPagedBackingTests
         Directory.CreateDirectory(tempDir);
         try
         {
-            var persistence = new HNSWIndexPersistence();
-            string filePath = Path.Combine(tempDir, "idx.vector.json");
-            persistence.SaveIndex(index, filePath);
-            var loaded = (HNSWIndex)persistence.LoadIndex(filePath);
+            string filePath = Path.Combine(tempDir, "idx.hnsw");
+            HnswSnapshotFile.Write(filePath, index, watermark: 0, column: "v");
+            Assert.True(HnswSnapshotFile.TryRead(filePath, "v", out HNSWIndex? reloadedIndex, out _));
+            var loaded = reloadedIndex!;
 
             Assert.Equal(index.Count, loaded.Count);
 

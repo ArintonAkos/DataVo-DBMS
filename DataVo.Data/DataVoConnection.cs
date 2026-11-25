@@ -17,7 +17,7 @@ namespace DataVo.Data;
 /// </summary>
 /// <example>
 /// <code>
-/// using var connection = new DataVoConnection("StorageMode=Disk;DataSource=./mydb");
+/// using var connection = new DataVoConnection("StorageMode=Lsm;DataSource=./mydb");
 /// connection.Open();
 /// using var cmd = connection.CreateCommand();
 /// cmd.CommandText = "SELECT 1;";
@@ -65,7 +65,7 @@ public class DataVoConnection : DbConnection
     /// </summary>
     /// <param name="connectionString">
     /// Semicolon-delimited key=value pairs. Supported keys:
-    /// <c>StorageMode</c>, <c>DataSource</c>, <c>WalEnabled</c>.
+    /// <c>StorageMode</c> and <c>DataSource</c>.
     /// </param>
     public DataVoConnection(string connectionString)
     {

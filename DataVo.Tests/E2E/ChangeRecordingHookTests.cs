@@ -84,37 +84,37 @@ public sealed class ChangeRecordingHookTests : IDisposable
     [InlineData("INSERT INTO T (Id, V) VALUES (2, 1)")]
     [InlineData("UPDATE T SET V = 9 WHERE Id = 1")]
     [InlineData("DELETE FROM T WHERE Id = 1")]
-    public void Disk_Autocommit_ReportsBeforeTheTableFileChanges(string sql)
+    public void Persisted_Autocommit_ReportsBeforeAnyFileChanges(string sql)
     {
-        using DataVoContext db = SeedDisk();
-        AssertHookRunsBeforeDiskChanges(db, () => Ok(db, sql));
+        using DataVoContext db = SeedPersisted();
+        AssertHookRunsBeforeFileChanges(db, () => Ok(db, sql));
     }
 
     [Theory]
     [InlineData("INSERT INTO T (Id, V) VALUES (2, 1)")]
     [InlineData("UPDATE T SET V = 9 WHERE Id = 1")]
     [InlineData("DELETE FROM T WHERE Id = 1")]
-    public void Disk_ExplicitTransaction_ReportsBeforeTheWalOrTableFileChanges(string sql)
+    public void Persisted_ExplicitTransaction_ReportsBeforeTheCommitLogOrTableFilesChange(string sql)
     {
-        using DataVoContext db = SeedDisk();
+        using DataVoContext db = SeedPersisted();
         Ok(db, "BEGIN");
         Ok(db, sql);
 
-        AssertHookRunsBeforeDiskChanges(db, () => Ok(db, "COMMIT"));
-        Assert.True(new FileInfo(WalPath).Length > 0, "The transaction never reached the WAL.");
+        AssertHookRunsBeforeFileChanges(db, () => Ok(db, "COMMIT"));
+        Assert.True(CommitLogBytes() > 0, "The transaction never reached the commit log.");
     }
 
     [Fact]
-    public void Disk_TypedInsert_ReportsBeforeTheTableFileChanges()
+    public void Persisted_TypedInsert_ReportsBeforeAnyFileChanges()
     {
-        using DataVoContext db = SeedDisk();
-        AssertHookRunsBeforeDiskChanges(db, () => db.BulkInsert("T", [new Dictionary<string, object?> { ["Id"] = 3, ["V"] = 1 }]));
+        using DataVoContext db = SeedPersisted();
+        AssertHookRunsBeforeFileChanges(db, () => db.BulkInsert("T", [new Dictionary<string, object?> { ["Id"] = 3, ["V"] = 1 }]));
     }
 
     [Fact]
     public void Announcement_CarriesTheImagesASubscriberNeeds()
     {
-        using DataVoContext db = SeedDisk();
+        using DataVoContext db = SeedPersisted();
         var changes = new List<RowChange>();
         db.Engine.Changes.Recording += (_, change) => changes.Add(change);
 
@@ -127,9 +127,7 @@ public sealed class ChangeRecordingHookTests : IDisposable
         Assert.Equal(9, change.After!["V"]);
     }
 
-    private string WalPath => Path.Combine(_directory, "datavo.wal");
-
-    private void AssertHookRunsBeforeDiskChanges(DataVoContext db, Action write)
+    private void AssertHookRunsBeforeFileChanges(DataVoContext db, Action write)
     {
         string before = DiskFingerprint();
         string? atFirstHook = null;
@@ -155,9 +153,9 @@ public sealed class ChangeRecordingHookTests : IDisposable
         return string.Join("\n", parts);
     }
 
-    private DataVoContext SeedDisk()
+    private DataVoContext SeedPersisted()
     {
-        return Seed(StorageMode.Disk);
+        return Seed(StorageMode.Lsm);
     }
 
     private long CommitLogBytes() =>
@@ -170,7 +168,6 @@ public sealed class ChangeRecordingHookTests : IDisposable
     {
         StorageMode = mode,
         DiskStoragePath = mode == StorageMode.InMemory ? null! : _directory,
-        WalFilePath = WalPath,
     });
 
     private DataVoContext Seed(StorageMode mode)

@@ -42,13 +42,6 @@ internal static class SqlIndexLookupKey
 
         DataVoEngine engine = DataVoEngine.Current();
 
-        // Disk mode keeps index files written by older versions, whose key format may differ; only
-        // modes that rebuild their indexes from rows on open are guaranteed to use the current format.
-        if (engine.Config.StorageMode is not (StorageMode.InMemory or StorageMode.Lsm))
-        {
-            return false;
-        }
-
         if (!IsSingleColumnBTree(engine, table, columnName, indexName))
         {
             return false;

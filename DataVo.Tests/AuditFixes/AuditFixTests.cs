@@ -9,7 +9,6 @@ using DataVo.Core.Services;
 using DataVo.Core.Indexing;
 using DataVo.Core.StorageEngine;
 using DataVo.Core.StorageEngine.Config;
-using DataVo.Core.StorageEngine.Disk;
 using DataVo.Core.Enums;
 using System.Collections.Concurrent;
 using System.Reflection;
@@ -19,8 +18,7 @@ namespace DataVo.Tests.AuditFixes;
 
 /// <summary>
 /// Tests covering the Phase 1 audit fixes: domain exceptions, CacheStorage thread safety,
-/// TransactionIdAllocator lock-free upgrade, VersionStorageManager IDisposable, and
-/// DiskStorageEngine RowDeletedException.
+/// TransactionIdAllocator lock-free upgrade, and VersionStorageManager IDisposable.
 /// </summary>
 public class AuditFixTests
 {
@@ -170,122 +168,6 @@ public class AuditFixTests
         // No assertion needed — test passes if Dispose() doesn't throw
     }
 
-    // ── DiskStorageEngine RowDeletedException ───────────────────────────
-
-    [Fact]
-    public void DiskStorageEngine_ReadDeletedRow_ThrowsRowDeletedException()
-    {
-        string storagePath = Path.Combine(Path.GetTempPath(), $"datavo_test_{Guid.NewGuid():N}");
-        try
-        {
-            var engine = new DiskStorageEngine(storagePath);
-            byte[] data = [1, 2, 3, 4];
-            long rowId = engine.InsertRow("testdb", "testtable", data);
-
-            engine.DeleteRow("testdb", "testtable", rowId);
-
-            var ex = Assert.Throws<RowDeletedException>(() =>
-                engine.ReadRow("testdb", "testtable", rowId));
-
-            Assert.Equal(rowId, ex.RowId);
-            Assert.Equal("testtable", ex.TableName);
-        }
-        finally
-        {
-            if (Directory.Exists(storagePath))
-                Directory.Delete(storagePath, recursive: true);
-        }
-    }
-
-    [Fact]
-    public void DiskStorageEngine_CompactTable_UsesCorrectFileHeader()
-    {
-        string storagePath = Path.Combine(Path.GetTempPath(), $"datavo_test_{Guid.NewGuid():N}");
-        try
-        {
-            var engine = new DiskStorageEngine(storagePath);
-            byte[] data1 = [1, 2, 3];
-            byte[] data2 = [4, 5, 6];
-            long id1 = engine.InsertRow("testdb", "testtable", data1);
-            engine.InsertRow("testdb", "testtable", data2);
-
-            // Delete first row to create a tombstone
-            engine.DeleteRow("testdb", "testtable", id1);
-
-            // Compact should produce valid file with only surviving rows
-            var compacted = engine.CompactTable("testdb", "testtable");
-            Assert.Single(compacted);
-            Assert.Equal(data2, compacted[0].RawRow);
-
-            // The compacted row should be readable
-            byte[] readBack = engine.ReadRow("testdb", "testtable", compacted[0].NewRowId);
-            Assert.Equal(data2, readBack);
-        }
-        finally
-        {
-            if (Directory.Exists(storagePath))
-                Directory.Delete(storagePath, recursive: true);
-        }
-    }
-
-    [Fact]
-    public void DiskStorageEngine_DropTable_RemovesFileLockEntry()
-    {
-        string storagePath = Path.Combine(Path.GetTempPath(), $"datavo_test_{Guid.NewGuid():N}");
-        const string db = "testdb";
-        const string table = "drop_table_lock_test";
-
-        try
-        {
-            var engine = new DiskStorageEngine(storagePath);
-            engine.InsertRow(db, table, [1, 2, 3]);
-
-            string filePath = Path.GetFullPath(Path.Combine(storagePath, db, $"{table}.dat"));
-            var locks = GetDiskFileLocks();
-            Assert.True(locks.ContainsKey(filePath));
-
-            engine.DropTable(db, table);
-            Assert.False(locks.ContainsKey(filePath));
-        }
-        finally
-        {
-            if (Directory.Exists(storagePath))
-                Directory.Delete(storagePath, recursive: true);
-        }
-    }
-
-    [Fact]
-    public void DiskStorageEngine_DropDatabase_RemovesAllFileLockEntriesForDatabase()
-    {
-        string storagePath = Path.Combine(Path.GetTempPath(), $"datavo_test_{Guid.NewGuid():N}");
-        const string db = "testdb";
-        const string table1 = "drop_db_lock_t1";
-        const string table2 = "drop_db_lock_t2";
-
-        try
-        {
-            var engine = new DiskStorageEngine(storagePath);
-            engine.InsertRow(db, table1, [1]);
-            engine.InsertRow(db, table2, [2]);
-
-            string file1 = Path.GetFullPath(Path.Combine(storagePath, db, $"{table1}.dat"));
-            string file2 = Path.GetFullPath(Path.Combine(storagePath, db, $"{table2}.dat"));
-            var locks = GetDiskFileLocks();
-            Assert.True(locks.ContainsKey(file1));
-            Assert.True(locks.ContainsKey(file2));
-
-            engine.DropDatabase(db);
-
-            Assert.False(locks.ContainsKey(file1));
-            Assert.False(locks.ContainsKey(file2));
-        }
-        finally
-        {
-            if (Directory.Exists(storagePath))
-                Directory.Delete(storagePath, recursive: true);
-        }
-    }
-
     [Fact]
     public void Parser_UnexpectedToken_ThrowsParserException()
     {
@@ -351,7 +233,7 @@ public class AuditFixTests
 
         try
         {
-            var manager = new IndexManager(new DataVoConfig { StorageMode = StorageMode.Disk, DiskStoragePath = root }, root);
+            var manager = new IndexManager();
             IndexException ex = Assert.Throws<IndexException>(() =>
                 manager.FilterUsingIndex("Alice", "idx_missing", "Users", "Db"));
 
@@ -427,9 +309,8 @@ public class AuditFixTests
 
         var diskConfig = new DataVoConfig
         {
-            StorageMode = StorageMode.Disk,
+            StorageMode = StorageMode.Lsm,
             DiskStoragePath = storagePath,
-            WalEnabled = false,
             TransactionIdStateFilePath = "tx-state.dat"
         };
 
@@ -497,43 +378,4 @@ public class AuditFixTests
         }
     }
 
-    [Fact]
-    public void StorageContext_CreateTable_DiskMode_CreatesPhysicalTableFile()
-    {
-        string storagePath = Path.Combine(Path.GetTempPath(), $"datavo_create_table_{Guid.NewGuid():N}");
-
-        try
-        {
-            var context = new StorageContext(new DataVoConfig
-            {
-                StorageMode = StorageMode.Disk,
-                DiskStoragePath = storagePath,
-                WalEnabled = false
-            });
-
-            context.CreateTable("Users", "CreateTableDb");
-
-            string tablePath = Path.Combine(storagePath, "CreateTableDb", "Users.dat");
-            Assert.True(File.Exists(tablePath));
-            Assert.True(new FileInfo(tablePath).Length >= 8);
-        }
-        finally
-        {
-            if (Directory.Exists(storagePath))
-            {
-                Directory.Delete(storagePath, recursive: true);
-            }
-        }
-    }
-
-    private static ConcurrentDictionary<string, object> GetDiskFileLocks()
-    {
-        FieldInfo? field = typeof(DiskStorageEngine).GetField("GlobalFileLocks", BindingFlags.Static | BindingFlags.NonPublic);
-        Assert.NotNull(field);
-
-        object? raw = field!.GetValue(null);
-        Assert.NotNull(raw);
-
-        return Assert.IsType<ConcurrentDictionary<string, object>>(raw);
-    }
 }

@@ -252,7 +252,7 @@ public class AlterTableTestsMemory : AlterTableTestsBase
     public AlterTableTestsMemory() : base(new DataVoConfig { StorageMode = StorageMode.InMemory }, "AlterTableDB_Mem") { }
 }
 
-public class AlterTableTestsDisk : AlterTableTestsBase
+public class AlterTableTestsLsm : AlterTableTestsBase
 {
-    public AlterTableTestsDisk() : base(new DataVoConfig { StorageMode = StorageMode.Disk, DiskStoragePath = "AlterTableDB_Disk" }, "AlterTableDB_Disk") { }
+    public AlterTableTestsLsm() : base(new DataVoConfig { StorageMode = StorageMode.Lsm, DiskStoragePath = "AlterTableDB_Lsm" }, "AlterTableDB_Lsm") { }
 }

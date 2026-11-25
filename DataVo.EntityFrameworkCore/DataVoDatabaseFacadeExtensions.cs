@@ -39,7 +39,7 @@ public static class DataVoDatabaseFacadeExtensions
     }
 
     /// <summary>
-    /// Deletes DataVo disk storage directory for the configured connection string.
+    /// Deletes the DataVo Lsm data directory for the configured connection string.
     /// </summary>
     public static bool EnsureDataVoDeleted(this DatabaseFacade database)
     {
@@ -51,7 +51,7 @@ public static class DataVoDatabaseFacadeExtensions
     }
 
     /// <summary>
-    /// Deletes DataVo disk storage directory for an explicit connection string.
+    /// Deletes the DataVo Lsm data directory for an explicit connection string.
     /// </summary>
     public static bool EnsureDataVoDeleted(this DatabaseFacade database, string connectionString)
     {
@@ -65,7 +65,7 @@ public static class DataVoDatabaseFacadeExtensions
     {
         var builder = new DataVoConnectionStringBuilder(connectionString);
 
-        if (builder.StorageMode != StorageMode.Disk)
+        if (builder.StorageMode != StorageMode.Lsm)
         {
             return true;
         }

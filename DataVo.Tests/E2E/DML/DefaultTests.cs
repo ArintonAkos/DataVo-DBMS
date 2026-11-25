@@ -123,8 +123,8 @@ public abstract class DefaultTestsBase(DataVoConfig config, string testDbName) :
 
 public class DefaultTestsMemory() : DefaultTestsBase(new DataVoConfig { StorageMode = StorageMode.InMemory }, "DefaultDb_Mem");
 
-public class DefaultTestsDisk() : DefaultTestsBase(new DataVoConfig
+public class DefaultTestsLsm() : DefaultTestsBase(new DataVoConfig
 {
-    StorageMode = StorageMode.Disk,
+    StorageMode = StorageMode.Lsm,
     DiskStoragePath = Path.Combine(Path.GetTempPath(), "DataVo_Tests_Default")
 }, "DefaultDb_Disk");

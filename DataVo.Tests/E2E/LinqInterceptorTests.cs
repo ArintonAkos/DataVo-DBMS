@@ -65,7 +65,7 @@ public sealed class LinqInterceptorTests : IDisposable
     private readonly List<Hero> _heroes = [];
     private readonly int _field = 7;
 
-    public static TheoryData<StorageMode> Modes => new() { StorageMode.InMemory, StorageMode.Disk, StorageMode.Lsm };
+    public static TheoryData<StorageMode> Modes => new() { StorageMode.InMemory, StorageMode.Lsm };
 
     public void Dispose()
     {

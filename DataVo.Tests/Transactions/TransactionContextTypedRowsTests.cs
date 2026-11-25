@@ -47,24 +47,4 @@ public class TransactionContextTypedRowsTests
         Assert.False(context.UpdatedRows.ContainsKey("Users"));
     }
 
-    [Fact]
-    public void WalEntry_FromTransactionContext_UsesVectorEnvelopeInOperationPayload()
-    {
-        var context = new TransactionContext { TransactionId = 42 };
-        context.BufferInsert("Users", new Dictionary<string, object?>
-        {
-            ["Id"] = 10,
-            ["Name"] = "Jane",
-            ["Emb"] = new float[] { 0.1f, 0.2f }
-        });
-
-        WalEntry entry = WalEntry.FromTransactionContext("AppDb", context);
-
-        Assert.Equal(42, entry.MvccTransactionId);
-        Assert.Single(entry.Operations);
-
-        Dictionary<string, object?> rowData = Assert.IsType<Dictionary<string, object?>>(entry.Operations[0].RowData);
-        var embEnvelope = Assert.IsType<Dictionary<string, object>>(rowData["Emb"]);
-        Assert.Equal("vector-f32b64-v1", embEnvelope["__dvType"]);
-    }
 }

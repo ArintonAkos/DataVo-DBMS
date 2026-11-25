@@ -38,11 +38,6 @@ public class IndexMetadata
     public string IndexType { get; set; } = "";
 
     /// <summary>
-    /// Gets or sets the persistence format: "json", "binary", etc.
-    /// </summary>
-    public string PersistenceFormat { get; set; } = "json";
-
-    /// <summary>
     /// Gets or sets type-specific parameters (e.g., vector dimension for HNSW, degree for BTree).
     /// </summary>
     public Dictionary<string, object> Parameters { get; set; } = [];

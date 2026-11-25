@@ -1,57 +1,27 @@
-using System.Buffers;
-using System.Buffers.Binary;
 using System.Collections.Concurrent;
-using System.Text;
-using System.Text.Json;
 using DataVo.Core.Compat;
-using DataVo.Core.Serialization;
-using DataVo.Core.StorageEngine.Disk;
 using DataVo.Core.Utils;
-using DataVo.Core.ValueConversion;
 
 namespace DataVo.Core.Transactions;
 
-/// <summary>
-/// Provides synchronized low-level access to the write-ahead log file.
-/// </summary>
-/// <remarks>
-/// This class centralizes file locking, JSON line serialization, append operations,
-/// and full-file rewrites so higher-level reader and writer components can stay focused
-/// on WAL semantics instead of file-system details.
-/// </remarks>
-/// <example>
-/// <code>
-/// var store = new WalFileStore("./data/datavo.wal");
-/// store.AppendEntry(new WalEntry { TransactionId = Guid.NewGuid() });
-/// List&lt;WalEntry&gt; entries = store.ReadEntries();
-/// </code>
-/// </example>
 /// <summary>
 /// A decoded binary WAL frame: its fixed-size header plus the application payload bytes that follow it.
 /// </summary>
 internal readonly record struct WalFrameRecord(WalFrameHeader Header, byte[] Payload);
 
+/// <summary>
+/// Synchronized access to one binary write-ahead log file of the LSM engine (a table WAL or the commit log):
+/// appending framed records, forcing them to disk, reading the valid frames back and truncating through a
+/// checkpoint LSN. Appends go through a pooled file handle; a per-path lock orders appends, reads and rewrites.
+/// </summary>
 internal sealed class WalFileStore
 {
-    internal sealed class WalRecordEnvelope
-    {
-        public int Version { get; set; }
-        public int PayloadLength { get; set; }
-        public uint PayloadCrc32 { get; set; }
-        public string Payload { get; set; } = string.Empty;
-    }
-
     private static readonly ConcurrentDictionary<string, object> FileLocks =
         new(StringComparer.OrdinalIgnoreCase);
 
     private static readonly FileHandlePool BinaryFrameHandlePool = new(capacity: 128);
 
     private int _durableFlushCount;
-
-    // Source-gen context built with the WAL object converter so the heterogeneous object? row values
-    // serialize without reflection (Native-AOT safe).
-    private static readonly DataVoJsonContext WalJson =
-        new(new JsonSerializerOptions { Converters = { new WalObjectConverter() } });
 
     /// <summary>
     /// Initializes a new file store for the specified WAL path.
@@ -68,53 +38,6 @@ internal sealed class WalFileStore
     public string FilePath { get; }
 
     internal int DurableFlushCount => Volatile.Read(ref _durableFlushCount);
-
-    /// <summary>
-    /// Reads and deserializes every WAL entry currently present in the file.
-    /// </summary>
-    /// <returns>The ordered list of entries stored in the log file.</returns>
-    public List<WalEntry> ReadEntries()
-    {
-        return ExecuteLocked(ReadEntriesCore);
-    }
-
-    /// <summary>
-    /// Appends a single WAL entry to the end of the file and forces it to disk.
-    /// </summary>
-    /// <param name="entry">The entry to persist.</param>
-    public void AppendEntry(WalEntry entry)
-    {
-        ExecuteLocked(() =>
-        {
-            EnsureDirectoryExists();
-
-            // Share like the pooled binary handle does, so concurrent readers never conflict on Windows.
-            using var stream = new FileStream(FilePath, FileMode.OpenOrCreate, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete);
-            stream.Seek(0, SeekOrigin.End);
-
-            using (var writer = new StreamWriter(stream, new UTF8Encoding(false), 1024, leaveOpen: true))
-            {
-                writer.WriteLine(SerializeWalEntry(entry));
-                writer.Flush();
-            }
-
-            stream.Flush(true);
-        });
-    }
-
-    /// <summary>
-    /// Appends an already-framed binary WAL record and forces it to disk.
-    /// </summary>
-    /// <param name="frame">The committed binary frame to persist.</param>
-    public void AppendFrame(WalFrame frame)
-    {
-        AppendSingleFrame(frame, flushToDisk: true);
-    }
-
-    internal void AppendFrame(WalFrame frame, bool flushToDisk)
-    {
-        AppendSingleFrame(frame, flushToDisk);
-    }
 
     internal void AppendFrameBytes(ReadOnlySpan<byte> bytes, bool flushToDisk)
     {
@@ -171,60 +94,6 @@ internal sealed class WalFileStore
         }
     }
 
-    /// <summary>
-    /// Appends committed binary WAL frames as one contiguous durable write.
-    /// </summary>
-    /// <param name="frames">The committed binary frames to persist in LSN order.</param>
-    public void AppendFrames(IReadOnlyList<WalFrame> frames)
-    {
-        AppendFrames(frames, flushToDisk: true);
-    }
-
-    internal void AppendFrames(IReadOnlyList<WalFrame> frames, bool flushToDisk)
-    {
-        ExecuteLocked(() =>
-        {
-            if (frames.Count == 0)
-            {
-                return;
-            }
-
-            EnsureDirectoryExists();
-
-            int totalLength = 0;
-            foreach (WalFrame frame in frames)
-            {
-                totalLength = checked(totalLength + frame.Range.Length);
-            }
-
-            byte[] rented = ArrayPool<byte>.Shared.Rent(totalLength);
-            try
-            {
-                int offset = 0;
-                foreach (WalFrame frame in frames)
-                {
-                    frame.Range.ReadOnlySpan.CopyTo(rented.AsSpan(offset, frame.Range.Length));
-                    offset += frame.Range.Length;
-                }
-
-                AppendFrameBytesCore(rented.AsSpan(0, totalLength), flushToDisk);
-            }
-            finally
-            {
-                ArrayPool<byte>.Shared.Return(rented);
-            }
-        });
-    }
-
-    private void AppendSingleFrame(WalFrame frame, bool flushToDisk)
-    {
-        ExecuteLocked(() =>
-        {
-            EnsureDirectoryExists();
-            AppendFrameBytesCore(frame.Range.ReadOnlySpan, flushToDisk);
-        });
-    }
-
     private void AppendFrameBytesCore(ReadOnlySpan<byte> bytes, bool flushToDisk)
     {
         using FileHandlePool.FileHandleLease lease = BinaryFrameHandlePool.Acquire(FilePath);
@@ -258,8 +127,8 @@ internal sealed class WalFileStore
             while (TryReadValidFrame(bytes, offset, out WalFrameHeader header))
             {
                 ReadOnlySpan<byte> payload = bytes.AsSpan(
-                    offset + WalAppender.FrameHeaderSize,
-                    header.FrameLength - WalAppender.FrameHeaderSize);
+                    offset + WalFrameFormat.FrameHeaderSize,
+                    header.FrameLength - WalFrameFormat.FrameHeaderSize);
                 records.Add(new WalFrameRecord(header, payload.ToArray()));
                 offset += header.FrameLength;
             }
@@ -325,33 +194,24 @@ internal sealed class WalFileStore
     private static bool TryReadValidFrame(byte[] bytes, int offset, out WalFrameHeader header)
     {
         header = default;
-        if (offset < 0 || offset + WalAppender.FrameHeaderSize > bytes.Length)
+        if (offset < 0 || offset + WalFrameFormat.FrameHeaderSize > bytes.Length)
         {
             return false;
         }
 
         ReadOnlySpan<byte> remaining = bytes.AsSpan(offset);
-        if (!WalAppender.TryReadFrameHeader(remaining, out header))
+        if (!WalFrameFormat.TryReadFrameHeader(remaining, out header))
         {
             return false;
         }
 
-        if (header.FrameLength < WalAppender.FrameHeaderSize || offset + header.FrameLength > bytes.Length)
+        if (header.FrameLength < WalFrameFormat.FrameHeaderSize || offset + header.FrameLength > bytes.Length)
         {
             return false;
         }
 
         ReadOnlySpan<byte> frame = bytes.AsSpan(offset, header.FrameLength);
-        return WalAppender.ValidateFrame(frame, header);
-    }
-
-    /// <summary>
-    /// Rewrites the entire WAL file with the supplied entries and forces the result to disk.
-    /// </summary>
-    /// <param name="entries">The entries that should remain in the file.</param>
-    public void RewriteEntries(IEnumerable<WalEntry> entries)
-    {
-        ExecuteLocked(() => RewriteEntriesCore(entries.ToList()));
+        return WalFrameFormat.ValidateFrame(frame, header);
     }
 
     /// <summary>
@@ -388,66 +248,6 @@ internal sealed class WalFileStore
         }
     }
 
-    private List<WalEntry> ReadEntriesCore()
-    {
-        if (!File.Exists(FilePath))
-        {
-            return [];
-        }
-
-        var entries = new List<WalEntry>();
-        int lineNumber = 0;
-        foreach (var line in ReadLinesShared(FilePath))
-        {
-            lineNumber++;
-            if (string.IsNullOrWhiteSpace(line))
-            {
-                continue;
-            }
-
-            WalEntry entry = DeserializeWalEntry(line, lineNumber);
-            if (entry != null)
-            {
-                entries.Add(entry);
-            }
-        }
-
-        return entries;
-    }
-
-    private void RewriteEntriesCore(List<WalEntry> entries)
-    {
-        if (entries.Count == 0)
-        {
-            DeleteIfExistsCore();
-            return;
-        }
-
-        EnsureDirectoryExists();
-
-        string tmpPath = FilePath + ".tmp";
-
-        // The temp file must be closed before it is moved into place: Windows refuses to replace with a
-        // file that still has an open handle.
-        using (var stream = new FileStream(tmpPath, FileMode.Create, FileAccess.Write, FileShare.None))
-        {
-            using (var writer = new StreamWriter(stream, new UTF8Encoding(false), 1024, leaveOpen: true))
-            {
-                foreach (var entry in entries)
-                {
-                    writer.WriteLine(SerializeWalEntry(entry));
-                }
-
-                writer.Flush();
-            }
-
-            stream.Flush(true);
-        }
-
-        BinaryFrameHandlePool.Remove(FilePath);
-        AtomicFileOperations.ReplaceFromTemp(tmpPath, FilePath);
-    }
-
     /// <summary>
     /// Reads the whole file while the pooled append handle may still be open. On Windows a plain
     /// File.ReadAllBytes (FileShare.Read) is refused while another handle holds write access.
@@ -470,17 +270,6 @@ internal sealed class WalFileStore
         }
 
         return bytes;
-    }
-
-    private static IEnumerable<string> ReadLinesShared(string path)
-    {
-        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
-        using var reader = new StreamReader(stream);
-        string? line;
-        while ((line = reader.ReadLine()) is not null)
-        {
-            yield return line;
-        }
     }
 
     /// <summary>
@@ -514,200 +303,5 @@ internal sealed class WalFileStore
     private object GetLock()
     {
         return FileLocks.GetOrAdd(FilePath, _ => new object());
-    }
-
-    private static string SerializeWalEntry(WalEntry entry)
-    {
-        // Prepare the entry by wrapping vector arrays in envelopes before JSON serialization.
-        WalEntry prepared = PrepareWalEntryForSerialization(entry);
-
-        string payload = JsonSerializer.Serialize(prepared, WalJson.WalEntry);
-        byte[] payloadBytes = Encoding.UTF8.GetBytes(payload);
-
-        var envelope = new WalRecordEnvelope
-        {
-            Version = 1,
-            PayloadLength = payloadBytes.Length,
-            PayloadCrc32 = ComputeCrc32(payloadBytes),
-            Payload = payload,
-        };
-
-        return JsonSerializer.Serialize(envelope, WalJson.WalRecordEnvelope);
-    }
-
-    internal static byte[] SerializeWalEntryPayload(WalEntry entry)
-    {
-        WalEntry prepared = PrepareWalEntryForSerialization(entry);
-        return JsonSerializer.SerializeToUtf8Bytes(prepared, WalJson.WalEntry);
-    }
-
-    /// <summary>
-    /// Decodes a binary WAL frame payload produced by <see cref="SerializeWalEntryPayload"/> back into a
-    /// <see cref="WalEntry"/>. Vector envelopes are decoded lazily by <see cref="WalEntry.ToTransactionContext"/>.
-    /// </summary>
-    internal static WalEntry? DeserializeWalEntryPayload(byte[] payload)
-    {
-        return JsonSerializer.Deserialize(payload, WalJson.WalEntry);
-    }
-
-    private static WalEntry PrepareWalEntryForSerialization(WalEntry entry)
-    {
-        var prepared = new WalEntry
-        {
-            TransactionId = entry.TransactionId,
-            MvccTransactionId = entry.MvccTransactionId,
-            Timestamp = entry.Timestamp,
-            DatabaseName = entry.DatabaseName,
-            IsCheckpointed = entry.IsCheckpointed,
-            Operations = entry.Operations.Select(op => new WalOperation
-            {
-                OperationType = op.OperationType,
-                TableName = op.TableName,
-                RowId = op.RowId,
-                RowData = op.RowData != null ? PrepareRowDataForSerialization(op.RowData) : null,
-                UpdatedColumns = op.UpdatedColumns != null ? PrepareRowDataForSerialization(op.UpdatedColumns) : null,
-            }).ToList(),
-        };
-
-        return prepared;
-    }
-
-    private static Dictionary<string, object?> PrepareRowDataForSerialization(Dictionary<string, object?> row)
-    {
-        var prepared = new Dictionary<string, object?>(StringComparer.Ordinal);
-        foreach (var (key, value) in row)
-        {
-            prepared[key] = PrepareValueForWalSerialization(value);
-        }
-
-        return prepared;
-    }
-
-    private static object? PrepareValueForWalSerialization(object? value)
-    {
-        if (value is DataVoBoundValue boundValue)
-        {
-            value = boundValue.ToMaterializedValue();
-        }
-
-        if (TryCoerceRuntimeVector(value, out float[] vector))
-        {
-            return CreateVectorEnvelope(vector);
-        }
-
-        return value;
-    }
-
-    private static bool TryCoerceRuntimeVector(object? value, out float[] vector)
-    {
-        vector = [];
-
-        switch (value)
-        {
-            case null:
-                return false;
-            case float[] floatArray:
-                vector = [.. floatArray];
-                return vector.Length > 0;
-            case double[] doubleArray:
-                vector = doubleArray.Select(item => (float)item).ToArray();
-                return vector.Length > 0;
-            case IEnumerable<float> floatEnumerable:
-                vector = floatEnumerable.ToArray();
-                return vector.Length > 0;
-            case IEnumerable<double> doubleEnumerable:
-                vector = doubleEnumerable.Select(item => (float)item).ToArray();
-                return vector.Length > 0;
-            default:
-                return false;
-        }
-    }
-
-    private static Dictionary<string, object> CreateVectorEnvelope(float[] vector)
-    {
-        byte[] payload = new byte[vector.Length * sizeof(int)];
-        for (int i = 0; i < vector.Length; i++)
-        {
-            int bits = BitConverter.SingleToInt32Bits(vector[i]);
-            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(i * sizeof(int), sizeof(int)), bits);
-        }
-
-        return new Dictionary<string, object>(StringComparer.Ordinal)
-        {
-            ["__dvType"] = "vector-f32b64-v1",
-            ["dims"] = vector.Length,
-            ["data"] = Convert.ToBase64String(payload)
-        };
-    }
-
-    private static WalEntry DeserializeWalEntry(string line, int lineNumber)
-    {
-        WalRecordEnvelope? envelope = null;
-        try
-        {
-            envelope = JsonSerializer.Deserialize(line, WalJson.WalRecordEnvelope);
-        }
-        catch
-        {
-            // Legacy format fallback handled below.
-        }
-
-        if (envelope != null && !string.IsNullOrWhiteSpace(envelope.Payload) && envelope.Version > 0)
-        {
-            byte[] payloadBytes = Encoding.UTF8.GetBytes(envelope.Payload);
-            if (payloadBytes.Length != envelope.PayloadLength)
-            {
-                throw new InvalidDataException($"WAL corruption at line {lineNumber}: payload length mismatch.");
-            }
-
-            uint actualChecksum = ComputeCrc32(payloadBytes);
-            if (actualChecksum != envelope.PayloadCrc32)
-            {
-                throw new InvalidDataException($"WAL corruption at line {lineNumber}: checksum mismatch.");
-            }
-
-            WalEntry? entry = JsonSerializer.Deserialize(envelope.Payload, WalJson.WalEntry);
-            if (entry == null)
-            {
-                throw new InvalidDataException($"WAL corruption at line {lineNumber}: invalid payload JSON.");
-            }
-
-            return entry;
-        }
-
-        WalEntry? legacyEntry = null;
-        try
-        {
-            legacyEntry = JsonSerializer.Deserialize(line, WalJson.WalEntry);
-        }
-        catch
-        {
-            // Handled below.
-        }
-
-        if (legacyEntry != null)
-        {
-            return legacyEntry;
-        }
-
-        throw new InvalidDataException($"WAL corruption at line {lineNumber}: unrecognized record format.");
-    }
-
-    private static uint ComputeCrc32(ReadOnlySpan<byte> data)
-    {
-        const uint polynomial = 0xEDB88320u;
-        uint crc = 0xFFFFFFFFu;
-
-        for (int i = 0; i < data.Length; i++)
-        {
-            crc ^= data[i];
-            for (int bit = 0; bit < 8; bit++)
-            {
-                uint mask = (uint)-(int)(crc & 1);
-                crc = (crc >> 1) ^ (polynomial & mask);
-            }
-        }
-
-        return ~crc;
     }
 }

@@ -64,11 +64,6 @@ public partial class StorageContext(DataVoConfig config) : IDisposable
         _instance = new StorageContext(config);
 
         DataVoEngine.ResetCurrent(_instance);
-
-        if (config.StorageMode == StorageMode.Disk && config.WalEnabled)
-        {
-            new RecoveryManager(config).Recover();
-        }
     }
 
     internal void AttachRuntimeCatalog(EngineCatalog catalog, Guid engineId)
@@ -124,7 +119,6 @@ public partial class StorageContext(DataVoConfig config) : IDisposable
         return config.StorageMode switch
         {
             StorageMode.InMemory => new InMemoryStorageBackend(),
-            StorageMode.Disk => new DiskStorageBackend(config.ResolveDataDirectory()!, config.SyncDiskWrites, config.IoSchedulerMode),
             StorageMode.Lsm => new LsmStorageBackend(
                 config.ResolveDataDirectory()!,
                 config.LsmStrictFsync ? LsmWalDurabilityMode.StrictFsync : LsmWalDurabilityMode.RelaxedOsBuffer,
@@ -188,18 +182,6 @@ public partial class StorageContext(DataVoConfig config) : IDisposable
     }
 
     /// <summary>
-    /// Forces all buffered disk writes to the physical device, when the active backend is disk-backed.
-    /// Used by the WAL checkpointer to make data-file writes durable before advancing the checkpoint LSN.
-    /// </summary>
-    internal void FlushBackendToDisk()
-    {
-        if (_storageEngine is DiskStorageBackend diskBackend)
-        {
-            diskBackend.FlushToDisk();
-        }
-    }
-
-    /// <summary>
     /// Releases resources owned by the resolved storage backend.
     /// </summary>
     public void Dispose()
@@ -207,19 +189,6 @@ public partial class StorageContext(DataVoConfig config) : IDisposable
         if (_storageEngine is IDisposable disposable)
         {
             disposable.Dispose();
-        }
-    }
-
-    /// <summary>
-    /// Creates a logical table container in the active storage engine.
-    /// </summary>
-    /// <param name="tableName">The table to create.</param>
-    /// <param name="databaseName">The owning database.</param>
-    public void CreateTable(string tableName, string databaseName)
-    {
-        if (_storageEngine is DiskStorageBackend diskBackend)
-        {
-            diskBackend.CreateTable(databaseName, tableName);
         }
     }
 
