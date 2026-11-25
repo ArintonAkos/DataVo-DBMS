@@ -11,7 +11,7 @@ const isProdBuild =
 const SITE_URL = "https://arintonakos.github.io/DataVo-DBMS";
 const SITE_TITLE = "DataVo-DBMS";
 const SITE_DESCRIPTION =
-  "C#-native embedded database documentation for DataVo v0.4 (0.4.0-rc.1).";
+  "C#-native embedded database documentation for DataVo v0.5 (0.5.0).";
 
 const configDir = path.dirname(fileURLToPath(import.meta.url));
 const ogPublicDir = path.resolve(configDir, "../public/og");

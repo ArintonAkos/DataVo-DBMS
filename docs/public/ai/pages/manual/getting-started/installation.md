@@ -3,13 +3,14 @@
 > Source route: /manual/getting-started/installation
 > Source file: manual/getting-started/installation.md
 
-DataVo ships as four NuGet packages on `nuget.org`, with `DataVo.Core` as the foundation. The current release is **0.4.0-rc.1 (release candidate)**, so pass `--prerelease` when installing.
+DataVo ships as five NuGet packages on `nuget.org`, with `DataVo.Core` as the foundation. The current release is **0.5.0**.
 
 ```bash
-dotnet add package DataVo.Core --prerelease
-dotnet add package DataVo.Generators --prerelease
-dotnet add package DataVo.Data --prerelease
-dotnet add package DataVo.EntityFrameworkCore --prerelease
+dotnet add package DataVo.Core
+dotnet add package DataVo.Generators
+dotnet add package DataVo.Data
+dotnet add package DataVo.EntityFrameworkCore
+dotnet add package DataVo.VectorData
 ```
 
 ## Package Reference
@@ -33,7 +34,7 @@ dotnet add package DataVo.EntityFrameworkCore --prerelease
 
 ## Requirements
 
-- **`.NET 10` (`net10.0`):** Published packages target `net10.0`. Multi-target packages (`net8.0`, `net9.0`, `net10.0`, `netstandard2.1`) are planned for v0.5; see [Status & Roadmap](/manual/getting-started/roadmap#unity-evaluation-status) for Unity evaluation details.
+- **Target frameworks:** Packages ship `net8.0`, `net9.0`, `net10.0` and `netstandard2.1` assets; see [Status & Roadmap](/manual/getting-started/roadmap#unity-evaluation-status) for Unity evaluation details.
 - **Native AOT:** `DataVo.Core`, `DataVo.Data`, and `DataVo.Generators` build with trim and AOT analyzers (`IL2026`, `IL3050`) as errors. `DataVo.EntityFrameworkCore` is excluded from Native AOT.
 - **C# Interceptors:** `DataVo.Generators` ships MSBuild `.props` that automatically register `DataVo.Generated` in `InterceptorsNamespaces`.
 - **Building from source:** Run `dotnet pack DataVo.sln -c Release` to produce local `.nupkg` files in `artifacts/packages`.

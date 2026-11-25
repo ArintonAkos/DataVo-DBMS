@@ -4,7 +4,7 @@ layout: home
 hero:
   name: "DataVo"
   text: "C#-native embedded database"
-  tagline: "In-process SQL, LSM storage, vector search, and live Z-set reactive views for .NET 10. Documentation for v0.4 (0.4.0-rc.1)."
+  tagline: "In-process SQL, LSM storage, vector search, and live Z-set reactive views for .NET 8, 9 and 10. Documentation for v0.5 (0.5.0)."
   actions:
     - theme: brand
       text: Quickstart
@@ -39,7 +39,7 @@ DataVo is a managed C# embedded database engine that runs directly inside your `
 - [Quickstart](/manual/getting-started/quickstart): Create a database, insert rows, and query in 60 seconds.
 - [Choosing an Interface](/manual/getting-started/choosing-an-interface): Compare `DataVoContext`, Compiled LINQ, ADO.NET, Dapper, and EF Core.
 - [DataVo vs SQLite](/manual/performance/datavo-vs-sqlite): Oracle-verified benchmarks across 28 SQL shapes and filtered vector search.
-- [Status & Roadmap](/manual/getting-started/roadmap): Release candidate scope, durability guarantees, and the v0.5 plan.
+- [Status & Roadmap](/manual/getting-started/roadmap): Release scope, durability guarantees, and the milestone history.
 
 ## DataVo-Sync (Commercial Add-On)
 

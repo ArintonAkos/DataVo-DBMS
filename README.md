@@ -10,7 +10,7 @@
 ## Try it in 30 seconds
 
 ```bash
-dotnet add package DataVo.Core --prerelease
+dotnet add package DataVo.Core
 ```
 
 ```csharp
@@ -78,14 +78,14 @@ Full tables, methodology, cross-platform CI runs, and raw outputs:
 
 ## Install
 
-Latest prereleases on [nuget.org](https://www.nuget.org/packages/DataVo.Core/) (**0.4.0-rc.1**, 17 November 2026 — shipping both the **v0.3** and **v0.4** milestones; see the [roadmap](https://arintonakos.github.io/DataVo-DBMS/manual/getting-started/roadmap)):
+Current release on [nuget.org](https://www.nuget.org/packages/DataVo.Core/): **0.5.0** (25 November 2026; see the [roadmap](https://arintonakos.github.io/DataVo-DBMS/manual/getting-started/roadmap)):
 
 ```bash
-dotnet add package DataVo.Core --prerelease
-dotnet add package DataVo.Data --prerelease                  # ADO.NET provider, also used by Dapper
-dotnet add package DataVo.Generators --prerelease            # compiled LINQ, no EF Core dependency
-dotnet add package DataVo.EntityFrameworkCore --prerelease   # EF Core bridge (not a full provider)
-dotnet add package DataVo.VectorData --prerelease            # Microsoft.Extensions.VectorData vector store
+dotnet add package DataVo.Core
+dotnet add package DataVo.Data                  # ADO.NET provider, also used by Dapper
+dotnet add package DataVo.Generators            # compiled LINQ, no EF Core dependency
+dotnet add package DataVo.EntityFrameworkCore   # EF Core bridge (not a full provider)
+dotnet add package DataVo.VectorData            # Microsoft.Extensions.VectorData vector store
 ```
 
 To build packages locally from this repository:
@@ -199,7 +199,7 @@ The full manual is live at [arintonakos.github.io/DataVo-DBMS](https://arintonak
 
 ## Status
 
-DataVo is prerelease software (`0.4.0-rc.1`). The documented SQL dialect and C# APIs are the release-candidate surface being verified; the on-disk format does not yet carry a long-term cross-version compatibility guarantee, so keep an export or seed script for important data. Validate your own workload before relying on it in production.
+DataVo `0.5.0` is a pre-1.0 release. The documented SQL dialect and C# APIs may still change between minor versions, and the on-disk format does not yet carry a long-term cross-version compatibility guarantee, so keep an export or seed script for important data. Validate your own workload before relying on it in production.
 
 ## License
 
