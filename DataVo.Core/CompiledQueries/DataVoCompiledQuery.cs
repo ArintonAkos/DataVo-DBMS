@@ -406,6 +406,7 @@ public static class DataVoCompiledQuery
         using CommitClock.UnitScope writeUnit = CommitClock.OpenUnit();
         long statementTxId = MvccCoordinator.ResolveStatementTransactionId(context.Engine, null);
         List<RowKey> rowWriteLocks = context.Engine.LockManager.AcquireRowWriteLocks(databaseName, plan.TableName, candidateRowIds);
+        var keyLocks = DataVo.Core.Transactions.KeyLockSet.ForUpdate(context.Engine.LockManager, databaseName, plan.TableName);
 
         try
         {
@@ -436,7 +437,7 @@ public static class DataVoCompiledQuery
                 .Select(rowId => ApplyAssignments(context, existingRows[rowId], plan, parameterDictionary, columnsByName))
                 .ToList();
 
-            ValidateUpdatedRows(context, plan.TableName, databaseName, orderedRowIds, existingRows, newRows);
+            ValidateUpdatedRows(context, plan.TableName, databaseName, orderedRowIds, existingRows, newRows, keyLocks);
 
             List<Dictionary<string, object?>> oldRows = orderedRowIds
                 .Select(rowId => existingRows[rowId])
@@ -480,7 +481,14 @@ public static class DataVoCompiledQuery
         }
         finally
         {
-            context.Engine.LockManager.ReleaseRowWriteLocks(databaseName, plan.TableName, rowWriteLocks);
+            try
+            {
+                keyLocks.Release();
+            }
+            finally
+            {
+                context.Engine.LockManager.ReleaseRowWriteLocks(databaseName, plan.TableName, rowWriteLocks);
+            }
         }
     }
 
@@ -1861,7 +1869,8 @@ public static class DataVoCompiledQuery
         string databaseName,
         IReadOnlyList<RowKey> rowIds,
         IReadOnlyDictionary<RowKey, Dictionary<string, object?>> existingRows,
-        IReadOnlyList<Dictionary<string, object?>> newRows)
+        IReadOnlyList<Dictionary<string, object?>> newRows,
+        DataVo.Core.Transactions.KeyLockSet? keyLocks = null)
     {
         List<string> primaryKeys = context.Engine.Catalog.GetTablePrimaryKeys(tableName, databaseName);
         List<string> uniqueKeys = context.Engine.Catalog.GetTableUniqueKeys(tableName, databaseName);
@@ -1869,7 +1878,7 @@ public static class DataVoCompiledQuery
         List<(string ChildTable, string ChildColumn, string ParentColumn, string OnDeleteAction)> childForeignKeys =
             context.Engine.Catalog.GetChildForeignKeys(tableName, databaseName);
 
-        var keyValidator = new DataVo.Core.Parser.DML.UpdateKeyValidator(context.Engine.IndexManager, context.Engine.StorageContext, tableName, databaseName);
+        var keyValidator = new DataVo.Core.Parser.DML.UpdateKeyValidator(context.Engine.IndexManager, context.Engine.StorageContext, tableName, databaseName, keyLocks: keyLocks);
 
         for (int i = 0; i < rowIds.Count; i++)
         {

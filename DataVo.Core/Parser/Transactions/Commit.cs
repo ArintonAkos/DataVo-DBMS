@@ -59,12 +59,13 @@ internal class Commit : BaseDbAction
         long commitStamp = Engine.CommitClock.AcquireStamp(context.TransactionId);
 
         var lockedResources = AcquireWriteLocks(databaseName, context);
+        var keyLocks = new List<KeyLockSet>();
 
         try
         {
             // Every check that can reject the commit runs before anything is applied, so a failed COMMIT never
             // reaches storage, the indexes or the version metadata.
-            ValidateBeforeApply(context, databaseName);
+            ValidateBeforeApply(context, databaseName, keyLocks);
 
             AnnounceBufferedChanges(context, databaseName);
 
@@ -72,7 +73,17 @@ internal class Commit : BaseDbAction
         }
         finally
         {
-            ReleaseWriteLocks(databaseName, lockedResources);
+            try
+            {
+                for (int i = keyLocks.Count - 1; i >= 0; i--)
+                {
+                    keyLocks[i].Release();
+                }
+            }
+            finally
+            {
+                ReleaseWriteLocks(databaseName, lockedResources);
+            }
         }
     }
 
@@ -81,7 +92,7 @@ internal class Commit : BaseDbAction
     /// changed since this one began (first committer wins), a buffered insert whose key another session committed
     /// meanwhile, or a buffered update whose new key value another session committed meanwhile.
     /// </summary>
-    private void ValidateBeforeApply(TransactionContext context, string databaseName)
+    private void ValidateBeforeApply(TransactionContext context, string databaseName, List<KeyLockSet> keyLocks)
     {
         foreach (var (tableName, rowIds) in context.DeletedRowIds)
         {
@@ -99,7 +110,7 @@ internal class Commit : BaseDbAction
                 MvccCoordinator.ValidateCanModifyRow(Engine, databaseName, tableName, rowId, context.Snapshot, "UPDATE");
             }
 
-            ValidateUpdatedKeys(context, databaseName, tableName, updates);
+            ValidateUpdatedKeys(context, databaseName, tableName, updates, keyLocks);
         }
 
         foreach (var (tableName, rows) in context.InsertedRows)
@@ -118,7 +129,8 @@ internal class Commit : BaseDbAction
         TransactionContext context,
         string databaseName,
         string tableName,
-        List<(RowKey RowId, Dictionary<string, object?> UpdatedColumns)> updates)
+        List<(RowKey RowId, Dictionary<string, object?> UpdatedColumns)> updates,
+        List<KeyLockSet> keyLocks)
     {
         if (!context.HasKeyModifyingUpdates(tableName))
         {
@@ -157,7 +169,11 @@ internal class Commit : BaseDbAction
             }
         }
 
-        var validator = new DML.UpdateKeyValidator(Indexes, Context, tableName, databaseName, released);
+        // The new key values are reserved until the commit is published: a concurrent auto-commit INSERT or UPDATE
+        // of the same value no longer excludes this commit through the table's write lock.
+        var tableKeyLocks = KeyLockSet.ForUpdate(Locks, databaseName, tableName);
+        keyLocks.Add(tableKeyLocks);
+        var validator = new DML.UpdateKeyValidator(Indexes, Context, tableName, databaseName, released, tableKeyLocks);
         int rowNumber = 1;
         foreach (var (rowId, newRow) in updates)
         {
