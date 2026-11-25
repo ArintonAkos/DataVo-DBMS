@@ -26,6 +26,11 @@ public sealed class DynamicObjectComparer : IComparer<object?>
         if (x is null) return -1;
         if (y is null) return 1;
 
+        if (x is string textX && y is string textY)
+        {
+            return string.CompareOrdinal(textX, textY); // string.CompareTo would use the current culture
+        }
+
         if (x is IComparable comparableX)
         {
             try

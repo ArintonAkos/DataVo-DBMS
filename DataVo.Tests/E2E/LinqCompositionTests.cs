@@ -86,9 +86,10 @@ public sealed class LinqCompositionTests : IDisposable
         Same(heroes.OrderBy(static h => h.IsActive), _heroes.OrderBy(static h => h.IsActive));
         Same(heroes.OrderBy(static h => h.Tag), _heroes.OrderBy(static h => h.Tag));
         Same(heroes.OrderByDescending(static h => h.Joined), _heroes.OrderByDescending(static h => h.Joined));
-        Same(heroes.OrderBy(static h => h.Name), _heroes.OrderBy(static h => h.Name));
-        Same(heroes.OrderBy(static h => h.Guild), _heroes.OrderBy(static h => h.Guild));
-        Same(heroes.OrderByDescending(static h => h.Guild), _heroes.OrderByDescending(static h => h.Guild));
+        // Text orders ordinally in the engine, as SQL ORDER BY does on every path (not by the current culture).
+        Same(heroes.OrderBy(static h => h.Name), _heroes.OrderBy(static h => h.Name, StringComparer.Ordinal));
+        Same(heroes.OrderBy(static h => h.Guild), _heroes.OrderBy(static h => h.Guild, StringComparer.Ordinal));
+        Same(heroes.OrderByDescending(static h => h.Guild), _heroes.OrderByDescending(static h => h.Guild, StringComparer.Ordinal));
     }
 
     [Theory]
@@ -100,10 +101,10 @@ public sealed class LinqCompositionTests : IDisposable
 
         Same(
             heroes.OrderBy(static h => h.IsActive).ThenByDescending(static h => h.Speed).ThenBy(static h => h.Name),
-            _heroes.OrderBy(static h => h.IsActive).ThenByDescending(static h => h.Speed).ThenBy(static h => h.Name));
+            _heroes.OrderBy(static h => h.IsActive).ThenByDescending(static h => h.Speed).ThenBy(static h => h.Name, StringComparer.Ordinal));
         Same(
             heroes.OrderByDescending(static h => h.Guild).ThenBy(static h => h.Score).ThenByDescending(static h => h.Id),
-            _heroes.OrderByDescending(static h => h.Guild).ThenBy(static h => h.Score).ThenByDescending(static h => h.Id));
+            _heroes.OrderByDescending(static h => h.Guild, StringComparer.Ordinal).ThenBy(static h => h.Score).ThenByDescending(static h => h.Id));
         Same(
             heroes.Where(static h => h.IsActive).OrderBy(static h => h.Speed).ThenBy(static h => h.Gold),
             _heroes.Where(static h => h.IsActive).OrderBy(static h => h.Speed).ThenBy(static h => h.Gold));

@@ -153,6 +153,12 @@ internal static class ExpressionValueComparer
             return leftNumber.CompareTo(rightNumber);
         }
 
+        // Text compares ordinally, as the typed paths and indexes do: string.CompareTo would use the current culture.
+        if (leftValue is string leftText && rightValue is string rightText)
+        {
+            return string.CompareOrdinal(leftText, rightText);
+        }
+
         if (leftValue is IComparable comparable && leftValue.GetType() == rightValue.GetType())
         {
             return comparable.CompareTo(rightValue);
