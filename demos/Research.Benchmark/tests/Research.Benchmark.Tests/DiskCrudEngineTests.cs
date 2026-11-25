@@ -49,6 +49,7 @@ public sealed class DiskCrudEngineTests
         }
         finally
         {
+            engine.Dispose(); // close the database (and its datavo.lock) before deleting its directory: Windows refuses otherwise
             if (Directory.Exists(root))
             {
                 Directory.Delete(root, recursive: true);
@@ -77,6 +78,7 @@ public sealed class DiskCrudEngineTests
         }
         finally
         {
+            engine.Dispose(); // close the database (and its datavo.lock) before deleting its directory: Windows refuses otherwise
             if (Directory.Exists(root))
             {
                 Directory.Delete(root, recursive: true);
@@ -122,6 +124,7 @@ public sealed class DiskCrudEngineTests
         }
         finally
         {
+            engine.Dispose(); // close the database (and its datavo.lock) before deleting its directory: Windows refuses otherwise
             if (Directory.Exists(root))
             {
                 Directory.Delete(root, recursive: true);
@@ -168,6 +171,7 @@ public sealed class DiskCrudEngineTests
         }
         finally
         {
+            engine.Dispose(); // close the database (and its datavo.lock) before deleting its directory: Windows refuses otherwise
             if (Directory.Exists(root))
             {
                 Directory.Delete(root, recursive: true);
