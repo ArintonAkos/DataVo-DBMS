@@ -79,10 +79,17 @@ public sealed class LsmTable : IDisposable
     internal Action? AfterFlush { get; set; }
 
     /// <summary>
-    /// SSTable format written on flush and compaction. <see cref="LsmSstableFormat.RowKeyed"/> requires
-    /// every user key to be an 8-byte row key or the table metadata key.
+    /// SSTable format written on flush and compaction: <see cref="LsmSstableFormat.Keyed"/> (the default, any
+    /// byte keys) or <see cref="LsmSstableFormat.RowKeyed"/>, which requires every user key to be a 16-byte row
+    /// key or the table metadata key.
     /// </summary>
-    internal LsmSstableFormat Format { get; set; }
+    internal LsmSstableFormat Format { get; set; } = LsmSstableFormat.Keyed;
+
+    /// <summary>
+    /// Bloom setting of keyed files: 0 (the default) filters on the whole user key, <see cref="LsmIndexKeyCodec.BloomSuffix"/>
+    /// on an index entry's length-prefixed key (see <see cref="SsTableKeyedFormat.BloomKeyLength"/>).
+    /// </summary>
+    internal int BloomSuffixLength { get; set; }
 
     /// <summary>How compaction reads v2 inputs.</summary>
     internal LsmReadMode ReadMode { get; set; }
@@ -515,58 +522,7 @@ public sealed class LsmTable : IDisposable
             return FlushMemTableToV2Sstable(memTable);
         }
 
-        if (Format == LsmSstableFormat.Keyed)
-        {
-            return FlushMemTableToKeyedSstable(memTable);
-        }
-
-        lock (_ioGate)
-        {
-            (byte[] smallest, byte[] largest) = ComputeBounds(memTable);
-            byte[] imageBuffer = SsTableWriter.WriteRented(memTable, out int imageLength);
-            try
-            {
-                long fileNumber = _manifest.AllocateFileNumber();
-                string fileName = $"{fileNumber:D6}.sst";
-                string filePath = Path.Combine(_tableDirectory, fileName);
-                WriteSstableAtomically(filePath, imageBuffer, imageLength, _crashHook);
-
-                var metadata = new LsmTableFileMetadata(
-                    fileNumber,
-                    level: 0,
-                    smallest,
-                    largest,
-                    imageLength,
-                    fileName);
-
-                var edit = new LsmVersionEdit();
-                edit.AddFile(metadata);
-                try
-                {
-                    _manifest.CrashHook = _crashHook;
-                    _applyEdit(edit);
-                }
-                catch (LsmCrashSimulationException)
-                {
-                    throw;
-                }
-                catch
-                {
-                    DeleteFileIfExists(filePath);
-                    throw;
-                }
-                finally
-                {
-                    _manifest.CrashHook = null;
-                }
-
-                return new LsmFlushResult(metadata, imageLength, filePath);
-            }
-            finally
-            {
-                ArrayPool<byte>.Shared.Return(imageBuffer);
-            }
-        }
+        return FlushMemTableToKeyedSstable(memTable);
     }
 
     /// <summary>
@@ -721,7 +677,7 @@ public sealed class LsmTable : IDisposable
                 overwrite: false,
                 stream =>
                 {
-                    using var writer = new SsTableKeyedWriter(stream, LsmIndexKeyCodec.BloomSuffix);
+                    using var writer = new SsTableKeyedWriter(stream, BloomSuffixLength);
                     foreach (MemTableEntry entry in memTable)
                     {
                         writer.Add(
@@ -789,7 +745,7 @@ public sealed class LsmTable : IDisposable
         lock (_ioGate)
         {
             int maxLevel = ValidatedMaxCompactionLevel();
-            var compactor = new LsmCompactor(_tableDirectory, _manifest, registry) { Format = Format, ReadMode = ReadMode, BlockCache = BlockCache, Columnar = ColumnarSpec };
+            var compactor = new LsmCompactor(_tableDirectory, _manifest, registry) { Format = Format, BloomSuffixLength = BloomSuffixLength, ReadMode = ReadMode, BlockCache = BlockCache, Columnar = ColumnarSpec };
             compactor.CompactLevel(sourceLevel, sourceLevel + 1, dropTombstonesAtBottomLevel: sourceLevel + 1 == maxLevel);
         }
     }
@@ -997,7 +953,7 @@ public sealed class LsmTable : IDisposable
     private void CompactEligibleLevels(LsmFileRegistry registry)
     {
         int maxLevel = ValidatedMaxCompactionLevel();
-        var compactor = new LsmCompactor(_tableDirectory, _manifest, registry) { Format = Format, ReadMode = ReadMode, BlockCache = BlockCache, Columnar = ColumnarSpec };
+        var compactor = new LsmCompactor(_tableDirectory, _manifest, registry) { Format = Format, BloomSuffixLength = BloomSuffixLength, ReadMode = ReadMode, BlockCache = BlockCache, Columnar = ColumnarSpec };
 
         bool madeProgress;
         do
@@ -1030,7 +986,7 @@ public sealed class LsmTable : IDisposable
     private void CompactAllLevels(LsmFileRegistry registry)
     {
         int maxLevel = ValidatedMaxCompactionLevel();
-        var compactor = new LsmCompactor(_tableDirectory, _manifest, registry) { Format = Format, ReadMode = ReadMode, BlockCache = BlockCache, Columnar = ColumnarSpec };
+        var compactor = new LsmCompactor(_tableDirectory, _manifest, registry) { Format = Format, BloomSuffixLength = BloomSuffixLength, ReadMode = ReadMode, BlockCache = BlockCache, Columnar = ColumnarSpec };
 
         for (int sourceLevel = 0; sourceLevel < maxLevel; sourceLevel++)
         {
@@ -1100,7 +1056,7 @@ public sealed class LsmTable : IDisposable
         string stem = Path.GetFileNameWithoutExtension(_walBasePath);
         var segments = new List<(long Seq, string Path)>();
 
-        // Legacy single-file layout: the base path itself, replayed before any numbered segment.
+        // The live segment sits at the base path; it is replayed before any rotated (numbered) segment.
         if (File.Exists(_walBasePath))
         {
             segments.Add((-1L, _walBasePath));
@@ -1166,22 +1122,6 @@ public sealed class LsmTable : IDisposable
         }
 
         return (smallest, largest);
-    }
-
-    private static void WriteSstableAtomically(
-        string filePath,
-        byte[] bytes,
-        int length,
-        Action<LsmCrashPoint>? crashHook)
-    {
-        LsmDurableFileOperations.WriteFileAtomically(
-            filePath,
-            overwrite: false,
-            stream => stream.Write(bytes, 0, length),
-            crashHook,
-            LsmCrashPoint.AfterSstableTempFileFsyncBeforeRename,
-            LsmCrashPoint.AfterSstableRenameBeforeDirectoryFsync,
-            LsmCrashPoint.AfterSstableDirectoryFsyncBeforeManifest);
     }
 
     private static void DeleteFileIfExists(string path)

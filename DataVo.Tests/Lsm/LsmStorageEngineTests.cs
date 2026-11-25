@@ -6,6 +6,7 @@ using DataVo.Core.Exceptions;
 using DataVo.Core.Models.Catalog;
 using DataVo.Core.StorageEngine;
 using DataVo.Core.StorageEngine.Lsm;
+using DataVo.Core.StorageEngine.Lsm.V2;
 using DataVo.Core.StorageEngine.Serialization;
 
 namespace DataVo.Tests.Lsm;
@@ -342,14 +343,8 @@ public sealed class LsmStorageEngineTests
 
     private static byte[] Val(string value) => Encoding.UTF8.GetBytes(value);
 
-    private static byte[] Internal(long rowId, ulong seqno, LsmValueType valueType)
-    {
-        byte[] userKey = new byte[sizeof(long)];
-        InternalKey.EncodeInt64UserKey(userKey, rowId);
-        byte[] internalKey = new byte[InternalKey.MeasureSize(userKey.Length)];
-        InternalKey.Write(internalKey, userKey, seqno, valueType);
-        return internalKey;
-    }
+    private static byte[] Internal(long rowId, ulong seqno, LsmValueType valueType) =>
+        LsmRowKeyCodec.RowInternalKey(rowId, seqno, valueType);
 
     private static void AddSstable(
         string tableDirectory,
@@ -358,9 +353,14 @@ public sealed class LsmStorageEngineTests
         byte[] internalKey,
         byte[] value)
     {
-        var writer = new SsTableWriter(expectedEntries: 1);
-        writer.Add(internalKey, value);
-        byte[] bytes = writer.Finish();
+        var stream = new MemoryStream();
+        using (var writer = new SsTableV2Writer(stream, alignment: 0, expectedEntries: 1))
+        {
+            LsmRowKeyCodec.AddInternalEntry(writer, internalKey, value);
+            writer.Finish();
+        }
+
+        byte[] bytes = stream.ToArray();
         string fileName = $"{fileNumber:D6}.sst";
         File.WriteAllBytes(Path.Combine(tableDirectory, fileName), bytes);
 

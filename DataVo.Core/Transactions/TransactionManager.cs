@@ -14,29 +14,19 @@ namespace DataVo.Core.Transactions;
 /// </summary>
 /// <example>
 /// <code>
-/// TransactionManager.Instance.Begin(session);
+/// transactions.Begin(session);
 /// // ... buffered DML operations ...
-/// TransactionManager.Instance.Commit(session);
+/// transactions.Commit(session);
 /// </code>
 /// </example>
 public sealed class TransactionManager
 {
-    private static readonly Lazy<TransactionManager> _instance = new(() => new TransactionManager());
-
-    /// <summary>
-    /// Gets the global singleton instance of the <see cref="TransactionManager"/>.
-    /// </summary>
-    public static TransactionManager Instance => _instance.Value;
-
     private readonly ConcurrentDictionary<Guid, TransactionContext> _activeTransactions = new();
 
     /// <summary>
     /// Creates a transaction manager instance.
     /// </summary>
-    /// <remarks>
-    /// The legacy process-wide singleton remains available through <see cref="Instance"/>,
-    /// while engine-scoped runtimes can create dedicated instances directly.
-    /// </remarks>
+    /// <remarks>Each engine owns one instance.</remarks>
     public TransactionManager() { }
 
     /// <summary>

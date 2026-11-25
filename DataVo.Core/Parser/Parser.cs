@@ -1268,20 +1268,14 @@ public class Parser(List<Token> tokens)
             selectStmt.Joins.Add(ParseJoinDetail());
         }
 
-        // 4. Parse optional WHERE (also supports historical WHERE-before-JOIN form)
+        // 4. Parse optional WHERE
         if (Match(TokenType.Keyword, SqlKeywords.WHERE))
         {
             // HAVING ends the WHERE condition too: an aggregate query may have HAVING without GROUP BY.
-            var expressionTokens = CollectExpressionTokens(() => IsJoinKeyword() || IsGroupByKeyword() || IsHavingKeyword() || IsOrderByKeyword() || IsLimitKeyword() || IsOffsetKeyword() || IsUnionKeyword());
+            var expressionTokens = CollectExpressionTokens(() => IsGroupByKeyword() || IsHavingKeyword() || IsOrderByKeyword() || IsLimitKeyword() || IsOffsetKeyword() || IsUnionKeyword());
 
             RequireCondition(expressionTokens, "WHERE");
             selectStmt.WhereExpression = ParseWhereExpression(expressionTokens);
-        }
-
-        // 4b. Parse optional JOINs after WHERE for backward compatibility.
-        while (IsJoinKeyword())
-        {
-            selectStmt.Joins.Add(ParseJoinDetail());
         }
 
         // 5. Parse optional GROUP BY

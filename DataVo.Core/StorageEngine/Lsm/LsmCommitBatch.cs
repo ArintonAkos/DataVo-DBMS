@@ -277,17 +277,13 @@ internal sealed class LsmCommitBatch
 /// per operation: u8 kind | u8 reserved | u16 databaseBytes | u16 tableBytes | u64 key high | u64 key low
 ///                | i32 valueBytes | database (UTF-8) | table (UTF-8) | value
 /// </code>
-/// Version 1 frames (written before row keys were widened) hold an i64 row id in place of the two key
-/// halves; they are still read, so a log written by an older build replays. Decoding is strict: any
-/// length or kind that does not add up exactly makes the payload invalid.
+/// Decoding is strict: any length or kind that does not add up exactly makes the payload invalid.
 /// </summary>
 internal static class LsmCommitBatchCodec
 {
     private const ushort CurrentVersion = 2;
-    private const ushort RowIdVersion = 1;
     private const int BatchHeaderSize = 8;
     private const int OperationHeaderSize = 26;
-    private const int RowIdOperationHeaderSize = 18;
 
     /// <summary>Byte offset of the first operation's kind byte (for format tests).</summary>
     internal const int FirstOperationOffset = BatchHeaderSize;
@@ -353,13 +349,12 @@ internal static class LsmCommitBatchCodec
         }
 
         ushort version = BinaryPrimitives.ReadUInt16LittleEndian(payload);
-        if (version is not CurrentVersion and not RowIdVersion)
+        if (version != CurrentVersion)
         {
             return false;
         }
 
-        bool wide = version == CurrentVersion;
-        int operationHeaderSize = wide ? OperationHeaderSize : RowIdOperationHeaderSize;
+        const int operationHeaderSize = OperationHeaderSize;
         int count = BinaryPrimitives.ReadInt32LittleEndian(payload[4..]);
         if (count <= 0 || count > (payload.Length - BatchHeaderSize) / operationHeaderSize)
         {
@@ -379,24 +374,8 @@ internal static class LsmCommitBatchCodec
             var kind = (LsmCommitOperationKind)header[0];
             int databaseBytes = BinaryPrimitives.ReadUInt16LittleEndian(header[2..]);
             int tableBytes = BinaryPrimitives.ReadUInt16LittleEndian(header[4..]);
-            RowKey rowId;
-            int valueBytes;
-            if (wide)
-            {
-                rowId = new RowKey(BinaryPrimitives.ReadUInt64LittleEndian(header[6..]), BinaryPrimitives.ReadUInt64LittleEndian(header[14..]));
-                valueBytes = BinaryPrimitives.ReadInt32LittleEndian(header[22..]);
-            }
-            else
-            {
-                long legacyRowId = BinaryPrimitives.ReadInt64LittleEndian(header[6..]);
-                if (legacyRowId < 0)
-                {
-                    return false; // version 1 wrote engine row ids only, never negative
-                }
-
-                rowId = legacyRowId;
-                valueBytes = BinaryPrimitives.ReadInt32LittleEndian(header[14..]);
-            }
+            var rowId = new RowKey(BinaryPrimitives.ReadUInt64LittleEndian(header[6..]), BinaryPrimitives.ReadUInt64LittleEndian(header[14..]));
+            int valueBytes = BinaryPrimitives.ReadInt32LittleEndian(header[22..]);
 
             offset += operationHeaderSize;
 

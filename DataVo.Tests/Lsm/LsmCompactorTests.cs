@@ -1,6 +1,7 @@
 using System.Buffers.Binary;
 using System.Text;
 using DataVo.Core.StorageEngine.Lsm;
+using DataVo.Core.StorageEngine.Lsm.V2;
 
 namespace DataVo.Tests.Lsm;
 
@@ -20,7 +21,7 @@ public sealed class LsmCompactorTests
         LsmTableFileMetadata output = Assert.Single(fixture.Manifest.GetLiveFiles(1));
         Assert.Equal(output.FileNumber, result.OutputFile!.Value.FileNumber);
         Assert.Equal(2, result.DeletedFiles.Count);
-        SsTableReader reader = fixture.LoadReader(output);
+        TestSsTable reader = fixture.LoadReader(output);
         Assert.True(reader.TryGet(Key(7), snapshotSeqno: 20, out byte[] value, out bool isTombstone));
         Assert.False(isTombstone);
         Assert.Equal(Val("new"), value);
@@ -36,7 +37,7 @@ public sealed class LsmCompactorTests
 
         LsmTableFileMetadata output = compactor.CompactLevel(0, 1)!.Value.OutputFile!.Value;
 
-        SsTableReader reader = fixture.LoadReader(output);
+        TestSsTable reader = fixture.LoadReader(output);
         Assert.False(reader.TryGet(Key(7), snapshotSeqno: 10, out byte[] value, out bool isTombstone));
         Assert.False(isTombstone);
         Assert.Empty(value);
@@ -52,7 +53,7 @@ public sealed class LsmCompactorTests
 
         LsmTableFileMetadata output = compactor.CompactLevel(0, 1)!.Value.OutputFile!.Value;
 
-        SsTableReader reader = fixture.LoadReader(output);
+        TestSsTable reader = fixture.LoadReader(output);
         Assert.False(reader.TryGet(Key(3), snapshotSeqno: 8, out byte[] value, out bool isTombstone));
         Assert.True(isTombstone);
         Assert.Empty(value);
@@ -90,7 +91,7 @@ public sealed class LsmCompactorTests
         Assert.Contains(fixture.Manifest.GetLiveFiles(1), file => file.FileNumber == nonOverlapping.FileNumber);
 
         LsmTableFileMetadata output = result.OutputFile!.Value;
-        SsTableReader reader = fixture.LoadReader(output);
+        TestSsTable reader = fixture.LoadReader(output);
         Assert.True(reader.TryGet(Key(9), snapshotSeqno: 3, out byte[] nine, out bool nineTombstone));
         Assert.False(nineTombstone);
         Assert.Equal(Val("nine"), nine);
@@ -127,7 +128,7 @@ public sealed class LsmCompactorTests
         Assert.True(InternalKey.UserKey(output.SmallestInternalKey).SequenceCompareTo(Key(15)) <= 0);
         Assert.True(InternalKey.UserKey(output.LargestInternalKey).SequenceCompareTo(Key(30)) >= 0);
 
-        SsTableReader reader = fixture.LoadReader(output);
+        TestSsTable reader = fixture.LoadReader(output);
         AssertValue(reader, pk: 15, snapshotSeqno: 7, "fifteen");
         AssertValue(reader, pk: 20, snapshotSeqno: 10, "twenty");
         AssertValue(reader, pk: 24, snapshotSeqno: 6, "twenty-four");
@@ -146,7 +147,7 @@ public sealed class LsmCompactorTests
                 (Internal(2, 1, LsmValueType.Put), Val("two"))
             ]);
         byte[] bytes = fixture.ReadSstable(corrupt);
-        CorruptBySwappingDataEntries(bytes);
+        CorruptFirstDataBlock(bytes);
         fixture.WriteSstable(corrupt, bytes);
         var compactor = new LsmCompactor(fixture.TableDirectory, fixture.Manifest);
 
@@ -194,7 +195,7 @@ public sealed class LsmCompactorTests
         Assert.True(File.Exists(Path.Combine(fixture.TableDirectory, second.FileName)));
 
         byte[] bytes = snapshot.ReadAllBytes(first.FileNumber);
-        SsTableReader reader = SsTableReader.Load(bytes);
+        TestSsTable reader = TestSsTable.Load(bytes);
         Assert.True(reader.TryGet(Key(1), snapshotSeqno: 1, out byte[] value, out bool tombstone));
         Assert.False(tombstone);
         Assert.Equal(Val("one"), value);
@@ -233,7 +234,7 @@ public sealed class LsmCompactorTests
         {
             readerCanContinue.Task.GetAwaiter().GetResult();
             byte[] bytes = snapshot.ReadAllBytes(input.FileNumber);
-            SsTableReader reader = SsTableReader.Load(bytes);
+            TestSsTable reader = TestSsTable.Load(bytes);
             Assert.True(reader.TryGet(Key(1), snapshotSeqno: 1, out byte[] value, out bool tombstone));
             Assert.False(tombstone);
             Assert.Equal(Val("one"), value);
@@ -273,7 +274,7 @@ public sealed class LsmCompactorTests
                     foreach (LsmTableFileMetadata file in snapshot.Files)
                     {
                         byte[] bytes = snapshot.ReadAllBytes(file.FileNumber);
-                        _ = SsTableReader.Load(bytes);
+                        _ = TestSsTable.Load(bytes);
                     }
                 }
             }
@@ -310,32 +311,15 @@ public sealed class LsmCompactorTests
 
     private static byte[] Val(string value) => Encoding.UTF8.GetBytes(value);
 
-    private static void AssertValue(SsTableReader reader, long pk, ulong snapshotSeqno, string expectedValue)
+    private static void AssertValue(TestSsTable reader, long pk, ulong snapshotSeqno, string expectedValue)
     {
         Assert.True(reader.TryGet(Key(pk), snapshotSeqno, out byte[] value, out bool isTombstone));
         Assert.False(isTombstone);
         Assert.Equal(Val(expectedValue), value);
     }
 
-    private static void CorruptBySwappingDataEntries(byte[] sstable)
-    {
-        Assert.True(SsTableFormat.TryReadFooter(sstable, out SsTableBlockHandle indexBlock, out _));
-        int dataLength = BinaryPrimitives.ReadInt32LittleEndian(
-            sstable.AsSpan((int)indexBlock.Offset + sizeof(int) + sizeof(long), sizeof(int)));
-        Span<byte> dataBlock = sstable.AsSpan(0, dataLength);
-        int firstLength = EntryLength(dataBlock);
-        byte[] first = dataBlock[..firstLength].ToArray();
-        byte[] second = dataBlock.Slice(firstLength, dataBlock.Length - firstLength).ToArray();
-        second.CopyTo(dataBlock);
-        first.CopyTo(dataBlock[second.Length..]);
-    }
-
-    private static int EntryLength(ReadOnlySpan<byte> dataBlock)
-    {
-        int keyLength = BinaryPrimitives.ReadInt32LittleEndian(dataBlock[..sizeof(int)]);
-        int valueLength = BinaryPrimitives.ReadInt32LittleEndian(dataBlock.Slice(sizeof(int), sizeof(int)));
-        return sizeof(int) + sizeof(int) + keyLength + valueLength;
-    }
+    /// <summary>Flips a byte inside the first data block's entries, so its checksum no longer matches.</summary>
+    private static void CorruptFirstDataBlock(byte[] sstable) => sstable[SsTableKeyedFormat.BlockHeaderSize + 4] ^= 0xFF;
 
     private sealed class CompactorFixture : IDisposable
     {
@@ -352,7 +336,7 @@ public sealed class LsmCompactorTests
 
         public LsmTableFileMetadata AddSstable(int level, IReadOnlyList<(byte[] InternalKey, byte[] Value)> entries)
         {
-            var writer = new SsTableWriter(entries.Count);
+            var writer = new TestSsTableWriter(entries.Count);
             foreach ((byte[] internalKey, byte[] value) in entries)
             {
                 writer.Add(internalKey, value);
@@ -372,8 +356,8 @@ public sealed class LsmCompactorTests
             return metadata;
         }
 
-        public SsTableReader LoadReader(LsmTableFileMetadata metadata) =>
-            SsTableReader.Load(File.ReadAllBytes(Path.Combine(TableDirectory, metadata.FileName)));
+        public TestSsTable LoadReader(LsmTableFileMetadata metadata) =>
+            TestSsTable.Open(Path.Combine(TableDirectory, metadata.FileName));
 
         public byte[] ReadSstable(LsmTableFileMetadata metadata) =>
             File.ReadAllBytes(Path.Combine(TableDirectory, metadata.FileName));

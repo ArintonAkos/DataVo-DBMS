@@ -499,7 +499,7 @@ public sealed partial class LsmStorageEngine
         string directory = GetIndexDirectory(databaseName, tableName, indexName);
         Directory.CreateDirectory(directory);
         var manifest = new LsmManifest(Path.Combine(directory, "MANIFEST"));
-        var table = new LsmTable(directory, manifest) { Format = LsmSstableFormat.Keyed, ReadMode = _readMode, BlockCache = _blockCache };
+        var table = new LsmTable(directory, manifest) { Format = LsmSstableFormat.Keyed, BloomSuffixLength = LsmIndexKeyCodec.BloomSuffix, ReadMode = _readMode, BlockCache = _blockCache };
         if (MemTableFlushThresholdOverrideBytes is long thresholdOverride)
         {
             table.FlushThresholdBytes = thresholdOverride;

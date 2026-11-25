@@ -241,7 +241,7 @@ public sealed class LsmBackgroundPipelineTests : IDisposable
             $"expected cascading L1 compaction (L1={manifest.GetLiveFiles(1).Count}, L2={manifest.GetLiveFiles(2).Count})");
 
         LsmTableFileMetadata bottomFile = Assert.Single(manifest.GetLiveFiles(2));
-        SsTableReader reader = SsTableReader.Load(File.ReadAllBytes(Path.Combine(dir, bottomFile.FileName)));
+        TestSsTable reader = TestSsTable.Open(Path.Combine(dir, bottomFile.FileName));
 
         InternalKey.EncodeInt64UserKey(key, 1);
         Assert.False(reader.TryGet(key, snapshotSeqno: 2, out byte[] deletedValue, out bool isTombstone));

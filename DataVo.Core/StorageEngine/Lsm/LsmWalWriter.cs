@@ -24,7 +24,7 @@ internal sealed class LsmWalWriter
         DataVo.Core.Compat.ThrowHelper.ThrowIfNullOrWhiteSpace(walPath);
         _store = new WalFileStore(walPath);
         _durabilityMode = durabilityMode;
-        _frameBuffer = new byte[Math.Max(capacityBytes, WalAppender.FrameHeaderSize)];
+        _frameBuffer = new byte[Math.Max(capacityBytes, WalFrameFormat.FrameHeaderSize)];
     }
 
     internal int DurableFlushCount => _store.DurableFlushCount;
@@ -98,7 +98,7 @@ internal sealed class LsmWalWriter
         ValidateMutation(seqno, valueType, value);
 
         int payloadLength = LsmWalRecordCodec.MeasureSize(userKey, value);
-        int frameLength = checked(WalAppender.FrameHeaderSize + payloadLength);
+        int frameLength = checked(WalFrameFormat.FrameHeaderSize + payloadLength);
         byte[]? rented = null;
         Span<byte> frame = frameLength <= _frameBuffer.Length
             ? _frameBuffer.AsSpan(0, frameLength)
@@ -164,14 +164,14 @@ internal sealed class LsmWalWriter
         ReadOnlySpan<byte> value)
     {
         int payloadLength = LsmWalRecordCodec.MeasureSize(userKey, value);
-        int frameLength = checked(WalAppender.FrameHeaderSize + payloadLength);
+        int frameLength = checked(WalFrameFormat.FrameHeaderSize + payloadLength);
         if (frame.Length < frameLength)
         {
             throw new ArgumentException("Destination frame buffer is too small.", nameof(frame));
         }
 
         Span<byte> target = frame[..frameLength];
-        target[..WalAppender.FrameHeaderSize].Clear();
+        target[..WalFrameFormat.FrameHeaderSize].Clear();
 
         BinaryPrimitives.WriteInt32LittleEndian(target[..sizeof(int)], frameLength);
         BinaryPrimitives.WriteInt64LittleEndian(target.Slice(8, sizeof(long)), checked(++_nextLsn));
@@ -183,7 +183,7 @@ internal sealed class LsmWalWriter
         BinaryPrimitives.WriteInt64LittleEndian(target.Slice(20, sizeof(long)), UnknownRowId);
         BinaryPrimitives.WriteInt32LittleEndian(target.Slice(28, sizeof(int)), LsmTableId);
 
-        LsmWalRecordCodec.Write(target.Slice(WalAppender.FrameHeaderSize, payloadLength), userKey, seqno, valueType, value);
+        LsmWalRecordCodec.Write(target.Slice(WalFrameFormat.FrameHeaderSize, payloadLength), userKey, seqno, valueType, value);
 
         uint checksum = WalCrc32C.HashToUInt32(target[8..frameLength]);
         BinaryPrimitives.WriteUInt32LittleEndian(target.Slice(4, sizeof(uint)), checksum);

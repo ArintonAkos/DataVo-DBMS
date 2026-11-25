@@ -919,8 +919,6 @@ public sealed partial class LsmStorageEngine : IFixedWidthPatchStorageEngine, IL
         SsTableSpillOptions.DeleteLeftovers(tableDirectory); // a compaction's temporary files outlive a crash
 
         var manifest = new LsmManifest(Path.Combine(tableDirectory, "MANIFEST"));
-        MigrateLegacyTableWal(tableDirectory, manifest);
-
         // No per-table WAL: durability comes from the shared commit log, and this table's MemTables
         // hold only mutations whose frames are already in it.
         var table = new LsmTable(tableDirectory, manifest)
@@ -942,15 +940,14 @@ public sealed partial class LsmStorageEngine : IFixedWidthPatchStorageEngine, IL
         var state = new TableState(tableDirectory, manifest, table, registry, _readMode);
         table.AfterSstablePublished = memTable => EvictFlushed(state, memTable);
 
-        UpgradeLegacySstables(state);
         LoadTableMetadata(state);
         return state;
     }
 
     /// <summary>
     /// Reads the table's next row id, live-row count, and flushed sequence from the SSTable properties
-    /// (O(files), no row is read). Only files upgraded from v1 lack a live count; the rows are then
-    /// counted once, and the next commit persists the count.
+    /// (O(files), no row is read). A table whose files carry no live count (none of its commits has been
+    /// flushed with the metadata entry) has its rows counted once, and the next commit persists the count.
     /// </summary>
     private void LoadTableMetadata(TableState state)
     {
@@ -992,165 +989,6 @@ public sealed partial class LsmStorageEngine : IFixedWidthPatchStorageEngine, IL
 
         // Everything in SSTables is durable; only commit-log frames above this point still need replay.
         state.FlushedLsn = checked((long)flushed);
-    }
-
-    /// <summary>
-    /// Rewrites v1 SSTables (one block per file, read by full scans only) as v2 once, so the read path
-    /// only ever serves page-aligned, indexed files. Each file is replaced atomically through a manifest
-    /// edit at the same level; a crash in between leaves either the old or the new file live.
-    /// </summary>
-    /// <remarks>
-    /// v1 metadata has no live-row count. The upgrade counts live rows across all files first and stores
-    /// the count in the file that holds the newest metadata version, so later opens never recount.
-    /// </remarks>
-    private void UpgradeLegacySstables(TableState state)
-    {
-        var legacy = new List<LsmTableFileMetadata>();
-        for (int level = 0; level <= MaxLevelToScan; level++)
-        {
-            foreach (LsmTableFileMetadata file in state.FileRegistry.ExecuteVersionEdit(() => state.Manifest.GetLiveFiles(level)))
-            {
-                if (!SsTableV2Format.IsV2File(Path.Combine(state.TableDirectory, file.FileName)))
-                {
-                    legacy.Add(file);
-                }
-            }
-        }
-
-        if (legacy.Count == 0)
-        {
-            return;
-        }
-
-        // Pass 1: newest version per row across every live file, and where the newest metadata lives.
-        var newest = new Dictionary<RowKey, (ulong Sequence, bool Live)>();
-        long metadataFile = -1;
-        ulong metadataSequence = 0;
-        bool sawMetadata = false;
-        void Observe(RowKey rowId, ulong sequence, bool live)
-        {
-            if (!newest.TryGetValue(rowId, out var current) || sequence > current.Sequence)
-            {
-                newest[rowId] = (sequence, live);
-            }
-        }
-
-        foreach (LsmTableFileMetadata file in AllLiveFiles(state))
-        {
-            string path = Path.Combine(state.TableDirectory, file.FileName);
-            if (SsTableV2Format.IsV2File(path))
-            {
-                using SsTableV2Reader reader = SsTableV2Reader.Open(path, LsmReadMode.PositionalRead);
-                SsTableV2Cursor cursor = reader.OpenCursor();
-                while (cursor.MoveNext())
-                {
-                    Observe(cursor.Key, cursor.Sequence, cursor.Type == LsmValueType.Put);
-                }
-
-                if (reader.Properties.NextRowId > 0 && (!sawMetadata || reader.Properties.NextRowIdSequence >= metadataSequence))
-                {
-                    sawMetadata = true;
-                    metadataSequence = reader.Properties.NextRowIdSequence;
-                    metadataFile = -1; // a v2 file cannot be rewritten here; open recounts in that rare case
-                }
-
-                continue;
-            }
-
-            byte[] bytes = File.ReadAllBytes(path);
-            SsTableReader.Load(bytes);
-            foreach (SstableEntry entry in ReadSstableEntries(bytes))
-            {
-                ReadOnlySpan<byte> userKey = InternalKey.UserKey(entry.InternalKey);
-                ulong sequence = InternalKey.Sequence(entry.InternalKey);
-                if (LsmRowKeyCodec.IsRowKey(userKey))
-                {
-                    Observe(LsmRowKeyCodec.DecodeRowKey(userKey), sequence, InternalKey.ValueType(entry.InternalKey) == LsmValueType.Put);
-                }
-                else if (LsmRowKeyCodec.IsTableMetadataKey(userKey) && (!sawMetadata || sequence >= metadataSequence))
-                {
-                    sawMetadata = true;
-                    metadataSequence = sequence;
-                    metadataFile = file.FileNumber;
-                }
-            }
-        }
-
-        long liveRows = newest.Values.Count(static version => version.Live);
-        newest.Clear();
-
-        // Pass 2: rewrite each legacy file.
-        foreach (LsmTableFileMetadata file in legacy)
-        {
-            byte[] bytes = File.ReadAllBytes(Path.Combine(state.TableDirectory, file.FileName));
-            List<SstableEntry> entries = ReadSstableEntries(bytes);
-            byte[]? first = null;
-            byte[]? last = null;
-            foreach (SstableEntry entry in entries)
-            {
-                ReadOnlySpan<byte> rowUserKey = InternalKey.UserKey(entry.InternalKey);
-                if (LsmRowKeyCodec.IsRowKey(rowUserKey))
-                {
-                    byte[] widened = LsmRowKeyCodec.RowInternalKey(
-                        LsmRowKeyCodec.DecodeRowKey(rowUserKey),
-                        InternalKey.Sequence(entry.InternalKey),
-                        InternalKey.ValueType(entry.InternalKey));
-                    first ??= widened;
-                    last = widened;
-                }
-            }
-
-            if (first is null || last is null)
-            {
-                throw new InvalidDataException($"Legacy SSTable '{file.FileName}' holds no rows and cannot be upgraded.");
-            }
-
-            long fileNumber = state.Manifest.AllocateFileNumber();
-            string fileName = $"{fileNumber:D6}.sst";
-            long length = 0;
-            bool holdsNewestMetadata = file.FileNumber == metadataFile;
-            LsmDurableFileOperations.WriteFileAtomically(
-                Path.Combine(state.TableDirectory, fileName),
-                overwrite: false,
-                stream =>
-                {
-                    using var writer = new SsTableV2Writer(stream, alignment: 0, entries.Count, columnar: state.Table.ColumnarSpec);
-                    long nextRowId = 0;
-                    foreach (SstableEntry entry in entries)
-                    {
-                        LsmRowKeyCodec.AddInternalEntry(writer, entry.InternalKey, entry.Value);
-                        if (holdsNewestMetadata
-                            && LsmRowKeyCodec.IsTableMetadataKey(InternalKey.UserKey(entry.InternalKey))
-                            && InternalKey.Sequence(entry.InternalKey) == metadataSequence)
-                        {
-                            nextRowId = LsmRowKeyCodec.DecodeTableMetadata(entry.Value).NextRowId;
-                        }
-                    }
-
-                    if (holdsNewestMetadata && nextRowId > 0)
-                    {
-                        writer.SetTableMetadata(nextRowId, liveRows, metadataSequence);
-                    }
-
-                    length = writer.Finish();
-                },
-                crashHook: null,
-                LsmCrashPoint.AfterSstableTempFileFsyncBeforeRename,
-                LsmCrashPoint.AfterSstableRenameBeforeDirectoryFsync,
-                LsmCrashPoint.AfterSstableDirectoryFsyncBeforeManifest);
-
-            var upgraded = new LsmTableFileMetadata(fileNumber, file.Level, first, last, length, fileName);
-            var edit = new LsmVersionEdit();
-            edit.DeleteFile(file.Level, file.FileNumber);
-            edit.AddFile(upgraded);
-            state.FileRegistry.ExecuteVersionEdit(() =>
-            {
-                state.Manifest.ApplyEdit(edit);
-                state.FileRegistry.Register(upgraded);
-                state.FileRegistry.MarkDeleted([file]);
-                return true;
-            });
-        }
     }
 
     private static List<LsmTableFileMetadata> AllLiveFiles(TableState state) =>
@@ -1203,21 +1041,6 @@ public sealed partial class LsmStorageEngine : IFixedWidthPatchStorageEngine, IL
         }
 
         ResetColumnarTail(state);
-    }
-
-    /// <summary>
-    /// Directories written before the shared commit log kept a WAL per table. Replay those segments once
-    /// through a WAL-backed table, flush them to SSTables, and remove them, so nothing is lost on upgrade.
-    /// </summary>
-    private void MigrateLegacyTableWal(string tableDirectory, LsmManifest manifest)
-    {
-        if (!Directory.EnumerateFiles(tableDirectory, "active*.wal").Any())
-        {
-            return;
-        }
-
-        using var legacy = new LsmTable(tableDirectory, manifest, Path.Combine(tableDirectory, "active.wal"), _walDurabilityMode);
-        legacy.FlushActiveMemTable();
     }
 
     /// <summary>
@@ -2415,85 +2238,6 @@ public sealed partial class LsmStorageEngine : IFixedWidthPatchStorageEngine, IL
         return coveredThrough;
     }
 
-    private static List<SstableEntry> ReadSstableEntries(byte[] bytes)
-    {
-        if (!SsTableFormat.TryReadFooter(bytes, out SsTableBlockHandle indexBlock, out _))
-        {
-            throw new InvalidDataException("SSTable footer is missing, corrupt, or points outside the table.");
-        }
-
-        SsTableBlockHandle dataBlock = ReadDataBlockHandle(SliceBlock(bytes, indexBlock));
-        ReadOnlySpan<byte> data = SliceBlock(bytes, dataBlock);
-        var entries = new List<SstableEntry>();
-        int offset = 0;
-        while (offset < data.Length)
-        {
-            int keyLength = ReadInt32(data, ref offset);
-            int valueLength = ReadInt32(data, ref offset);
-            if (keyLength < InternalKey.TagSize || valueLength < 0)
-            {
-                throw new InvalidDataException("SSTable data block contains a malformed entry length.");
-            }
-
-            byte[] internalKey = ReadSpan(data, ref offset, keyLength).ToArray();
-            byte[] value = ReadSpan(data, ref offset, valueLength).ToArray();
-            entries.Add(new SstableEntry(internalKey, value));
-        }
-
-        return entries;
-    }
-
-    private static SsTableBlockHandle ReadDataBlockHandle(ReadOnlySpan<byte> indexBlock)
-    {
-        int offset = 0;
-        int count = ReadInt32(indexBlock, ref offset);
-        if (count != 1)
-        {
-            throw new InvalidDataException($"SSTable v1 scan expects exactly one data block, found {count}.");
-        }
-
-        long dataOffset = ReadInt64(indexBlock, ref offset);
-        int dataLength = ReadInt32(indexBlock, ref offset);
-        return new SsTableBlockHandle(dataOffset, dataLength);
-    }
-
-    private static ReadOnlySpan<byte> SliceBlock(byte[] source, SsTableBlockHandle handle)
-    {
-        if (handle.Offset < 0
-            || handle.Length <= 0
-            || handle.Offset > int.MaxValue
-            || handle.Offset + handle.Length > source.Length)
-        {
-            throw new InvalidDataException("SSTable block handle points outside the table.");
-        }
-
-        return source.AsSpan((int)handle.Offset, handle.Length);
-    }
-
-    private static int ReadInt32(ReadOnlySpan<byte> source, ref int offset)
-    {
-        ReadOnlySpan<byte> span = ReadSpan(source, ref offset, sizeof(int));
-        return BinaryPrimitives.ReadInt32LittleEndian(span);
-    }
-
-    private static long ReadInt64(ReadOnlySpan<byte> source, ref int offset)
-    {
-        ReadOnlySpan<byte> span = ReadSpan(source, ref offset, sizeof(long));
-        return BinaryPrimitives.ReadInt64LittleEndian(span);
-    }
-
-    private static ReadOnlySpan<byte> ReadSpan(ReadOnlySpan<byte> source, ref int offset, int length)
-    {
-        if (length < 0 || offset < 0 || offset > source.Length - length)
-        {
-            throw new InvalidDataException("SSTable block is truncated.");
-        }
-
-        ReadOnlySpan<byte> span = source.Slice(offset, length);
-        offset += length;
-        return span;
-    }
-
     /// <summary>
     /// The engine row id that must follow <paramref name="key"/>: one past it for a positive integer key,
     /// otherwise 1 (negative integers and GUIDs are never engine-assigned, so they reserve nothing).
@@ -2838,5 +2582,4 @@ public sealed partial class LsmStorageEngine : IFixedWidthPatchStorageEngine, IL
     }
 
 
-    private readonly record struct SstableEntry(byte[] InternalKey, byte[] Value);
 }

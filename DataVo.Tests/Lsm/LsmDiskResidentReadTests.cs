@@ -9,7 +9,7 @@ namespace DataVo.Tests.Lsm;
 /// <summary>
 /// The LSM engine serves flushed rows from memory-mapped (or positionally read) v2 SSTables instead of
 /// keeping every row in the managed heap. These tests pin the observable behavior across flush, overlay
-/// eviction, compaction, reopen, v1 upgrade, and concurrent readers, in both read modes.
+/// eviction, compaction, reopen, and concurrent readers, in both read modes.
 /// </summary>
 public sealed class LsmDiskResidentReadTests : IDisposable
 {
@@ -111,45 +111,6 @@ public sealed class LsmDiskResidentReadTests : IDisposable
         Assert.False(reopened.HasAnyRows(Db, Table));
         Assert.Equal(0, reopened.EstimateRowCount(Db, Table));
         Assert.Equal(4, reopened.InsertRow(Db, Table, Row(4)));
-    }
-
-    [Fact]
-    public void LegacyV1Sstables_AreUpgradedOnOpen_WithIdenticalContents()
-    {
-        string tableDirectory = Path.Combine(_root, Db, Table);
-        Directory.CreateDirectory(tableDirectory);
-        var manifest = new LsmManifest(Path.Combine(tableDirectory, "MANIFEST"));
-        using (var legacy = new LsmTable(tableDirectory, manifest)) // v1 writer, as before this format
-        {
-            // Row keys of that era: 8-byte order-preserving integers.
-            Span<byte> key = stackalloc byte[8];
-            for (int rowId = 1; rowId <= 500; rowId++)
-            {
-                InternalKey.EncodeInt64UserKey(key, rowId);
-                legacy.Put(key, (ulong)rowId, Row(rowId));
-            }
-
-            InternalKey.EncodeInt64UserKey(key, 7);
-            legacy.Delete(key, 600);
-            legacy.Put(LsmRowKeyCodec.TableMetadataKey, 600, BitConverter.GetBytes(501L)); // pre-count 8-byte form
-            legacy.FlushActiveMemTable();
-        }
-
-        Assert.All(Directory.GetFiles(tableDirectory, "*.sst"), file => Assert.False(SsTableV2Format.IsV2File(file)));
-
-        using var engine = new LsmStorageEngine(_root, Relaxed);
-
-        Assert.All(Directory.GetFiles(tableDirectory, "*.sst"), file => Assert.True(SsTableV2Format.IsV2File(file)));
-        Assert.Equal(Row(500), engine.ReadRow(Db, Table, 500));
-        Assert.Throws<RowDeletedException>(() => engine.ReadRow(Db, Table, 7));
-        Assert.Equal(499, engine.EstimateRowCount(Db, Table)); // counted once, the legacy metadata had no count
-        Assert.Equal(501, engine.InsertRow(Db, Table, Row(501)));
-
-        // The upgrade stored the count in the file's properties: later opens do not recount.
-        string upgraded = Assert.Single(Directory.GetFiles(tableDirectory, "*.sst"));
-        using SsTableV2Reader reader = SsTableV2Reader.Open(upgraded, LsmReadMode.PositionalRead);
-        Assert.Equal(499, reader.Properties.LiveRowCount);
-        Assert.Equal(501, reader.Properties.NextRowId);
     }
 
     [Theory]

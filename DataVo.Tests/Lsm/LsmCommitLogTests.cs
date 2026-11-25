@@ -102,37 +102,6 @@ public sealed class LsmCommitLogTests : IDisposable
         Assert.Equal([(RowKey)(-42), long.MaxValue, guid, guid], operations.Select(o => o.RowId));
     }
 
-    [Fact]
-    public void Codec_ReadsVersionOneFrames_WithEightByteRowIds()
-    {
-        // A frame as written before row keys were widened: i64 row id in an 18-byte operation header.
-        byte[] database = "Db"u8.ToArray();
-        byte[] table = "T"u8.ToArray();
-        byte[] value = "row"u8.ToArray();
-        byte[] payload = new byte[8 + 18 + database.Length + table.Length + value.Length];
-        BinaryPrimitives.WriteUInt16LittleEndian(payload, 1);
-        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(4), 1);
-        Span<byte> header = payload.AsSpan(8, 18);
-        header[0] = (byte)LsmCommitOperationKind.Put;
-        BinaryPrimitives.WriteUInt16LittleEndian(header[2..], (ushort)database.Length);
-        BinaryPrimitives.WriteUInt16LittleEndian(header[4..], (ushort)table.Length);
-        BinaryPrimitives.WriteInt64LittleEndian(header[6..], 77);
-        BinaryPrimitives.WriteInt32LittleEndian(header[14..], value.Length);
-        database.CopyTo(payload.AsSpan(26));
-        table.CopyTo(payload.AsSpan(26 + database.Length));
-        value.CopyTo(payload.AsSpan(26 + database.Length + table.Length));
-
-        Assert.True(LsmCommitBatchCodec.TryRead(payload, out List<LsmCommitOperation> operations));
-        LsmCommitOperation operation = Assert.Single(operations);
-        Assert.Equal((RowKey)77, operation.RowId);
-        Assert.Equal("T", operation.Table);
-        Assert.Equal(value, operation.Value);
-
-        // Version 1 only ever held engine row ids: a negative one is corruption.
-        BinaryPrimitives.WriteInt64LittleEndian(header[6..], -1);
-        Assert.False(LsmCommitBatchCodec.TryRead(payload, out _));
-    }
-
     [Theory]
     [InlineData(LsmWalDurabilityMode.StrictFsync)]
     [InlineData(LsmWalDurabilityMode.RelaxedOsBuffer)]

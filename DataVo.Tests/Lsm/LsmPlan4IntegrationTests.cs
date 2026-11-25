@@ -37,7 +37,7 @@ public sealed class LsmPlan4IntegrationTests
         Assert.Equal(levelOne.FileNumber, reloadedLevelOne.FileNumber);
         Assert.Empty(reloaded.GetLiveFiles(0));
 
-        SsTableReader reader = fixture.LoadReader(reloadedLevelOne);
+        TestSsTable reader = fixture.LoadReader(reloadedLevelOne);
         AssertValue(reader, pk: 1, snapshotSeqno: 5, "one-v5");
         Assert.False(reader.TryGet(Key(2), snapshotSeqno: 6, out byte[] deleted, out bool isTombstone));
         Assert.True(isTombstone);
@@ -70,7 +70,7 @@ public sealed class LsmPlan4IntegrationTests
         Assert.Empty(Directory.EnumerateFiles(fixture.TableDirectory, "*.sst"));
     }
 
-    private static void AssertValue(SsTableReader reader, long pk, ulong snapshotSeqno, string expectedValue)
+    private static void AssertValue(TestSsTable reader, long pk, ulong snapshotSeqno, string expectedValue)
     {
         Assert.True(reader.TryGet(Key(pk), snapshotSeqno, out byte[] value, out bool isTombstone));
         Assert.False(isTombstone);
@@ -102,8 +102,8 @@ public sealed class LsmPlan4IntegrationTests
 
         public LsmManifest Manifest { get; }
 
-        public SsTableReader LoadReader(LsmTableFileMetadata metadata) =>
-            SsTableReader.Load(File.ReadAllBytes(Path.Combine(TableDirectory, metadata.FileName)));
+        public TestSsTable LoadReader(LsmTableFileMetadata metadata) =>
+            TestSsTable.Open(Path.Combine(TableDirectory, metadata.FileName));
 
         public void Dispose()
         {

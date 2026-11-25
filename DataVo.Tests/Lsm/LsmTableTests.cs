@@ -106,7 +106,7 @@ public sealed class LsmTableTests
             LsmWalDurabilityMode.StrictFsync);
 
         LsmFlushResult result = reopened.FlushActiveMemTable()!.Value;
-        SsTableReader reader = SsTableReader.Load(File.ReadAllBytes(result.FilePath));
+        TestSsTable reader = TestSsTable.Open(result.FilePath);
         Assert.True(reader.TryGet(userKey, snapshotSeqno: 11, out byte[] actual, out bool tombstone));
         Assert.False(tombstone);
         Assert.Equal(value, actual);
@@ -140,7 +140,7 @@ public sealed class LsmTableTests
             LsmWalDurabilityMode.StrictFsync);
 
         LsmFlushResult result = reopened.FlushActiveMemTable()!.Value;
-        SsTableReader reader = SsTableReader.Load(File.ReadAllBytes(result.FilePath));
+        TestSsTable reader = TestSsTable.Open(result.FilePath);
         Assert.True(reader.TryGet(userKey, snapshotSeqno: 13, out byte[] actual, out bool tombstone));
         Assert.False(tombstone);
         Assert.Equal(value, actual);
@@ -205,7 +205,7 @@ public sealed class LsmTableTests
             LsmWalDurabilityMode.StrictFsync);
 
         LsmFlushResult recovered = reopened.FlushActiveMemTable()!.Value;
-        SsTableReader reader = SsTableReader.Load(File.ReadAllBytes(recovered.FilePath));
+        TestSsTable reader = TestSsTable.Open(recovered.FilePath);
         Assert.True(reader.TryGet(userKey, snapshotSeqno: 21, out byte[] actual, out bool tombstone));
         Assert.False(tombstone);
         Assert.Equal(value, actual);
@@ -325,7 +325,7 @@ public sealed class LsmTableTests
         table.Delete(Key(3), seqno: 8);
 
         LsmFlushResult result = table.FlushActiveMemTable()!.Value;
-        SsTableReader reader = SsTableReader.Load(File.ReadAllBytes(result.FilePath));
+        TestSsTable reader = TestSsTable.Open(result.FilePath);
 
         Assert.True(reader.TryGet(Key(7), snapshotSeqno: 20, out byte[] newest, out bool newestIsTombstone));
         Assert.False(newestIsTombstone);
@@ -377,7 +377,7 @@ public sealed class LsmTableTests
         table.Put(Key(1), seqno: 3, Val("one-new-active"));
 
         Assert.Equal(originalBytes, File.ReadAllBytes(result.FilePath));
-        SsTableReader reader = SsTableReader.Load(originalBytes);
+        TestSsTable reader = TestSsTable.Load(originalBytes);
         Assert.True(reader.TryGet(Key(1), snapshotSeqno: 3, out byte[] value, out bool isTombstone));
         Assert.False(isTombstone);
         Assert.Equal(Val("one"), value);
@@ -398,7 +398,7 @@ public sealed class LsmTableTests
 
         Directory.Delete(Path.Combine(fixture.TableDirectory, "000001.sst"));
         LsmFlushResult retried = table.FlushActiveMemTable()!.Value;
-        SsTableReader reader = SsTableReader.Load(File.ReadAllBytes(retried.FilePath));
+        TestSsTable reader = TestSsTable.Open(retried.FilePath);
         Assert.True(reader.TryGet(Key(1), snapshotSeqno: 1, out byte[] value, out bool isTombstone));
         Assert.False(isTombstone);
         Assert.Equal(Val("one"), value);

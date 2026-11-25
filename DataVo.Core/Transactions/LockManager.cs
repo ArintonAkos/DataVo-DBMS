@@ -59,8 +59,6 @@ public sealed class LockManager
     /// <summary>Gets whether the current thread holds any table or row lock.</summary>
     internal static bool CurrentThreadHoldsLocks => t_heldLocks > 0;
 
-    private static readonly Lazy<LockManager> _instance = new(() => new LockManager());
-
     private readonly ConcurrentDictionary<string, TableLockEntry> _tableLocks =
         new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, RowLockEntry> _rowLocks =
@@ -90,17 +88,9 @@ public sealed class LockManager
     internal long RowWriteLockEpoch => Volatile.Read(ref _rowWriteLockEpoch);
 
     /// <summary>
-    /// Gets the process-wide singleton lock manager instance.
-    /// </summary>
-    public static LockManager Instance => _instance.Value;
-
-    /// <summary>
     /// Creates a lock manager instance.
     /// </summary>
-    /// <remarks>
-    /// The legacy process-wide singleton remains available through <see cref="Instance"/>,
-    /// while engine-scoped runtimes can create dedicated instances directly.
-    /// </remarks>
+    /// <remarks>Each engine owns one instance.</remarks>
     public LockManager(int lockAcquireTimeoutMs = DefaultLockAcquireTimeoutMs)
     {
         if (lockAcquireTimeoutMs < -1)

@@ -45,7 +45,7 @@ internal static class ReferenceCompaction
         }
         else
         {
-            var writer = new SsTableWriter(merged.Count);
+            var writer = new TestSsTableWriter(merged.Count);
             foreach ((byte[] key, byte[] value) in merged)
             {
                 writer.Add(key, value);
@@ -122,17 +122,7 @@ internal static class ReferenceCompaction
             return entries;
         }
 
-        if (!SsTableV2Format.IsV2File(path))
-        {
-            byte[] bytes = File.ReadAllBytes(path);
-            foreach ((byte[] key, byte[] value) in ReadV1(bytes))
-            {
-                entries.Add((writesV2 ? Widen(key) : key, value));
-            }
-
-            return entries;
-        }
-
+        Assert.True(SsTableV2Format.IsV2File(path), $"{path} is neither a keyed nor a row-keyed SSTable.");
         using SsTableV2Reader reader = SsTableV2Reader.Open(path);
         SsTableV2Cursor cursor = reader.OpenCursor();
         while (cursor.MoveNext())
@@ -146,43 +136,6 @@ internal static class ReferenceCompaction
         }
 
         return entries;
-    }
-
-    private static byte[] Widen(byte[] key)
-    {
-        ReadOnlySpan<byte> userKey = InternalKey.UserKey(key);
-        if (userKey.Length != LsmRowKeyCodec.LegacyRowKeySize)
-        {
-            return key;
-        }
-
-        var widened = new byte[LsmRowKeyCodec.RowKeySize + InternalKey.TagSize];
-        userKey.CopyTo(widened.AsSpan(LsmRowKeyCodec.RowKeySize - LsmRowKeyCodec.LegacyRowKeySize));
-        key.AsSpan(userKey.Length).CopyTo(widened.AsSpan(LsmRowKeyCodec.RowKeySize));
-        return widened;
-    }
-
-    // A v1 file: footer -> index block with one data block -> length-prefixed entries.
-    private static IEnumerable<(byte[] Key, byte[] Value)> ReadV1(byte[] bytes)
-    {
-        Assert.True(SsTableFormat.TryReadFooter(bytes, out SsTableBlockHandle index, out _));
-        ReadOnlySpan<byte> indexBlock = bytes.AsSpan((int)index.Offset, index.Length);
-        Assert.Equal(1, BinaryPrimitives.ReadInt32LittleEndian(indexBlock));
-        long dataOffset = BinaryPrimitives.ReadInt64LittleEndian(indexBlock[4..]);
-        int dataLength = BinaryPrimitives.ReadInt32LittleEndian(indexBlock[12..]);
-        var result = new List<(byte[] Key, byte[] Value)>();
-        int offset = (int)dataOffset;
-        int end = offset + dataLength;
-        while (offset < end)
-        {
-            int keyLength = BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(offset));
-            int valueLength = BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(offset + 4));
-            offset += 8;
-            result.Add((bytes.AsSpan(offset, keyLength).ToArray(), bytes.AsSpan(offset + keyLength, valueLength).ToArray()));
-            offset += keyLength + valueLength;
-        }
-
-        return result;
     }
 
     private sealed class Comparer : IComparer<(byte[] Key, int Ordinal)>

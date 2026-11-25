@@ -45,9 +45,12 @@ public sealed class LsmCompactor
     }
 
     /// <summary>Format of the output (inputs may be any format).</summary>
-    internal LsmSstableFormat Format { get; set; }
+    internal LsmSstableFormat Format { get; set; } = LsmSstableFormat.Keyed;
 
     private bool WritesV2 => Format == LsmSstableFormat.RowKeyed;
+
+    /// <summary>Bloom setting of keyed output files (see <see cref="SsTableKeyedFormat.BloomKeyLength"/>).</summary>
+    internal int BloomSuffixLength { get; set; }
 
     /// <summary>The columns a row-keyed output file carries as a columnar segment, or null for none.</summary>
     internal DataVo.Core.Indexing.Columnar.ColumnarSpec? Columnar { get; set; }
@@ -116,9 +119,7 @@ public sealed class LsmCompactor
                 {
                     (outputMetadata, outputPath) = WritesV2
                         ? WriteV2Output(merge, targetLevel)
-                        : Format == LsmSstableFormat.Keyed
-                            ? WriteKeyedOutput(merge, targetLevel)
-                            : WriteLegacyOutput(merge, targetLevel);
+                        : WriteKeyedOutput(merge, targetLevel);
                 }
             }
             finally
@@ -223,11 +224,9 @@ public sealed class LsmCompactor
             return;
         }
 
-        bool isV2 = handle?.IsV2() ?? SsTableV2Format.IsV2File(path);
-        if (!isV2)
+        if (!(handle?.IsV2() ?? SsTableV2Format.IsV2File(path)))
         {
-            sources.Add(new LsmListMergeSource(ordinal, ReadLegacyEntries(handle?.ReadAllBytes() ?? File.ReadAllBytes(path))));
-            return;
+            throw new InvalidDataException($"SSTable '{file.FileName}' is neither a row-keyed nor a keyed file.");
         }
 
         SsTableV2Reader reader = handle?.GetV2Reader(ReadMode, BlockCache) ?? SsTableV2Reader.Open(path, ReadMode);
@@ -239,44 +238,6 @@ public sealed class LsmCompactor
                 LsmRowKeyCodec.MetadataInternalKey(properties.NextRowIdSequence),
                 LsmRowKeyCodec.EncodeTableMetadata(properties.NextRowId, properties.LiveRowCount))]));
         }
-    }
-
-    // A v1 file is one block, read whole. In a row-keyed table its 8-byte row keys are merged in their
-    // 16-byte form so they order correctly against rows read from newer files.
-    private List<(byte[] InternalKey, byte[] Value)> ReadLegacyEntries(byte[] bytes)
-    {
-        SsTableReader.Load(bytes);
-        List<(byte[] InternalKey, byte[] Value)> entries = ReadEntries(bytes);
-        if (WritesV2)
-        {
-            for (int i = 0; i < entries.Count; i++)
-            {
-                entries[i] = (WidenRowInternalKey(entries[i].InternalKey), entries[i].Value);
-            }
-        }
-
-        entries.Sort(static (x, y) => InternalKey.Compare(x.InternalKey, y.InternalKey));
-        return entries;
-    }
-
-    private (LsmTableFileMetadata Metadata, string Path) WriteLegacyOutput(LsmCompactionMerge merge, int targetLevel)
-    {
-        var writer = new SsTableWriter();
-        byte[] first = merge.InternalKey.ToArray();
-        byte[] last;
-        do
-        {
-            writer.Add(merge.InternalKey, merge.Value);
-            last = merge.InternalKey.ToArray();
-        }
-        while (merge.MoveNext());
-
-        byte[] bytes = writer.Finish();
-        long fileNumber = _manifest.AllocateFileNumber();
-        string fileName = $"{fileNumber:D6}.sst";
-        string outputPath = Path.Combine(_tableDirectory, fileName);
-        WriteSstableAtomically(outputPath, bytes);
-        return (new LsmTableFileMetadata(fileNumber, targetLevel, first, last, bytes.LongLength, fileName), outputPath);
     }
 
     private (LsmTableFileMetadata Metadata, string Path) WriteKeyedOutput(LsmCompactionMerge merge, int targetLevel)
@@ -292,7 +253,7 @@ public sealed class LsmCompactor
             overwrite: false,
             stream =>
             {
-                using var writer = new SsTableKeyedWriter(stream, LsmIndexKeyCodec.BloomSuffix);
+                using var writer = new SsTableKeyedWriter(stream, BloomSuffixLength);
                 do
                 {
                     ReadOnlySpan<byte> key = merge.InternalKey;
@@ -374,28 +335,10 @@ public sealed class LsmCompactor
         public byte[] ToArray() => _bytes.AsSpan(0, _length).ToArray();
     }
 
-    private static byte[] WidenRowInternalKey(byte[] internalKey)
-    {
-        ReadOnlySpan<byte> userKey = InternalKey.UserKey(internalKey);
-        if (userKey.Length != LsmRowKeyCodec.LegacyRowKeySize)
-        {
-            return internalKey;
-        }
-
-        var widened = new byte[LsmRowKeyCodec.RowKeySize + InternalKey.TagSize];
-        userKey.CopyTo(widened.AsSpan(LsmRowKeyCodec.RowKeySize - LsmRowKeyCodec.LegacyRowKeySize));
-        internalKey.AsSpan(userKey.Length).CopyTo(widened.AsSpan(LsmRowKeyCodec.RowKeySize));
-        return widened;
-    }
-
     /// <summary>
-    /// The user key a file's bounds are compared by. Row tables' manifests may still record 8-byte keys
-    /// of files written before row keys were widened; those are compared in their 16-byte form.
+    /// The user key a file's bounds are compared by.
     /// </summary>
-    private static byte[] BoundUserKey(byte[] internalKey, bool rowKeyed) =>
-        rowKeyed
-            ? LsmRowKeyCodec.NormalizeUserKey(InternalKey.UserKey(internalKey))
-            : InternalKey.UserKey(internalKey).ToArray();
+    private static byte[] BoundUserKey(byte[] internalKey, bool rowKeyed) => InternalKey.UserKey(internalKey).ToArray();
 
     private static LsmTableFileMetadata[] SelectTargetOverlapsClosed(
         IReadOnlyList<LsmTableFileMetadata> sourceFiles,
@@ -469,48 +412,6 @@ public sealed class LsmCompactor
         return (smallestUserKey, largestUserKey);
     }
 
-    private static List<(byte[] InternalKey, byte[] Value)> ReadEntries(byte[] bytes)
-    {
-        if (!SsTableFormat.TryReadFooter(bytes, out SsTableBlockHandle indexBlock, out _))
-        {
-            throw new InvalidDataException("SSTable footer is missing, corrupt, or points outside the table.");
-        }
-
-        var entries = new List<(byte[] InternalKey, byte[] Value)>();
-        SsTableBlockHandle dataBlock = ReadDataBlockHandle(SliceBlock(bytes, indexBlock));
-        ReadOnlySpan<byte> data = SliceBlock(bytes, dataBlock);
-        int offset = 0;
-        while (offset < data.Length)
-        {
-            int keyLength = ReadInt32(data, ref offset);
-            int valueLength = ReadInt32(data, ref offset);
-            if (keyLength < InternalKey.TagSize || valueLength < 0)
-            {
-                throw new InvalidDataException("SSTable data block contains a malformed entry length.");
-            }
-
-            byte[] internalKey = ReadSpan(data, ref offset, keyLength).ToArray();
-            byte[] value = ReadSpan(data, ref offset, valueLength).ToArray();
-            entries.Add((internalKey, value));
-        }
-
-        return entries;
-    }
-
-    private static SsTableBlockHandle ReadDataBlockHandle(ReadOnlySpan<byte> indexBlock)
-    {
-        int offset = 0;
-        int count = ReadInt32(indexBlock, ref offset);
-        if (count != 1)
-        {
-            throw new InvalidDataException($"SSTable v1 compactor expects exactly one data block, found {count}.");
-        }
-
-        long dataOffset = ReadInt64(indexBlock, ref offset);
-        int dataLength = ReadInt32(indexBlock, ref offset);
-        return new SsTableBlockHandle(dataOffset, dataLength);
-    }
-
     private static bool UserKeyRangeOverlaps(
         ReadOnlySpan<byte> leftSmallest,
         ReadOnlySpan<byte> leftLargest,
@@ -519,55 +420,6 @@ public sealed class LsmCompactor
     {
         return leftSmallest.SequenceCompareTo(rightLargest) <= 0
             && rightSmallest.SequenceCompareTo(leftLargest) <= 0;
-    }
-
-    private static ReadOnlySpan<byte> SliceBlock(byte[] source, SsTableBlockHandle handle)
-    {
-        if (handle.Offset < 0
-            || handle.Length <= 0
-            || handle.Offset > int.MaxValue
-            || handle.Offset + handle.Length > source.Length)
-        {
-            throw new InvalidDataException("SSTable block handle points outside the table.");
-        }
-
-        return source.AsSpan((int)handle.Offset, handle.Length);
-    }
-
-    private static int ReadInt32(ReadOnlySpan<byte> source, ref int offset)
-    {
-        ReadOnlySpan<byte> span = ReadSpan(source, ref offset, sizeof(int));
-        return BinaryPrimitives.ReadInt32LittleEndian(span);
-    }
-
-    private static long ReadInt64(ReadOnlySpan<byte> source, ref int offset)
-    {
-        ReadOnlySpan<byte> span = ReadSpan(source, ref offset, sizeof(long));
-        return BinaryPrimitives.ReadInt64LittleEndian(span);
-    }
-
-    private static ReadOnlySpan<byte> ReadSpan(ReadOnlySpan<byte> source, ref int offset, int length)
-    {
-        if (length < 0 || offset < 0 || offset > source.Length - length)
-        {
-            throw new InvalidDataException("SSTable block is truncated.");
-        }
-
-        ReadOnlySpan<byte> span = source.Slice(offset, length);
-        offset += length;
-        return span;
-    }
-
-    private static void WriteSstableAtomically(string filePath, byte[] bytes)
-    {
-        LsmDurableFileOperations.WriteFileAtomically(
-            filePath,
-            overwrite: false,
-            stream => stream.Write(bytes),
-            crashHook: null,
-            LsmCrashPoint.AfterSstableTempFileFsyncBeforeRename,
-            LsmCrashPoint.AfterSstableRenameBeforeDirectoryFsync,
-            LsmCrashPoint.AfterSstableDirectoryFsyncBeforeManifest);
     }
 
     private static void DeleteFileIfExists(string path)

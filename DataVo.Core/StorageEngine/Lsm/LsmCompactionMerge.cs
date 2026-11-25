@@ -104,7 +104,7 @@ internal sealed class LsmKeyedFileMergeSource(int ordinal, SsTableKeyedReader re
     }
 }
 
-/// <summary>Entries already in memory: a legacy (v1) file's, or a row-keyed file's table metadata.</summary>
+/// <summary>Entries already in memory: a row-keyed file's table metadata.</summary>
 internal sealed class LsmListMergeSource(int ordinal, IReadOnlyList<(byte[] InternalKey, byte[] Value)> entries) : LsmMergeSource(ordinal)
 {
     private int _index = -1;

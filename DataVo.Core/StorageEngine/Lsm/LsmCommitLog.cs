@@ -96,12 +96,12 @@ internal sealed class LsmCommitLog : IDisposable
 
         DataVo.Core.Compat.ThrowHelper.ThrowIfDisposed(_disposed, this);
         int payloadLength = LsmCommitBatchCodec.MeasureSize(batch);
-        int frameLength = checked(WalAppender.FrameHeaderSize + payloadLength);
+        int frameLength = checked(WalFrameFormat.FrameHeaderSize + payloadLength);
         byte[] rented = ArrayPool<byte>.Shared.Rent(frameLength);
         try
         {
             Span<byte> frame = rented.AsSpan(0, frameLength);
-            LsmCommitBatchCodec.Write(frame[WalAppender.FrameHeaderSize..], batch);
+            LsmCommitBatchCodec.Write(frame[WalFrameFormat.FrameHeaderSize..], batch);
 
             long lsn;
             lock (_appendGate)
@@ -199,7 +199,7 @@ internal sealed class LsmCommitLog : IDisposable
     // Same 32-byte header as the other binary WAL frames; the RowId slot carries the operation count.
     private static void WriteHeader(Span<byte> frame, long lsn, int operationCount)
     {
-        Span<byte> header = frame[..WalAppender.FrameHeaderSize];
+        Span<byte> header = frame[..WalFrameFormat.FrameHeaderSize];
         header.Clear();
         BinaryPrimitives.WriteInt32LittleEndian(header, frame.Length);
         BinaryPrimitives.WriteInt64LittleEndian(header[8..], lsn);

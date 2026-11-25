@@ -65,14 +65,7 @@ public sealed class LsmStreamingCompactionTests : IDisposable
         for (int i = 0; i < files; i++)
         {
             int level = i == 0 || i < files - 2 ? 0 : 1;
-            if (seed % 7 == 0 && i == 0)
-            {
-                AddLegacyRowFile(directory, manifest, level, random, keySpace);
-            }
-            else
-            {
-                AddRowFile(directory, manifest, level, random, keySpace, wideKeys, deleteRate, columnar && random.Next(4) != 0 ? Spec : null);
-            }
+            AddRowFile(directory, manifest, level, random, keySpace, wideKeys, deleteRate, columnar && random.Next(4) != 0 ? Spec : null);
         }
 
         AssertSameOutput(directory, manifest, LsmSstableFormat.RowKeyed, columnar ? Spec : null, drop, spillLimit: (seed % 3) switch { 0 => 1, 1 => 70_000, _ => SsTableSpillOptions.DefaultMemoryLimit });
@@ -108,22 +101,6 @@ public sealed class LsmStreamingCompactionTests : IDisposable
         }
 
         AssertSameOutput(directory, manifest, LsmSstableFormat.Keyed, columnar: null, drop: seed % 2 == 0);
-    }
-
-    [Theory]
-    [InlineData(1)]
-    [InlineData(2)]
-    public void LegacyCompaction_WritesTheSameBytesAsTheMaterializingCompactor(int seed)
-    {
-        var random = new Random(seed);
-        string directory = NewDirectory();
-        var manifest = new LsmManifest(Path.Combine(directory, "MANIFEST"));
-        for (int i = 0; i < 3; i++)
-        {
-            AddLegacyRowFile(directory, manifest, level: 0, random, keySpace: 500);
-        }
-
-        AssertSameOutput(directory, manifest, LsmSstableFormat.Legacy, columnar: null, drop: seed == 2);
     }
 
     [Fact]
@@ -240,7 +217,13 @@ public sealed class LsmStreamingCompactionTests : IDisposable
             File.Copy(file, Path.Combine(copy, Path.GetFileName(file)));
         }
 
-        var compactor = new LsmCompactor(directory, manifest) { Format = format, Columnar = columnar, SpillMemoryLimit = spillLimit };
+        var compactor = new LsmCompactor(directory, manifest)
+        {
+            Format = format,
+            BloomSuffixLength = format == LsmSstableFormat.Keyed ? LsmIndexKeyCodec.BloomSuffix : 0,
+            Columnar = columnar,
+            SpillMemoryLimit = spillLimit,
+        };
         LsmCompactionResult result = compactor.CompactLevel(0, 1, drop)!.Value;
         Assert.Empty(Directory.EnumerateFiles(directory, "*" + SsTableSpillOptions.Extension));
 
@@ -338,37 +321,6 @@ public sealed class LsmStreamingCompactionTests : IDisposable
         AddToManifest(manifest, number, level, name, length,
             LsmRowKeyCodec.RowInternalKey(entries[0].Key, entries[0].Sequence, entries[0].Type),
             LsmRowKeyCodec.RowInternalKey(entries[^1].Key, entries[^1].Sequence, entries[^1].Type));
-    }
-
-    private static void AddLegacyRowFile(string directory, LsmManifest manifest, int level, Random random, int keySpace)
-    {
-        var entries = new List<(byte[] InternalKey, byte[] Value)>();
-        foreach (int id in Enumerable.Range(0, random.Next(1, 400)).Select(_ => random.Next(keySpace)).Distinct())
-        {
-            var userKey = new byte[8];
-            InternalKey.EncodeInt64UserKey(userKey, id);
-            bool put = random.Next(4) != 0;
-            var internalKey = new byte[16];
-            InternalKey.Write(internalKey, userKey, (ulong)random.Next(1, 300), put ? LsmValueType.Put : LsmValueType.Deletion);
-            entries.Add((internalKey, put ? Row(random) : []));
-        }
-
-        var metadataKey = LsmRowKeyCodec.MetadataInternalKey((ulong)random.Next(1, 300));
-        entries.Add((metadataKey, LsmRowKeyCodec.EncodeTableMetadata(5_000, entries.Count)));
-        entries.Sort(static (x, y) => InternalKey.Compare(x.InternalKey, y.InternalKey));
-
-        var writer = new SsTableWriter(entries.Count);
-        foreach ((byte[] key, byte[] value) in entries)
-        {
-            writer.Add(key, value);
-        }
-
-        byte[] bytes = writer.Finish();
-        long number = manifest.AllocateFileNumber();
-        string name = $"{number:D6}.sst";
-        File.WriteAllBytes(Path.Combine(directory, name), bytes);
-        byte[][] rowKeys = [.. entries.Select(static e => e.InternalKey).Where(static k => LsmRowKeyCodec.IsRowKey(InternalKey.UserKey(k)))];
-        AddToManifest(manifest, number, level, name, bytes.Length, rowKeys.Length > 0 ? rowKeys[0] : entries[0].InternalKey, rowKeys.Length > 0 ? rowKeys[^1] : entries[^1].InternalKey);
     }
 
     private static byte[] KeyedKey(int key, int suffix)

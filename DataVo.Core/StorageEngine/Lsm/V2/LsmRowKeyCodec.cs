@@ -5,10 +5,7 @@ namespace DataVo.Core.StorageEngine.Lsm.V2;
 /// <summary>SSTable format a table writes on flush and compaction.</summary>
 internal enum LsmSstableFormat
 {
-    /// <summary>v1: one data block per file (generic byte keys; tests and legacy files).</summary>
-    Legacy = 0,
-
-    /// <summary>Row-keyed (16-byte row keys since v6; v2 and v4 files hold 8-byte row ids), page-aligned blocks, values.</summary>
+    /// <summary>Row-keyed (16-byte row keys since v6; v2 and v4 files hold integer row ids), page-aligned blocks, values.</summary>
     RowKeyed = 2,
 
     /// <summary>v3: keyed (variable byte keys), page-aligned blocks; used by index tables.</summary>
@@ -20,17 +17,9 @@ internal enum LsmSstableFormat
 /// (the 16 big-endian bytes of a <see cref="RowKey"/>, order-preserving) and the per-table metadata entry
 /// (next row id and live-row count) that every commit writes alongside its rows.
 /// </summary>
-/// <remarks>
-/// Before row keys were widened, row user keys were 8-byte order-preserving integers. Those still appear
-/// in legacy files (v1 SSTables, per-table WALs) and in manifests; <see cref="DecodeRowKey"/> reads both,
-/// and <see cref="NormalizeUserKey"/> widens an old key so it compares correctly against new ones.
-/// </remarks>
 internal static class LsmRowKeyCodec
 {
     public const int RowKeySize = 16;
-
-    /// <summary>Size of the integer row user keys written before row keys were widened.</summary>
-    public const int LegacyRowKeySize = sizeof(long);
 
     /// <summary>User key of the table metadata entry ("__datavo_next_row_id").</summary>
     public static readonly byte[] TableMetadataKey =
@@ -38,33 +27,13 @@ internal static class LsmRowKeyCodec
 
     public static void EncodeRowKey(RowKey key, Span<byte> destination) => key.WriteTo(destination);
 
-    /// <summary>Decodes a row user key: 16 bytes, or a legacy 8-byte integer key.</summary>
+    /// <summary>Decodes a 16-byte row user key.</summary>
     [System.Runtime.CompilerServices.MethodImpl(DataVo.Core.Compat.MethodImplCompat.AggressiveOptimization)]
-    public static RowKey DecodeRowKey(ReadOnlySpan<byte> userKey) => userKey.Length switch
-    {
-        RowKeySize => RowKey.Read(userKey),
-        // The legacy encoding is the sign-flipped integer, exactly the low half of the widened key.
-        LegacyRowKeySize => new RowKey(0, BinaryPrimitives.ReadUInt64BigEndian(userKey)),
-        _ => throw new InvalidDataException($"LSM storage engine expected a 16-byte row key, got {userKey.Length} bytes."),
-    };
+    public static RowKey DecodeRowKey(ReadOnlySpan<byte> userKey) => userKey.Length == RowKeySize
+        ? RowKey.Read(userKey)
+        : throw new InvalidDataException($"LSM storage engine expected a 16-byte row key, got {userKey.Length} bytes.");
 
-    public static bool IsRowKey(ReadOnlySpan<byte> userKey) => userKey.Length is RowKeySize or LegacyRowKeySize;
-
-    /// <summary>
-    /// A row user key in its current 16-byte form (a legacy 8-byte key gains eight leading zero bytes, so
-    /// byte order equals key order across old and new keys); any other user key is returned as is.
-    /// </summary>
-    public static byte[] NormalizeUserKey(ReadOnlySpan<byte> userKey)
-    {
-        if (userKey.Length != LegacyRowKeySize)
-        {
-            return userKey.ToArray();
-        }
-
-        var widened = new byte[RowKeySize];
-        userKey.CopyTo(widened.AsSpan(RowKeySize - LegacyRowKeySize));
-        return widened;
-    }
+    public static bool IsRowKey(ReadOnlySpan<byte> userKey) => userKey.Length == RowKeySize;
 
     public static bool IsTableMetadataKey(ReadOnlySpan<byte> userKey) => userKey.SequenceEqual(TableMetadataKey);
 

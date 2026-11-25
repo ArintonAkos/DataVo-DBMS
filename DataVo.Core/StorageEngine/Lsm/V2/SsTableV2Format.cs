@@ -50,8 +50,8 @@ internal static class SsTableV2Format
     /// <summary>Whether a file version keys rows by 16-byte row keys (v6 and v8).</summary>
     public static bool HasWideKeys(ushort version) => version is WideVersion or ColumnarVersion;
 
-    /// <summary>Same magic as v1 ("SLVD"); the version field tells the layouts apart.</summary>
-    public const uint Magic = SsTableFormat.Magic;
+    /// <summary>File magic ("SLVD") shared by the row-keyed and keyed layouts; the version field tells them apart.</summary>
+    public const uint Magic = 0x44564C53U;
 
     public const int BlockHeaderSize = 16;
     public const int EntrySize = 24;

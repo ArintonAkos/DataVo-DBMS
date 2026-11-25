@@ -198,8 +198,8 @@ public abstract class VectorIndexTestsBase(DataVoConfig config, string testDbNam
         var result = ExecuteAndReturn(@"
             SELECT i.Name, e.Id, e.Emb <=> '[0.95,0.05,0]' AS distance
             FROM Embeddings e
-            WHERE e.Status = 'active'
             JOIN Items i ON e.Id = i.Id
+            WHERE e.Status = 'active'
             ORDER BY distance ASC
             LIMIT 2");
 
@@ -228,8 +228,8 @@ public abstract class VectorIndexTestsBase(DataVoConfig config, string testDbNam
         var result = ExecuteAndReturn(@"
             SELECT m.Title, e.Id, e.Emb <=> '[0.95,0.05,0]' AS distance
             FROM Embeddings e
-            WHERE e.Category = 'tech' AND e.Score >= 95
             JOIN Metadata m ON e.Id = m.Id
+            WHERE e.Category = 'tech' AND e.Score >= 95
             ORDER BY distance ASC
             LIMIT 5");
 
@@ -259,8 +259,8 @@ public abstract class VectorIndexTestsBase(DataVoConfig config, string testDbNam
         var result = ExecuteAndReturn(@"
             SELECT r.Name, e.Id, e.Emb <=> '[0.95,0.05,0]' AS distance
             FROM Embeddings e
-            WHERE e.DeletedAt IS NULL
             JOIN Refs r ON e.Id = r.Id
+            WHERE e.DeletedAt IS NULL
             ORDER BY distance ASC
             LIMIT 5");
 
@@ -288,8 +288,8 @@ public abstract class VectorIndexTestsBase(DataVoConfig config, string testDbNam
         var result = ExecuteAndReturn(@"
             SELECT i.Name, e.Id
             FROM Embeddings e
-            WHERE e.Status = 'active' OR e.Status = 'pending'
             JOIN Items i ON e.Id = i.Id
+            WHERE e.Status = 'active' OR e.Status = 'pending'
             ORDER BY e.Id ASC
             LIMIT 5");
 
@@ -340,8 +340,8 @@ public abstract class VectorIndexTestsBase(DataVoConfig config, string testDbNam
         var result = ExecuteAndReturn(@"
             SELECT e.Id, i.Name
             FROM Embeddings e
-            WHERE e.Emb <=> '[0.95,0.05,0]' < 0.2 AND e.Status = 'active'
             JOIN Items i ON e.Id = i.Id
+            WHERE e.Emb <=> '[0.95,0.05,0]' < 0.2 AND e.Status = 'active'
             ORDER BY e.Id ASC");
 
         Assert.False(result.IsError, string.Join(" | ", result.Messages));
@@ -414,8 +414,8 @@ public abstract class VectorIndexTestsBase(DataVoConfig config, string testDbNam
             var result = ExecuteAndReturn(@"
                 SELECT i.Name, e.Id
                 FROM Embeddings e
-                WHERE e.Emb <=> '[0.95,0.05,0]' < '0,2'
                 JOIN Items i ON e.Id = i.Id
+                WHERE e.Emb <=> '[0.95,0.05,0]' < '0,2'
                 ORDER BY e.Id ASC");
 
             Assert.False(result.IsError, string.Join(" | ", result.Messages));
@@ -807,9 +807,9 @@ public class InMemoryVectorIndexTests : VectorIndexTestsBase
     public InMemoryVectorIndexTests() : base(new DataVoConfig { StorageMode = StorageMode.InMemory }, "VectorDB_Mem") { }
 }
 
-public class DiskVectorIndexTests : VectorIndexTestsBase
+public class LsmVectorIndexTests : VectorIndexTestsBase
 {
-    public DiskVectorIndexTests() : base(new DataVoConfig { StorageMode = StorageMode.Disk, DiskStoragePath = "./test_datavo_vector" }, "VectorDB_Disk") { }
+    public LsmVectorIndexTests() : base(new DataVoConfig { StorageMode = StorageMode.Lsm, DiskStoragePath = "./test_datavo_lsm_vector" }, "VectorDB_Lsm") { }
 }
 
 public class WasmVectorPlannerIntegrationTests : SqlExecutionTestsBase
