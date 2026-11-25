@@ -644,14 +644,16 @@ public sealed class DataVoContext : IDisposable
             Engine.IndexManager);
 
         ChangeRecorder? recorder = ChangeRecorder.TryCreate(Engine, databaseName);
-        // The stamp is taken in the write unit and before the table lock (see CommitClock).
+        // The stamp is taken in the write unit and before the table's locks (see CommitClock).
         using MVCC.CommitClock.UnitScope writeUnit = MVCC.CommitClock.OpenUnit();
         long statementTxId = MvccCoordinator.ResolveStatementTransactionId(Engine, null);
-        string tableLockKey = GetRetainedWriteLockKey(databaseName, tableName);
-        Engine.LockManager.AcquireRetainedWriteLock(tableLockKey);
 
+        // One row needs only the table's intent lock and its own key values, so inserts and row updates of other
+        // rows run side by side; the keys are reserved before they are checked and kept until the row is published.
+        Transactions.KeyLockSet keyLocks = Transactions.KeyLockSet.Rent(Engine.LockManager, databaseName, tableName, takeTableIntent: true);
         try
         {
+            keyLocks.ReserveInsertKeys(Engine.Catalog, columns, row);
             RowKey rowId;
             using (IWriteBatchScope batch = Engine.StorageContext.BeginWriteBatch())
             {
@@ -670,7 +672,7 @@ public sealed class DataVoContext : IDisposable
         }
         finally
         {
-            Engine.LockManager.ReleaseRetainedWriteLock(tableLockKey);
+            keyLocks.Release();
         }
     }
 
@@ -742,11 +744,23 @@ public sealed class DataVoContext : IDisposable
         // The stamp is taken in the write unit and before the table lock (see CommitClock).
         using MVCC.CommitClock.UnitScope writeUnit = MVCC.CommitClock.OpenUnit();
         long statementTxId = MvccCoordinator.ResolveStatementTransactionId(Engine, null);
-        string tableLockKey = GetRetainedWriteLockKey(databaseName, tableName);
-        Engine.LockManager.AcquireRetainedWriteLock(tableLockKey);
+        // One row takes the table's intent lock and its key values, as InsertTyped does; several rows escalate to the
+        // table's write lock instead of one key lock per row.
+        Transactions.KeyLockSet? keyLocks = null;
+        string? tableLockKey = null;
+        if (rows.Count == 1 && rows[0] is not null)
+        {
+            keyLocks = Transactions.KeyLockSet.Rent(Engine.LockManager, databaseName, tableName, takeTableIntent: true);
+        }
+        else
+        {
+            tableLockKey = GetRetainedWriteLockKey(databaseName, tableName);
+            Engine.LockManager.AcquireRetainedWriteLock(tableLockKey);
+        }
 
         try
         {
+            keyLocks?.ReserveInsertKeys(Engine.Catalog, columns, rows[0]);
             IReadOnlyList<RowKey> rowIds;
             using (IWriteBatchScope batch = Engine.StorageContext.BeginWriteBatch())
             {
@@ -765,7 +779,14 @@ public sealed class DataVoContext : IDisposable
         }
         finally
         {
-            Engine.LockManager.ReleaseRetainedWriteLock(tableLockKey);
+            if (keyLocks is not null)
+            {
+                keyLocks.Release();
+            }
+            else
+            {
+                Engine.LockManager.ReleaseRetainedWriteLock(tableLockKey!);
+            }
         }
     }
 
