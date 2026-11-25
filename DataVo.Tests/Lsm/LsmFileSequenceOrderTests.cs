@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using System.Text;
 using DataVo.Core;
 using DataVo.Core.StorageEngine.Lsm;
@@ -40,10 +41,15 @@ public sealed class LsmFileSequenceOrderTests : IDisposable
         for (int round = 0; round < 6; round++)
         {
             using var stop = new CancellationTokenSource();
-            Task[] writers = [.. Enumerable.Range(0, 4).Select(worker => Task.Run(() => Write(engine, (round * 31) + worker, stop.Token)))];
-            for (int flush = 0; flush < 3; flush++)
+            var written = new StrongBox<int>();
+            Task[] writers = [.. Enumerable.Range(0, 4).Select(worker => Task.Run(() => Write(engine, (round * 31) + worker, written, stop.Token)))];
+
+            // Flush at write-count milestones rather than after fixed sleeps, so a slow runner (where the writers
+            // barely start within a few milliseconds) still races flushes against a known amount of committing.
+            for (int flush = 1; flush <= 3; flush++)
             {
-                Thread.Sleep(5);
+                int target = flush * 1_000;
+                SpinWait.SpinUntil(() => Volatile.Read(ref written.Value) >= target || writers.All(static writer => writer.IsCompleted), TimeSpan.FromSeconds(30));
                 engine.FlushTableForTesting(Db, Table);
             }
 
@@ -60,11 +66,11 @@ public sealed class LsmFileSequenceOrderTests : IDisposable
         Assert.True(compared > 0, "No two files ever shared a key range, so the test compared nothing.");
     }
 
-    private static void Write(LsmStorageEngine engine, int seed, CancellationToken stop)
+    private static void Write(LsmStorageEngine engine, int seed, StrongBox<int> written, CancellationToken stop)
     {
         var random = new Random(seed);
         var mine = new List<RowKey>();
-        for (int step = 0; !stop.IsCancellationRequested && step < 1_500; step++)
+        for (int step = 0; !stop.IsCancellationRequested && step < 1_500; step++, Interlocked.Increment(ref written.Value))
         {
             int action = random.Next(10);
             if (mine.Count == 0 || action < 5)
