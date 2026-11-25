@@ -377,7 +377,7 @@ public sealed class LockManager
         TableLockEntry tableLock = FindTableLock(databaseName, tableName, "intent");
         if (Runtime.DeferredPublication.Current is { } publication)
         {
-            publication.DeferRelease(() => ReleaseTableRead(tableLock));
+            DeferTableReadRelease(publication, tableLock);
             return;
         }
 
@@ -707,14 +707,24 @@ public sealed class LockManager
 
     private void ReleaseRowEntryWriteLock(LockId id, bool countsAsRowWrite)
     {
-        if (Runtime.DeferredPublication.Current is { } publication
-            && publication.TryHandleRelease("R:" + id, write: true, () => ReleaseRowEntryWriteLockCore(id, countsAsRowWrite)))
+        if (Runtime.DeferredPublication.Current is { } publication && TryDeferRowEntryRelease(publication, id, countsAsRowWrite))
         {
             return;
         }
 
         ReleaseRowEntryWriteLockCore(id, countsAsRowWrite);
     }
+
+    // Separate methods so the closures are only allocated when a release is deferred: a lambda capturing a
+    // method's parameters makes the compiler allocate its closure on every call of that method.
+    private bool TryDeferRowEntryRelease(Runtime.DeferredPublication publication, LockId id, bool countsAsRowWrite) =>
+        publication.TryHandleRelease("R:" + id, write: true, () => ReleaseRowEntryWriteLockCore(id, countsAsRowWrite));
+
+    private bool TryDeferTableRelease(Runtime.DeferredPublication publication, TableLockEntry tableLock, bool write) =>
+        publication.TryHandleRelease("T:" + tableLock.Key, write, () => ReleaseTableLockCore(tableLock, write));
+
+    private void DeferTableReadRelease(Runtime.DeferredPublication publication, TableLockEntry tableLock) =>
+        publication.DeferRelease(() => ReleaseTableRead(tableLock));
 
     private void ReleaseRowEntryWriteLockCore(LockId id, bool countsAsRowWrite)
     {
@@ -804,8 +814,7 @@ public sealed class LockManager
     private void ReleaseTableLock(TableLockEntry tableLock, bool write)
     {
         // Inside a durable write batch, write locks stay held until the statement is published.
-        if (Runtime.DeferredPublication.Current is { } publication
-            && publication.TryHandleRelease("T:" + tableLock.Key, write, () => ReleaseTableLockCore(tableLock, write)))
+        if (Runtime.DeferredPublication.Current is { } publication && TryDeferTableRelease(publication, tableLock, write))
         {
             return;
         }
