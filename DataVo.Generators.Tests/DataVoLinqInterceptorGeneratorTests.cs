@@ -7,6 +7,7 @@ using static DataVo.Generators.Tests.LinqGeneratorHarness;
 namespace DataVo.Generators.Tests;
 
 /// <summary>What the interceptor generator translates, what it leaves to scan, and what it tells the developer.</summary>
+[Collection(LinqGeneratorCollection.Name)]
 public class DataVoLinqInterceptorGeneratorTests
 {
     [Theory]

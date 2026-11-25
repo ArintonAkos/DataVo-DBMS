@@ -8,6 +8,7 @@ namespace DataVo.Generators.Tests;
 /// What the interceptor generator does with sort keys, <c>Select</c> projections and <c>ExecuteUpdate</c> setters:
 /// what it compiles, what it leaves to run in memory, and what it refuses.
 /// </summary>
+[Collection(LinqGeneratorCollection.Name)]
 public class DataVoLinqShapeGeneratorTests
 {
     private const string Core = "global::DataVo.Core.";
