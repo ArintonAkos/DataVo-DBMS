@@ -16,6 +16,7 @@ public sealed class Reading
 }
 
 /// <summary>Enumerating a table query keeps a bounded amount of memory alive, however many rows it returns.</summary>
+[Collection(AllocationSensitiveCollection.Name)]
 public sealed class LinqStreamingMemoryTests : IDisposable
 {
     private const int Rows = 25_000;

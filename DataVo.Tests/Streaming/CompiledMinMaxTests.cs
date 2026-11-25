@@ -57,6 +57,7 @@ public sealed class RefFloat
 /// <c>Min</c> and <c>Max</c> over a compiled query return what LINQ returns over the same rows in memory, in every
 /// storage mode, whether the scan finds the value itself or the rows are read.
 /// </summary>
+[Collection(AllocationSensitiveCollection.Name)]
 public sealed class CompiledMinMaxTests : IDisposable
 {
     private readonly string _directory = Path.Combine(Path.GetTempPath(), $"datavo_minmax_{Guid.NewGuid():N}");

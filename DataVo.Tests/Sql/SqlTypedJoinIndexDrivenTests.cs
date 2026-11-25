@@ -11,6 +11,7 @@ namespace DataVo.Tests.Sql;
 /// keys, duplicate keys on the hashed side, rows updated and deleted after the index was built, groups and top
 /// rows in the scan's order. A LEFT JOIN, or a hashed table that names too many rows, keeps the scan.
 /// </summary>
+[Collection(AllocationSensitiveCollection.Name)]
 public sealed class SqlTypedJoinIndexDrivenTests
 {
     public static TheoryData<StorageMode> Modes => new() { StorageMode.InMemory, StorageMode.Lsm };

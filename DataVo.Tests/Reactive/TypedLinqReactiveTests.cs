@@ -29,6 +29,7 @@ public readonly record struct NumericHudSlot(int Id, int Score);
 /// End-to-end and zero-allocation verification of typed LINQ reactive subscriptions
 /// (<c>Subscribe</c> and <c>SubscribeInto</c>) on <c>db.Table&lt;T&gt;()</c>.
 /// </summary>
+[Collection(AllocationSensitiveCollection.Name)]
 public sealed class TypedLinqReactiveTests : IDisposable
 {
     private readonly string _directory = Path.Combine(Path.GetTempPath(), $"datavo_linq_reactive_{Guid.NewGuid():N}");

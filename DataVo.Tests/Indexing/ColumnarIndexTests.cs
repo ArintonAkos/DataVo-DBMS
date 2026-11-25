@@ -46,6 +46,7 @@ public sealed class ColumnarDated
 /// Compiled queries over a table with a columnar index. Every answer is checked against the same rows held in a
 /// dictionary after each kind of change a table can see, and the index must be what answered.
 /// </summary>
+[Collection(AllocationSensitiveCollection.Name)]
 public sealed class ColumnarIndexTests
 {
     private static readonly ReactiveRowSchema Schema = new("Id", "Name", "Level", "Gold", "Ratio", "Speed", "Bonus", "Alive", "Rank");

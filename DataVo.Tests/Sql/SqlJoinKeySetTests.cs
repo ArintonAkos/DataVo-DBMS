@@ -13,6 +13,7 @@ namespace DataVo.Tests.Sql;
 /// run the same joins over keys of every kind (consecutive, with gaps, negative, far apart, at the ends of
 /// BIGINT, repeated) and compare the answers with LINQ over the seed data, on InMemory and Lsm.
 /// </summary>
+[Collection(AllocationSensitiveCollection.Name)]
 public sealed class SqlJoinKeySetTests
 {
     public static TheoryData<StorageMode, string> ModesAndKeys

@@ -57,6 +57,7 @@ public static class HeroLimits
 /// Table queries written as lambdas return what the same lambda returns over the rows in memory, whether the
 /// generator compiled them into a prepared statement or left them to scan.
 /// </summary>
+[Collection(AllocationSensitiveCollection.Name)]
 public sealed class LinqInterceptorTests : IDisposable
 {
     private static readonly Guid KnownTag = new("11111111-2222-3333-4444-555555555555");

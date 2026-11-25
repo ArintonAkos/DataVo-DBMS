@@ -15,6 +15,7 @@ namespace DataVo.Tests.Lsm;
 /// in memory (kept here as <see cref="ReferenceCompaction"/>), for row-keyed files with and without a columnar
 /// segment, legacy v1 row files, keyed (v3) files and legacy outputs.
 /// </summary>
+[Collection(AllocationSensitiveCollection.Name)]
 public sealed class LsmStreamingCompactionTests : IDisposable
 {
     private static readonly Column[] Columns =
@@ -167,6 +168,12 @@ public sealed class LsmStreamingCompactionTests : IDisposable
     [Fact]
     public void Compaction_AllocatesNoMemoryPerRow()
     {
+        // Two full warm-up compactions, so the first measured one does not pay for tiered JIT and type loading.
+        for (int pass = 0; pass < 2; pass++)
+        {
+            MeasureCompaction(rows: 50_000);
+        }
+
         (long small, long smallReference) = MeasureCompaction(rows: 50_000);
         (long large, long largeReference) = MeasureCompaction(rows: 400_000);
         _output.WriteLine($"50K rows: {small:N0} B (reference {smallReference:N0} B); 400K rows: {large:N0} B (reference {largeReference:N0} B)");

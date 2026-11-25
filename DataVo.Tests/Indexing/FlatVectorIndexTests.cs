@@ -3,6 +3,7 @@ using DataVo.Core.Indexing.Flat;
 
 namespace DataVo.Tests.Indexing;
 
+[Collection(AllocationSensitiveCollection.Name)]
 public class FlatVectorIndexTests
 {
     [Fact]

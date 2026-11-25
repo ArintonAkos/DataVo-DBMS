@@ -11,6 +11,7 @@ namespace DataVo.Tests.Reactive;
 /// WHERE and the hidden identity text for joins. Each randomized case maintains a live view from deltas and
 /// compares it with a from-scratch query after every step.
 /// </summary>
+[Collection(AllocationSensitiveCollection.Name)]
 public class TypedArrangementTests
 {
     [Theory]

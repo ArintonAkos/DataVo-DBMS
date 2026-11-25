@@ -10,6 +10,7 @@ namespace DataVo.Tests.Lsm;
 /// allocation on warm hits, a CRC check on every physical read (also after eviction), clean errors on
 /// truncation, and safe eviction under concurrent readers.
 /// </summary>
+[Collection(AllocationSensitiveCollection.Name)]
 public sealed class LsmBlockCacheTests : IDisposable
 {
     private readonly string _directory = TestStorageDirectories.Create("lsm_block_cache");
@@ -53,10 +54,14 @@ public sealed class LsmBlockCacheTests : IDisposable
         var cache = new LsmBlockCache(8 * 1024 * 1024);
         using SsTableV2Reader reader = SsTableV2Reader.Open(path, LsmReadMode.PositionalRead, cache);
 
-        // Warm every block (and the JIT).
-        for (long rowId = 1; rowId <= 4_000; rowId++)
+        // Two full warm-up passes: the first loads every block into the cache, the second runs the warm-hit
+        // path itself, so tiered JIT has recompiled it before the measured window.
+        for (int pass = 0; pass < 2; pass++)
         {
-            Assert.Equal(Value(rowId).Length, Length(reader, rowId));
+            for (long rowId = 1; rowId <= 4_000; rowId++)
+            {
+                Assert.Equal(Value(rowId).Length, Length(reader, rowId));
+            }
         }
 
         long before = GC.GetAllocatedBytesForCurrentThread();

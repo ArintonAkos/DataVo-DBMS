@@ -12,6 +12,7 @@ namespace DataVo.Tests.Sql;
 /// and group columns with LIMIT and OFFSET, ties kept in the order groups first appear, a NULL key forming one
 /// group, DISTINCT after a LIMIT, and keys of type INT, BIGINT, FLOAT, VARCHAR and of two columns.
 /// </summary>
+[Collection(AllocationSensitiveCollection.Name)]
 public sealed class SqlTypedGroupByTests
 {
     public static TheoryData<StorageMode> Modes => new() { StorageMode.InMemory, StorageMode.Lsm };

@@ -12,6 +12,7 @@ namespace DataVo.Tests.Sql;
 /// keys, empty tables and empty results, LEFT JOIN conditions tested after the join, and joined rows returned
 /// without a bounded top-N. Every query must stay on the typed path (no general join).
 /// </summary>
+[Collection(AllocationSensitiveCollection.Name)]
 public sealed class SqlTypedJoinBuildSideTests
 {
     public static TheoryData<StorageMode> Modes => new() { StorageMode.InMemory, StorageMode.Lsm };

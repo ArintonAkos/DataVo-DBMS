@@ -12,6 +12,7 @@ namespace DataVo.Tests.E2E.DQL;
 /// Pins the behaviour prepared statements must share with plain SQL: results a caller can keep, permission
 /// checks, plan invalidation, parameter positions, and index maintenance on the fast paths.
 /// </summary>
+[Collection(AllocationSensitiveCollection.Name)]
 public class PreparedStatementCorrectnessTests : IDisposable
 {
     private readonly string _directory = Path.Combine(Path.GetTempPath(), $"datavo_prep_correct_{Guid.NewGuid():N}");

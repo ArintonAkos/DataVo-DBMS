@@ -2,6 +2,7 @@ using DataVo.Core.StorageEngine.Lsm;
 
 namespace DataVo.Tests.Lsm;
 
+[Collection(AllocationSensitiveCollection.Name)]
 public class ArenaTests
 {
     [Fact]

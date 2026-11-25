@@ -15,6 +15,7 @@ namespace DataVo.Tests.Reactive;
 /// <c>SubscribeZeroAlloc</c> path and asserts the borrowed delta carries the correct per-group
 /// aggregate results for add / update / remove transitions.
 /// </summary>
+[Collection(AllocationSensitiveCollection.Name)]
 public class AggregateBorrowedTests
 {
     private const string GroupBySql =
@@ -184,14 +185,19 @@ public class AggregateBorrowedTests
                     after: Row(("Id", 2), ("Category", "sports"), ("Stake", 100))),
             };
 
+            // Two full warm-up passes of the measured loop's length, so tiered JIT has recompiled the dispatch
+            // path before the measured window.
             long sink = 0;
-            for (int i = 0; i < 2_000; i++)
+            for (int pass = 0; pass < 2; pass++)
             {
-                builder.Reset();
-                op.ApplyInto(batch, builder);
-                QueryChangeRef c = builder.Build();
-                for (int r = 0; r < c.Added.Count; r++) sink += Num(c.Added[r][1]);
-                for (int r = 0; r < c.Updated.Count; r++) sink += Num(c.Updated[r][1]);
+                for (int i = 0; i < 5_000; i++)
+                {
+                    builder.Reset();
+                    op.ApplyInto(batch, builder);
+                    QueryChangeRef c = builder.Build();
+                    for (int r = 0; r < c.Added.Count; r++) sink += Num(c.Added[r][1]);
+                    for (int r = 0; r < c.Updated.Count; r++) sink += Num(c.Updated[r][1]);
+                }
             }
 
             long before = GC.GetAllocatedBytesForCurrentThread();

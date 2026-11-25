@@ -2,6 +2,7 @@ using DataVo.Core.Runtime.Reactive;
 
 namespace DataVo.Tests.Reactive;
 
+[Collection(AllocationSensitiveCollection.Name)]
 public sealed class CellValueGuidTests
 {
     [Fact]

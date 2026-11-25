@@ -11,6 +11,7 @@ namespace DataVo.Tests.Sql;
 /// NULLs, a WHERE condition on the NULL-supplied side is tested after the join, and a comparison with NULL is
 /// unknown. Routing checks show these queries no longer run the general join.
 /// </summary>
+[Collection(AllocationSensitiveCollection.Name)]
 public sealed class SqlTypedJoinTests
 {
     public static TheoryData<StorageMode> Modes => new() { StorageMode.InMemory, StorageMode.Lsm };

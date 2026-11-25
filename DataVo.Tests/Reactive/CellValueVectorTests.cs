@@ -7,6 +7,7 @@ namespace DataVo.Tests.Reactive;
 /// support. Ownership is strict at every boundary — the cell clones on store and on every read, so a
 /// stored vector can never be mutated through an input reference or a returned reference.
 /// </summary>
+[Collection(AllocationSensitiveCollection.Name)]
 public class CellValueVectorTests
 {
     [Fact]

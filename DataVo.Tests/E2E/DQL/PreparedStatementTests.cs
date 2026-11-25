@@ -11,6 +11,7 @@ namespace DataVo.Tests.E2E.DQL;
 /// End-to-end tests covering <see cref="DataVoPreparedStatement"/>, parameter binding, SQL injection immunity,
 /// multi-threaded concurrent execution, ADO.NET <see cref="DataVoCommand.Prepare"/>, and steady-state zero-allocation point lookups.
 /// </summary>
+[Collection(AllocationSensitiveCollection.Name)]
 public class PreparedStatementTests
 {
     [Theory]

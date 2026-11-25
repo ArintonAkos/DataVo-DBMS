@@ -40,6 +40,7 @@ public sealed class PlainRow
 /// Sphere, box and nearest-neighbor queries over <see cref="Vector3"/> columns return exactly what the same test
 /// computed over every row in memory returns, in every storage mode, with and without an HNSW index.
 /// </summary>
+[Collection(AllocationSensitiveCollection.Name)]
 public sealed class SpatialQueryTests : IDisposable
 {
     private readonly string _directory = Path.Combine(Path.GetTempPath(), $"datavo_spatial_{Guid.NewGuid():N}");

@@ -60,6 +60,7 @@ public sealed class RefToken
 /// <see cref="RowRef"/> streams read every column type exactly as the model path reads it, in every storage mode,
 /// page after page, and a warmed-up pass over 50,000 rows allocates nothing.
 /// </summary>
+[Collection(AllocationSensitiveCollection.Name)]
 public sealed class RowRefStreamTests : IDisposable
 {
     private const int Id = 0, Health = 1, Score = 2, Ratio = 3, Alive = 4, Tag = 5, Name = 6, Position = 7, Nickname = 8, Bonus = 9;

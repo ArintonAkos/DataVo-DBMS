@@ -4,6 +4,7 @@ using DataVo.Core.Runtime.Reactive;
 
 namespace DataVo.Tests.Reactive;
 
+[Collection(AllocationSensitiveCollection.Name)]
 public class VipExposureBorrowedTests
 {
     private static IReadOnlyDictionary<string, object?> Row(params (string Key, object? Value)[] cells)

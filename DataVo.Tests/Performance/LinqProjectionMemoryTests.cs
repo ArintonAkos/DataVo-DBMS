@@ -18,6 +18,7 @@ public sealed class Document
 /// A compiled <c>Select</c> reads only the columns it projects: a projection that leaves out a wide text column never
 /// decodes it, whether the engine streams, sorts or keeps a top-N, and paging stops the scan early.
 /// </summary>
+[Collection(AllocationSensitiveCollection.Name)]
 public sealed class LinqProjectionMemoryTests : IDisposable
 {
     private const int Rows = 2_000;

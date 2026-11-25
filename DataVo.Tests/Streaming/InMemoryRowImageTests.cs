@@ -30,6 +30,7 @@ public sealed class RefSample
 /// up by later ones, so every answer is checked against the same rows held in a dictionary, after each kind of
 /// change a table can see.
 /// </summary>
+[Collection(AllocationSensitiveCollection.Name)]
 public sealed class InMemoryRowImageTests
 {
     private static readonly ReactiveRowSchema Schema = new("Id", "Name", "Level", "Gold", "Ratio", "Bonus", "Alive");
