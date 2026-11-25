@@ -1,11 +1,14 @@
 using RowRef = DataVo.Core.Runtime.Reactive.RowRef;
 using System.Globalization;
+using System.Runtime.CompilerServices;
 using DataVo.Core;
 using DataVo.Core.Parser.AST;
 using DataVo.Core.Runtime;
 using DataVo.Core.Runtime.Changes;
 using DataVo.Core.Runtime.Reactive;
 using DataVo.Core.StorageEngine.Config;
+using DataVo.Tests.Performance;
+using Xunit.Abstractions;
 
 namespace DataVo.Tests.Reactive;
 
@@ -16,8 +19,9 @@ namespace DataVo.Tests.Reactive;
 /// aggregate results for add / update / remove transitions.
 /// </summary>
 [Collection(AllocationSensitiveCollection.Name)]
-public class AggregateBorrowedTests
+public class AggregateBorrowedTests(ITestOutputHelper output)
 {
+    private readonly ITestOutputHelper _output = output;
     private const string GroupBySql =
         "SELECT Category, SUM(Stake) AS Total, COUNT(*) AS Cnt FROM Orders GROUP BY Category";
 
@@ -185,34 +189,40 @@ public class AggregateBorrowedTests
                     after: Row(("Id", 2), ("Category", "sports"), ("Stake", 100))),
             };
 
-            // Two full warm-up passes of the measured loop's length, so tiered JIT has recompiled the dispatch
-            // path before the measured window.
+            // The measured pass runs twice first, so it and everything it calls are compiled before the window.
             long sink = 0;
             for (int pass = 0; pass < 2; pass++)
             {
-                for (int i = 0; i < 5_000; i++)
-                {
-                    builder.Reset();
-                    op.ApplyInto(batch, builder);
-                    QueryChangeRef c = builder.Build();
-                    for (int r = 0; r < c.Added.Count; r++) sink += Num(c.Added[r][1]);
-                    for (int r = 0; r < c.Updated.Count; r++) sink += Num(c.Updated[r][1]);
-                }
+                sink += DispatchMinMax(op, batch, builder, iterations: 5_000);
             }
 
-            long before = GC.GetAllocatedBytesForCurrentThread();
-            for (int i = 0; i < 5_000; i++)
-            {
-                builder.Reset();
-                op.ApplyInto(batch, builder);
-                QueryChangeRef c = builder.Build();
-                for (int r = 0; r < c.Updated.Count; r++) sink += Num(c.Updated[r][1]);
-            }
-            long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+            var window = new AllocationWindow();
+            window.Start();
+            sink += DispatchMinMax(op, batch, builder, iterations: 5_000);
+            long allocated = window.Stop();
+            _output.WriteLine(window.ToString());
 
             Assert.True(sink > 0);
             Assert.Equal(0L, allocated);
         }
+    }
+
+    // The measured pass, shared by the warm-up and the measurement; fully optimized from its first call, so no
+    // tier-up or on-stack replacement of this loop can land inside the window.
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
+    private static long DispatchMinMax(AggregateReactiveQuery op, RowChange[] batch, QueryChangeBuilder builder, int iterations)
+    {
+        long sink = 0;
+        for (int i = 0; i < iterations; i++)
+        {
+            builder.Reset();
+            op.ApplyInto(batch, builder);
+            QueryChangeRef c = builder.Build();
+            for (int r = 0; r < c.Added.Count; r++) sink += Num(c.Added[r][1]);
+            for (int r = 0; r < c.Updated.Count; r++) sink += Num(c.Updated[r][1]);
+        }
+
+        return sink;
     }
 
     [Fact]

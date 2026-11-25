@@ -1,7 +1,10 @@
+using System.Runtime.CompilerServices;
 using System.Text;
 using DataVo.Core;
 using DataVo.Core.StorageEngine.Lsm;
 using DataVo.Core.StorageEngine.Lsm.V2;
+using DataVo.Tests.Performance;
+using Xunit.Abstractions;
 
 namespace DataVo.Tests.Lsm;
 
@@ -11,8 +14,9 @@ namespace DataVo.Tests.Lsm;
 /// truncation, and safe eviction under concurrent readers.
 /// </summary>
 [Collection(AllocationSensitiveCollection.Name)]
-public sealed class LsmBlockCacheTests : IDisposable
+public sealed class LsmBlockCacheTests(ITestOutputHelper output) : IDisposable
 {
+    private readonly ITestOutputHelper _output = output;
     private readonly string _directory = TestStorageDirectories.Create("lsm_block_cache");
 
     public void Dispose()
@@ -54,19 +58,36 @@ public sealed class LsmBlockCacheTests : IDisposable
         var cache = new LsmBlockCache(8 * 1024 * 1024);
         using SsTableV2Reader reader = SsTableV2Reader.Open(path, LsmReadMode.PositionalRead, cache);
 
-        // Two full warm-up passes: the first loads every block into the cache, the second runs the warm-hit
-        // path itself, so tiered JIT has recompiled it before the measured window.
-        for (int pass = 0; pass < 2; pass++)
+        // Load every block into the cache, then run the measured pass itself twice so it and everything it calls
+        // are compiled before the window.
+        for (long rowId = 1; rowId <= 4_000; rowId++)
         {
-            for (long rowId = 1; rowId <= 4_000; rowId++)
-            {
-                Assert.Equal(Value(rowId).Length, Length(reader, rowId));
-            }
+            Assert.Equal(Value(rowId).Length, Length(reader, rowId));
         }
 
-        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int pass = 0; pass < 2; pass++)
+        {
+            Assert.True(LookupAll(reader, passes: 5) > 0);
+        }
+
+        var window = new AllocationWindow();
+        long missesBefore = cache.Misses;
+        window.Start();
+        long total = LookupAll(reader, passes: 5);
+        long allocated = window.Stop();
+        _output.WriteLine($"{window}; {cache.Misses - missesBefore} cache miss(es)");
+
+        Assert.True(total > 0);
+        Assert.Equal(0, allocated);
+    }
+
+    // The measured pass, shared by the warm-up and the measurement; fully optimized from its first call, so no
+    // tier-up or on-stack replacement of this loop can land inside the window.
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
+    private static long LookupAll(SsTableV2Reader reader, int passes)
+    {
         long total = 0;
-        for (int pass = 0; pass < 5; pass++)
+        for (int pass = 0; pass < passes; pass++)
         {
             for (long rowId = 1; rowId <= 4_000; rowId++)
             {
@@ -74,9 +95,7 @@ public sealed class LsmBlockCacheTests : IDisposable
             }
         }
 
-        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
-        Assert.True(total > 0);
-        Assert.Equal(0, allocated);
+        return total;
     }
 
     [Fact]
