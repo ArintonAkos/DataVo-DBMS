@@ -52,6 +52,12 @@ internal sealed class LsmCommitLog : IDisposable
 
     internal int DurableFlushCount => _store.DurableFlushCount;
 
+    /// <summary>The tracked append offset (-1 until the first append after an open or prune) and the file's length.</summary>
+    internal (long Tracked, long OnDisk) ReadWalLengths() => _store.ReadLengths();
+
+    /// <summary>How many appends had to read the file length from the file system.</summary>
+    internal int WalLengthReadCount => _store.LengthReadCount;
+
     /// <summary>The highest LSN assigned so far.</summary>
     public long LastLsn
     {
