@@ -55,7 +55,7 @@ public sealed class WriterProgressUnderReadLoadTests(ITestOutputHelper output)
             DataVoPreparedSelectSingle<int> lookup = DataVoCompiledQuery.PrepareSelectSingleTyped(context, LookupPlan, static row => row.GetInt32(2));
 
             long nextId = InitialRows;
-            long[][] writesPerWindow = RunContention(
+            ContentionResult result = RunContention(
                 ReaderCount,
                 writers: 2,
                 read: random => lookup.Execute(random.Next(1, InitialRows + 1)),
@@ -78,7 +78,7 @@ public sealed class WriterProgressUnderReadLoadTests(ITestOutputHelper output)
                     }
                 });
 
-            AssertSteadyProgress(writesPerWindow);
+            AssertSteadyProgress(result);
         }
         finally
         {
@@ -93,7 +93,7 @@ public sealed class WriterProgressUnderReadLoadTests(ITestOutputHelper output)
     public void SnapshotGate_Writers_EnterInEveryWindow_UnderContinuousSnapshotReaders()
     {
         var gate = new SnapshotPublicationGate(waitTimeoutMs: 30_000);
-        long[][] writesPerWindow = RunContention(
+        ContentionResult result = RunContention(
             ReaderCount,
             writers: 2,
             read: _ =>
@@ -110,7 +110,39 @@ public sealed class WriterProgressUnderReadLoadTests(ITestOutputHelper output)
                 gate.Exit();
             });
 
-        AssertSteadyProgress(writesPerWindow);
+        AssertSteadyProgress(result);
+    }
+
+    /// <summary>What one contention run measured: each writer's completed writes per window, and what a failure report needs.</summary>
+    /// <param name="WritesPerWindow">Completed writes, per writer and window.</param>
+    /// <param name="LongestWriteMs">Each writer's longest single write, in milliseconds.</param>
+    /// <param name="LongestWriteEndWindow">The window in which each writer's longest write finished (Windows when after the run).</param>
+    /// <param name="Reads">Completed reads over the whole run.</param>
+    /// <param name="Readers">Number of reader threads.</param>
+    /// <param name="Collections">Gen0, gen1 and gen2 collections during the run.</param>
+    /// <param name="GcPause">Total time the runtime was paused for GC during the run.</param>
+    private sealed record ContentionResult(
+        long[][] WritesPerWindow,
+        double[] LongestWriteMs,
+        int[] LongestWriteEndWindow,
+        long Reads,
+        int Readers,
+        int[] Collections,
+        TimeSpan GcPause)
+    {
+        /// <summary>One line with every measurement, for the test output and failure messages.</summary>
+        public string Describe()
+        {
+            var text = new System.Text.StringBuilder();
+            text.Append($"{Readers} readers, {Reads:N0} reads; writes per {WindowLength.TotalMilliseconds} ms window:");
+            for (int writer = 0; writer < WritesPerWindow.Length; writer++)
+            {
+                text.Append($" writer {writer} [{string.Join(", ", WritesPerWindow[writer])}], longest write {LongestWriteMs[writer]:F1} ms ending in window {LongestWriteEndWindow[writer]};");
+            }
+
+            text.Append($" GC collections gen0/gen1/gen2 {Collections[0]}/{Collections[1]}/{Collections[2]}, GC pause {GcPause.TotalMilliseconds:F1} ms");
+            return text.ToString();
+        }
     }
 
     /// <summary>
@@ -118,9 +150,11 @@ public sealed class WriterProgressUnderReadLoadTests(ITestOutputHelper output)
     /// itself starve late workers) released together by one barrier, and counts each writer's completed writes
     /// per window.
     /// </summary>
-    private long[][] RunContention(int readers, int writers, Func<Random, int> read, Action<int, Random> write)
+    private ContentionResult RunContention(int readers, int writers, Func<Random, int> read, Action<int, Random> write)
     {
         long[][] writesPerWindow = [.. Enumerable.Range(0, writers).Select(_ => new long[Windows])];
+        long[] longestWriteTicks = new long[writers];
+        int[] longestWriteEndWindow = new int[writers];
         long reads = 0;
         var errors = new System.Collections.Concurrent.ConcurrentQueue<Exception>();
         using var start = new Barrier(readers + writers + 1);
@@ -165,12 +199,19 @@ public sealed class WriterProgressUnderReadLoadTests(ITestOutputHelper output)
                 {
                     while (Volatile.Read(ref stop) == 0)
                     {
+                        long started = stopwatch.ElapsedTicks;
                         write(writer, random);
                         long elapsed = stopwatch.ElapsedTicks;
-                        if (elapsed < Volatile.Read(ref endTicks))
+                        int window = elapsed < Volatile.Read(ref endTicks) ? (int)(elapsed * Windows / endTicks) : Windows;
+                        if (window < Windows)
                         {
-                            int window = (int)(elapsed * Windows / endTicks);
                             writesPerWindow[writer][window]++;
+                        }
+
+                        if (elapsed - started > longestWriteTicks[writer])
+                        {
+                            longestWriteTicks[writer] = elapsed - started;
+                            longestWriteEndWindow[writer] = window;
                         }
                     }
                 }
@@ -186,6 +227,8 @@ public sealed class WriterProgressUnderReadLoadTests(ITestOutputHelper output)
             thread.Start();
         }
 
+        int[] collectionsBefore = [GC.CollectionCount(0), GC.CollectionCount(1), GC.CollectionCount(2)];
+        TimeSpan pauseBefore = GC.GetTotalPauseDuration();
         Volatile.Write(ref endTicks, (long)(WindowLength.TotalSeconds * Windows * Stopwatch.Frequency));
         stopwatch.Start();
         start.SignalAndWait();
@@ -196,21 +239,28 @@ public sealed class WriterProgressUnderReadLoadTests(ITestOutputHelper output)
             Assert.True(thread.Join(TimeSpan.FromSeconds(60)), $"{thread.Name} did not stop");
         }
 
+        var result = new ContentionResult(
+            writesPerWindow,
+            [.. longestWriteTicks.Select(ticks => ticks * 1000d / Stopwatch.Frequency)],
+            longestWriteEndWindow,
+            reads,
+            readers,
+            [.. Enumerable.Range(0, 3).Select(generation => GC.CollectionCount(generation) - collectionsBefore[generation])],
+            GC.GetTotalPauseDuration() - pauseBefore);
+        output.WriteLine(result.Describe());
         Assert.Empty(errors);
-        output.WriteLine($"{readers} readers: {reads:N0} reads; writes per {WindowLength.TotalMilliseconds} ms window: "
-            + string.Join(" | ", writesPerWindow.Select(w => string.Join(", ", w))));
-        Assert.True(reads > 0, "readers made no progress");
-        return writesPerWindow;
+        Assert.True(reads > 0, $"readers made no progress: {result.Describe()}");
+        return result;
     }
 
-    private static void AssertSteadyProgress(long[][] writesPerWindow)
+    private static void AssertSteadyProgress(ContentionResult result)
     {
-        for (int writer = 0; writer < writesPerWindow.Length; writer++)
+        for (int writer = 0; writer < result.WritesPerWindow.Length; writer++)
         {
             for (int window = 0; window < Windows; window++)
             {
-                Assert.True(writesPerWindow[writer][window] > 0,
-                    $"writer {writer} completed no write in window {window}: [{string.Join(", ", writesPerWindow[writer])}]");
+                Assert.True(result.WritesPerWindow[writer][window] > 0,
+                    $"writer {writer} completed no write in window {window}: {result.Describe()}");
             }
         }
     }
