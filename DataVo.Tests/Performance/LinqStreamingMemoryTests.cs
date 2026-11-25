@@ -158,9 +158,15 @@ public sealed class LinqStreamingMemoryTests : IDisposable
         GC.KeepAlive(held);
     }
 
-    /// <summary>Bytes in live objects after a full collection, leaving out dead space the collector has not compacted.</summary>
+    /// <summary>
+    /// Bytes in live objects after a full collection, leaving out dead space the collector has not compacted.
+    /// Finalizers run between two collections so objects an earlier test left to its finalizers are already gone
+    /// and cannot be freed in the middle of a comparison.
+    /// </summary>
     private static long LiveBytes()
     {
+        GC.Collect(GC.MaxGeneration, GCCollectionMode.Forced, blocking: true, compacting: true);
+        GC.WaitForPendingFinalizers();
         GC.Collect(GC.MaxGeneration, GCCollectionMode.Forced, blocking: true, compacting: true);
         GCMemoryInfo info = GC.GetGCMemoryInfo(GCKind.FullBlocking);
         return info.HeapSizeBytes - info.FragmentedBytes;
