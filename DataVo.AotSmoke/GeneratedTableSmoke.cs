@@ -182,6 +182,59 @@ internal static class GeneratedTableSmoke
 
         Require(typedTopAdded == 1, "Typed LINQ reactive Subscribe did not receive the new top quest.");
         Require(hudCount == 2 && hudSlots[0] == new QuestHudSlot(101, 500), "Typed LINQ SubscribeInto did not write the live sorted window.");
+
+        LsmPersistedDeleteReopen();
+    }
+
+    /// <summary>
+    /// Verifies intercepted <c>FirstOrDefault</c> integer-key lookup on LSM across reopen and persisted delete.
+    /// </summary>
+    private static void LsmPersistedDeleteReopen()
+    {
+        string lsmPath = Path.Combine(Path.GetTempPath(), $"datavo-aot-lsm-{Guid.NewGuid():N}");
+        try
+        {
+            var config = new DataVoConfig
+            {
+                StorageMode = StorageMode.Lsm,
+                DiskStoragePath = lsmPath,
+                LsmStrictFsync = true,
+            };
+
+            using (var db = new DataVoContext(config))
+            {
+                db.Execute("CREATE DATABASE LsmSmoke");
+                db.Execute("USE LsmSmoke");
+                db.EnsureInventoryItemTable();
+                db.Insert(new InventoryItem { Id = 42, Slot = 7, Name = "Shield" });
+            }
+
+            using (var reopened = new DataVoContext(config))
+            {
+                reopened.Execute("USE LsmSmoke");
+                DataVoTable<InventoryItem> items = reopened.Table<InventoryItem>();
+                InventoryItem? loaded = items.FirstOrDefault(42, static (item, id) => item.Id == id);
+                Require(loaded is { Id: 42, Slot: 7, Name: "Shield" }, "LSM reopen did not find inserted key 42.");
+
+                int deleted = items.Where(42, static (item, id) => item.Id == id).ExecuteDelete();
+                Require(deleted == 1, "LSM ExecuteDelete did not remove key 42.");
+            }
+
+            using (var afterDelete = new DataVoContext(config))
+            {
+                afterDelete.Execute("USE LsmSmoke");
+                DataVoTable<InventoryItem> items = afterDelete.Table<InventoryItem>();
+                InventoryItem? missing = items.FirstOrDefault(42, static (item, id) => item.Id == id);
+                Require(missing is null, "LSM reopen after persisted delete did not return null for key 42.");
+            }
+        }
+        finally
+        {
+            if (Directory.Exists(lsmPath))
+            {
+                try { Directory.Delete(lsmPath, recursive: true); } catch { /* best-effort cleanup */ }
+            }
+        }
     }
 
     private static void Require(bool condition, string message)
