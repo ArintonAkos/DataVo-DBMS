@@ -12,7 +12,7 @@ The current release on NuGet is **0.4.0-rc.1 (release candidate, 17 November 202
 - **Supported shape:** One `.NET 10` process owns a database directory (enforced via `datavo.lock`) or an in-memory database, executing SQL or compiled LINQ through `DataVoContext`, ADO.NET, or the EF Core bridge.
 - **Durability:** Under `StorageMode.Lsm` with `LsmStrictFsync = true` (default), acknowledged commits are flushed to stable storage. With `LsmStrictFsync = false`, writes hand off to the OS page cache. See [LSM & Durability](/manual/fundamentals/lsm-and-durability).
 - **Isolation:** Explicit transactions provide MVCC snapshot isolation with read-your-own-writes and first-committer-wins conflict detection, but not serializable predicate locking (write skew is possible). See [Transactions & MVCC](/manual/fundamentals/transactions-and-mvcc).
-- **On-disk format:** v0.4 writes SSTable format version 8 and still reads versions 2, 4, and 6, but does not yet carry a long-term cross-version compatibility guarantee. Keep an export or seed script for critical data.
+- **On-disk format:** v0.5 writes SSTable format version 8 (and reads the row-file versions 2, 4 and 6 it still writes for small integer keys). Pre-release formats are not upgraded: the v1 SSTable reader, the per-table WAL migration and the paged `Disk` engine were removed in v0.5. The format does not yet carry a long-term cross-version compatibility guarantee; keep an export or seed script for critical data.
 - **SQL `DATE` contract:** SQL `DATE` materializes as `DataVo.Core.DataVoDate` in row APIs (`CellValue.AsDate()`, compiled `GetDate`), with explicit `FromDateOnly` / `ToDateOnly` / `AsDateOnly` / `GetDateOnly` adapters for `System.DateOnly`.
 
 ## Subsystem Status
@@ -20,7 +20,7 @@ The current release on NuGet is **0.4.0-rc.1 (release candidate, 17 November 202
 | Subsystem | Status | Notes |
 | --- | --- | --- |
 | `DataVoContext` & SQL dialect | Release candidate | DataVo's own dialect; see [SQL Compatibility](/manual/sql/compatibility) |
-| `InMemory` & `Lsm` storage | Release candidate | Active engines; `Disk` (paged) is legacy |
+| `InMemory` & `Lsm` storage | Release candidate | The two storage modes (the paged `Disk` engine was removed in v0.5) |
 | Transactions & MVCC | Release candidate | Snapshot isolation, savepoints, atomic `COMMIT` |
 | Vector search (`HNSW`, `FLAT`) | Release candidate | Cosine (`<=>`) and L2 (`<->`), cost-based exact fallback |
 | Columnar indexes & SSTable segments | Release candidate | In-memory buffers + persisted 4,096-row zone-mapped segments |
@@ -71,7 +71,7 @@ Unity is an **evaluation target**, not a supported runtime. The public `DataVo.C
 | Target / Boundary | Status | Notes |
 | --- | --- | --- |
 | Unity 6000.5.4f1 Editor (macOS) | Narrow smoke pass | EditMode smoke suite passes on local portable candidate |
-| macOS IL2CPP Player | Narrow smoke pass | Medium-stripping Player builds and passes type-binding + Disk/LSM reopen smoke |
+| macOS IL2CPP Player | Narrow smoke pass | Medium-stripping Player builds and passes type-binding + LSM reopen smoke |
 | Windows x64 IL2CPP | Unverified | Requires separate Player proof |
 | Direct Burst calls | Unsupported by design | Managed engine types cannot run inside Burst jobs |
 :::

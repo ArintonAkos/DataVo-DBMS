@@ -113,7 +113,6 @@ CREATE INDEX cx_players_stats ON players (score, id) USING COLUMNAR;
 - **Storage modes:**
   - `InMemory`: Stores 4–8 bytes per row per indexed column in RAM for SIMD-accelerated scans.
   - `Lsm`: Persists format-v8 columnar segments inside `.sst` files with `min`/`max`/`NULL`/`NaN` zone maps for chunk skipping.
-  - Legacy `Disk`: Records the index in the catalog but falls back to row scans.
 - **Query eligibility:** Accelerates `COUNT`, `SUM`, `AVG`, `MIN`, and `MAX` queries **without `GROUP BY`** whose `WHERE` clause is an `AND` of column-to-literal comparisons or `IS NULL` checks over indexed columns. Queries fall back cleanly to row scans when:
   - Running inside an explicit `BEGIN` ... `COMMIT` transaction.
   - Using `GROUP BY`.

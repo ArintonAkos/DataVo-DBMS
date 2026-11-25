@@ -48,14 +48,13 @@ Each SSTable is written sequentially to a temporary file, fsynced, atomically re
   Measured with `benchmarks/DataVo.Benchmarks` (`--filter '*LsmReadMode*' --job short`); `ReadRow` includes its 64 B row copy. Choose `PositionalRead` when you want checksummed reads and clean I/O errors at near-mmap speed (network or removable volumes, files other processes might truncate); keep `Auto` for the last ~15 % of point-read latency.
 - **Out-of-core columnar segments (v8):** Tables with a `USING COLUMNAR` (`[Columnar]`) index store 4,096-row columnar chunks, NULL/NaN masks, tombstone runs, and per-chunk min/max zone maps inside each `.sst` file.
 
-## Durability Settings & `IoSchedulerMode`
+## Durability Settings
 
 | Setting | Default | Behavior | When to Use |
 | --- | --- | --- | --- |
 | `LsmStrictFsync = true` | Yes | Forces `commit.wal` to stable storage before acknowledging writes; concurrent commits share fsyncs | Production data that must survive power loss or OS crash |
 | `LsmStrictFsync = false` | No | Acknowledges after OS-buffered WAL append; recent writes can be lost on power/kernel failure | Caches, rebuildable data, and throughput ceiling benchmarks |
 | `ClusteredPrimaryKeys` | `true` | Stores single `INT` or `GUID` PK tables directly under their key (no separate PK index) | Keep `true` for fast PK seeks and range scans (set at `CREATE TABLE`) |
-| `IoSchedulerMode` | `Off` | Controls legacy `Disk` I/O scheduling (`Off`, `PoolingOnly`, or reserved `GroupCommit`) | Only relevant for legacy `StorageMode.Disk` (`Lsm` uses its own commit log) |
 
 > When reporting or comparing write throughput, always pair the number with its durability setting (for example, `LSM Strict` vs. `LSM Relaxed`).
 
@@ -99,10 +98,10 @@ var row = reopened.Execute("SELECT name FROM players WHERE id = 1")[0].Data[0]; 
 | **`USING HNSW`** | Loads snapshot written on clean close and catches up from `commit.wal`; rebuilds if missing, corrupt, or >50% changed |
 | **`USING FLAT`** | Rebuilt sequentially from table rows on open |
 
-Like `Disk` mode, an LSM directory is owned by one process at a time via `datavo.lock`, while multiple contexts inside the same process share one engine (requiring identical settings). Note that prior to v1.0, the on-disk LSM format does not guarantee cross-version binary compatibility.
+An LSM directory is owned by one process at a time via `datavo.lock`, while multiple contexts inside the same process share one engine (requiring identical settings). Before v1.0 the on-disk format can change between releases, and older directories are not upgraded: recreate them from your source data when you move to a new pre-release version.
 
 ## See Also
 
-- [Storage Modes](/manual/fundamentals/storage-modes): Compare `InMemory`, `Lsm`, `Disk`, `Wasm`, and `Custom`
+- [Storage Modes](/manual/fundamentals/storage-modes): The two storage modes, `InMemory` and `Lsm`, and the `Wasm`/`Custom` hooks
 - [Transactions & MVCC](/manual/fundamentals/transactions-and-mvcc): Snapshot isolation and atomic multi-statement commits
 - [Configuration Reference](/manual/reference/configuration): Full `DataVoConfig` reference

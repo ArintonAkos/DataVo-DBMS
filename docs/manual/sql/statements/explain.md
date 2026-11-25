@@ -82,7 +82,7 @@ A `FallbackReason` is `"<Path>: <reason>"`, where `<Path>` is `TypedScan` (singl
 | `GROUP BY without aggregates` / `GROUP BY or HAVING without aggregates` | Add an aggregate or use the general path. |
 | `the join is not an INNER/LEFT equality of integer columns of distinct stored tables` | Typed joins need integer keys; text, GUID, `RIGHT`/`FULL`/`CROSS` joins and self-joins use the general path. |
 | `an ORDER BY key that is not a joined column` | Order joined rows by a column of a joined table. |
-| `the storage engine cannot stream typed rows` | The deprecated `Disk` engine streams fewer shapes; use `InMemory` or `Lsm`. |
+| `the storage engine cannot stream typed rows` | A custom (`Custom`/`Wasm`) storage engine that does not stream typed rows. |
 
 ## Usage Examples
 

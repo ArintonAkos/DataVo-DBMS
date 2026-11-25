@@ -164,7 +164,7 @@ while (reader.Read())
 
 ## How It Works
 
-- **Two active storage engines:** `InMemory` packs rows into contiguous fixed-width cells (`FlatRowStore`). `Lsm` appends commits to a WAL (flushed to stable storage when `LsmStrictFsync = true`), applies them to an arena-backed MemTable, flushes immutable memory-mapped SSTables at 32 MB in the background, and compacts them asynchronously. Single-column `INT`/`GUID` primary keys are clustered; secondary indexes are keyed SSTables committed atomically with their rows; HNSW graphs snapshot on close and catch up from the WAL on open. (`Disk`, an earlier paged engine, is legacy.)
+- **Two storage modes:** `InMemory` packs rows into contiguous fixed-width cells (`FlatRowStore`). `Lsm` appends commits to a WAL (flushed to stable storage when `LsmStrictFsync = true`), applies them to an arena-backed MemTable, flushes immutable memory-mapped SSTables at 32 MB in the background, and compacts them asynchronously. Single-column `INT`/`GUID` primary keys are clustered; secondary indexes are keyed SSTables committed atomically with their rows; HNSW graphs snapshot on close and catch up from the WAL on open. (`Disk`, an earlier paged engine, is legacy.)
 - **Columnar indexes:** `CREATE INDEX ... USING COLUMNAR` keeps chosen columns as contiguous buffers, persisted into LSM SSTables as 4,096-row segments with per-chunk min/max zone maps so aggregates skip excluded chunks out of core without rebuilding on open.
 - **Typed execution fast paths:** SQL is first offered to typed paths reading directly from stored bytes (single-table scans with `AND`/`OR`/`LIKE`, UTF-8 byte comparisons, unboxed grouping, in-place top-k, key ranges, integer-key hash joins, index-driven joins, dense bit-set anti-joins, columnar aggregates, and cost-based vector search). Any unsupported shape cleanly falls back to the general evaluator.
 - **Hybrid vector search:** Filtered `VECTOR(n)` queries test predicates on stored candidate rows, automatically switch from HNSW to an exact SIMD scan when selectivity makes graph traversal more expensive, and fall back to a filter-first exact scan rather than returning too few rows.
@@ -173,7 +173,7 @@ while (reader.Read())
 
 - **.NET 10** is the supported runtime. The published `DataVo.Core` package currently ships a `net10.0` asset; multi-target packages (`net8.0`, `net9.0`, `net10.0`, `netstandard2.1`) are planned for v0.5.
 - **Native AOT:** `DataVo.Core`, `DataVo.Data`, and `DataVo.Generators` output publish cleanly with `PublishAot=true`. The EF Core preview bridge is excluded from AOT.
-- **Unity** is an evaluation target, not a supported runtime. the package ships a `netstandard2.1` asset (alongside `net8.0`, `net9.0` and `net10.0`); a narrow smoke (in-memory, LSM and Disk save/reopen) passes in the Unity 6000.5.4f1 macOS Editor and a macOS IL2CPP Player. Windows IL2CPP is unverified and direct Burst calls are unsupported by design.
+- **Unity** is an evaluation target, not a supported runtime. the package ships a `netstandard2.1` asset (alongside `net8.0`, `net9.0` and `net10.0`); a narrow smoke (in-memory and LSM save/reopen) passes in the Unity 6000.5.4f1 macOS Editor and a macOS IL2CPP Player. Windows IL2CPP is unverified and direct Burst calls are unsupported by design.
 - **Browser / WebAssembly:** `DataVo.Browser` powers the documentation site's playground. It is experimental and not published on npm. To run it locally: `bash ./scripts/deploy-browser-wasm.sh`, then `cd docs && npm install && npm run docs:dev`.
 
 ## Commercial Add-On: DataVo Sync
