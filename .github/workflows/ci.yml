@@ -76,6 +76,11 @@ jobs:
           dotnet test DataVo.Generators.Tests/DataVo.Generators.Tests.csproj -c Release -f ${{ matrix.framework }}
           --logger "trx;LogFileName=generators-${{ matrix.framework }}.trx" --results-directory artifacts/test-results
 
+      - name: Vector data (Microsoft.Extensions.VectorData) tests
+        run: >-
+          dotnet test tests/DataVo.VectorData.Tests/DataVo.VectorData.Tests.csproj -c Release -f ${{ matrix.framework }}
+          --logger "trx;LogFileName=vectordata-${{ matrix.framework }}.trx" --results-directory artifacts/test-results
+
       # The benchmark harness (and its documentation checks) targets net10.0 only.
       - name: Benchmark harness tests
         if: matrix.framework == 'net10.0'
@@ -100,9 +105,12 @@ jobs:
 
       - uses: actions/setup-dotnet@v5
         with:
-          dotnet-version: "10.0.x"
+          dotnet-version: |
+            8.0.x
+            9.0.x
+            10.0.x
 
-      - name: AOT fence (Core and Data build with trim/AOT diagnostics as errors)
+      - name: AOT fence (Core, Data and VectorData build with trim/AOT diagnostics as errors)
         run: bash scripts/check-aot-baseline.sh
 
       - name: Publish and run the native AOT smoke binary
@@ -121,12 +129,16 @@ jobs:
 
       - uses: actions/setup-dotnet@v5
         with:
-          dotnet-version: "10.0.x"
+          dotnet-version: |
+            8.0.x
+            9.0.x
+            10.0.x
 
       - name: Build every package target (net8.0, net9.0, net10.0, netstandard2.1)
         run: |
           dotnet build DataVo.Core/DataVo.Core.csproj -c Release
           dotnet build DataVo.Data/DataVo.Data.csproj -c Release
+          dotnet build src/DataVo.VectorData/DataVo.VectorData.csproj -c Release
           dotnet build tests/DataVo.GeneratedCodeTargets/DataVo.GeneratedCodeTargets.csproj -c Release
 
       - name: Install ripgrep (used by the support-claims check)
@@ -134,3 +146,29 @@ jobs:
 
       - name: Verify runtime support claims
         run: bash scripts/check-unity-support-status.sh
+
+  examples:
+    name: Examples (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: |
+            8.0.x
+            9.0.x
+            10.0.x
+
+      # The Microsoft.Extensions.AI RAG demo runs offline with its built-in deterministic embedding generator.
+      - name: Run the Microsoft.Extensions.AI local RAG demo
+        shell: bash
+        run: |
+          set -euo pipefail
+          dotnet run -c Release --project examples/MicrosoftAiLocalRag | tee artifacts-rag.log
+          grep -q "RAG demo finished" artifacts-rag.log

@@ -19,7 +19,10 @@ jobs:
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: 10.0.x
+          dotnet-version: |
+            8.0.x
+            9.0.x
+            10.0.x
 
       - name: Determine version from tag
         id: version
@@ -36,7 +39,7 @@ jobs:
       - name: Verify runtime support claims
         run: bash scripts/check-unity-support-status.sh
 
-      # Pack only the four publishable projects explicitly. Packing the whole
+      # Pack only the five publishable projects explicitly. Packing the whole
       # solution would try to build DataVo.Browser, which needs the wasm-tools
       # workload (NETSDK1147) that isn't on the runner.
       - name: Pack
@@ -45,7 +48,8 @@ jobs:
           PROJECTS="DataVo.Core/DataVo.Core.csproj \
                     DataVo.Data/DataVo.Data.csproj \
                     DataVo.EntityFrameworkCore/DataVo.EntityFrameworkCore.csproj \
-                    DataVo.Generators/DataVo.Generators.csproj"
+                    DataVo.Generators/DataVo.Generators.csproj \
+                    src/DataVo.VectorData/DataVo.VectorData.csproj"
           for proj in $PROJECTS; do
             if [ -n "$VERSION" ]; then
               dotnet pack "$proj" -c Release -p:Version="$VERSION" -o artifacts/packages
