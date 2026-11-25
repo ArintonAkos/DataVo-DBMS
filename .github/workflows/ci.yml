@@ -116,7 +116,7 @@ jobs:
       - name: Publish and run the native AOT smoke binary
         run: |
           set -euo pipefail
-          dotnet publish DataVo.AotSmoke/DataVo.AotSmoke.csproj -c Release -r linux-x64 -p:PublishAot=true -o artifacts/aot-smoke
+          dotnet publish DataVo.AotSmoke/DataVo.AotSmoke.csproj -c Release -r linux-x64 -o artifacts/aot-smoke
           ./artifacts/aot-smoke/DataVo.AotSmoke | tee artifacts/aot-smoke.log
           grep -q "ALL SMOKE CHECKS PASSED" artifacts/aot-smoke.log
 

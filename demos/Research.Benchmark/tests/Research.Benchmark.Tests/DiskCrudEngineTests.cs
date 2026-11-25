@@ -8,12 +8,8 @@ public sealed class DiskCrudEngineTests
     [Fact]
     public void DataVoLsmVariants_HaveDistinctBenchmarkNames()
     {
-        using var production = new DataVoDiskCrudEngine(
-            durable: true,
-            storageMode: DataVoDiskCrudStorageMode.Lsm);
-        using var relaxed = new DataVoDiskCrudEngine(
-            durable: false,
-            storageMode: DataVoDiskCrudStorageMode.Lsm);
+        using var production = new DataVoDiskCrudEngine(durable: true);
+        using var relaxed = new DataVoDiskCrudEngine(durable: false);
 
         Assert.Equal("DataVo (LSM Production) [DataVo.Core net10.0]", production.Name);
         Assert.Equal("DataVo (LSM Relaxed) [DataVo.Core net10.0]", relaxed.Name);
@@ -23,7 +19,7 @@ public sealed class DiskCrudEngineTests
     public void DiskCrudWalAllMatrix_ContainsOnlyModernCompetitiveEngines()
     {
         using var engines = new CompositeDisposable(
-            DiskCrudEngineMatrix.Create(engineFilter: "all", checkpointIntervalMs: null, zeroAllocUpdate: true));
+            DiskCrudEngineMatrix.Create(engineFilter: "all", zeroAllocUpdate: true));
 
         string[] names = engines.Items.Select(engine => engine.Name).ToArray();
 
@@ -40,9 +36,7 @@ public sealed class DiskCrudEngineTests
     public void DataVoLsmVariant_RunsInsertAndUpdateLoop()
     {
         string root = Path.Combine(Path.GetTempPath(), $"datavo-lsm-disk-crud-test-{Guid.NewGuid():N}");
-        using var engine = new DataVoDiskCrudEngine(
-            durable: false,
-            storageMode: DataVoDiskCrudStorageMode.Lsm);
+        using var engine = new DataVoDiskCrudEngine(durable: false);
 
         try
         {
@@ -66,9 +60,7 @@ public sealed class DiskCrudEngineTests
     public void DataVoLsmVariant_RunsExplicitUpdateBatch()
     {
         string root = Path.Combine(Path.GetTempPath(), $"datavo-lsm-disk-crud-update-batch-test-{Guid.NewGuid():N}");
-        using var engine = new DataVoDiskCrudEngine(
-            durable: false,
-            storageMode: DataVoDiskCrudStorageMode.Lsm);
+        using var engine = new DataVoDiskCrudEngine(durable: false);
 
         try
         {
@@ -97,9 +89,7 @@ public sealed class DiskCrudEngineTests
     {
         const int records = 1_024;
         string root = Path.Combine(Path.GetTempPath(), $"datavo-lsm-disk-crud-alloc-test-{Guid.NewGuid():N}");
-        using var engine = new DataVoDiskCrudEngine(
-            durable: false,
-            storageMode: DataVoDiskCrudStorageMode.Lsm);
+        using var engine = new DataVoDiskCrudEngine(durable: false);
 
         try
         {
@@ -144,9 +134,7 @@ public sealed class DiskCrudEngineTests
     {
         const int records = 4_096;
         string root = Path.Combine(Path.GetTempPath(), $"datavo-lsm-disk-crud-batch-alloc-test-{Guid.NewGuid():N}");
-        using var engine = new DataVoDiskCrudEngine(
-            durable: false,
-            storageMode: DataVoDiskCrudStorageMode.Lsm);
+        using var engine = new DataVoDiskCrudEngine(durable: false);
 
         try
         {
