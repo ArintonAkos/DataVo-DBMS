@@ -2187,6 +2187,36 @@ public partial class IndexManager : IDisposable
 
     }
 
+    /// <summary>
+    /// Drops the scalar tree's copy of one integer primary-key pair, when another write path (SQL UPDATE) mirrored it
+    /// there, before an update moves the row: otherwise a later delete leaves the key behind and the next insert of it
+    /// fails with a phantom primary-key violation. Allocates nothing when the tree holds no pairs, the usual case for
+    /// a table written through the fast lane.
+    /// </summary>
+    internal void RemoveIntegerPrimaryKeyMirror(long key, RowKey rowId, string indexName, string tableName, string databaseName)
+    {
+        if (_lsmStore is not null || DeferredPublication.Current is not null)
+        {
+            return; // LSM keeps no heap lanes; the fast path that calls this never runs in a durable batch
+        }
+
+        lock (_lock)
+        {
+            switch (TryGetScalarIndexNoLock(indexName, tableName, databaseName))
+            {
+                case InMemoryBTreeIndex { Root.Keys.Count: 0 }:
+                case null:
+                    return;
+                case InMemoryBTreeIndex json:
+                    json.RemoveValue(FormatIntegerKey(key), rowId);
+                    return;
+                case IIndex other:
+                    other.DeleteValues([rowId]);
+                    return;
+            }
+        }
+    }
+
     /// <summary>Removes pairs from a loaded scalar tree; returns <see langword="false"/> when the tree is not loaded.</summary>
     private bool RemoveScalarPairsNoLock(IReadOnlyList<(string Key, RowKey RowId)> entries, string indexName, string tableName, string databaseName, IndexCacheKey cacheKey)
     {

@@ -7,6 +7,20 @@ internal sealed class InMemoryStorageBackend : IStorageBackend, IPagedRowScan, I
 {
     private readonly InMemoryStorageEngine _inner = new();
 
+    /// <summary>Whether a typed or serialized row is live; see <see cref="InMemoryStorageEngine.IsRowLive"/>.</summary>
+    internal bool IsRowLive(string databaseName, string tableName, long rowId) => _inner.IsRowLive(databaseName, tableName, rowId);
+
+    /// <summary>Appends a patched copy of a row; see <see cref="InMemoryStorageEngine.TryAppendPatchedFixedWidthRow"/>.</summary>
+    internal bool TryAppendPatchedFixedWidthRow(
+        string databaseName,
+        string tableName,
+        long rowId,
+        IReadOnlyList<DataVo.Core.Models.Catalog.Column> columns,
+        ReadOnlySpan<int> ordinals,
+        ReadOnlySpan<DataVo.Core.CompiledQueries.DataVoFixedWidthValue> values,
+        out long newRowId) =>
+        _inner.TryAppendPatchedFixedWidthRow(databaseName, tableName, rowId, columns, ordinals, values, out newRowId);
+
     public string BackendKind => "InMemory";
 
     public RowKey InsertRow(string databaseName, string tableName, byte[] rowBytes) => _inner.InsertRow(databaseName, tableName, rowBytes);

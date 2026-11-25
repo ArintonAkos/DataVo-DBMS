@@ -246,6 +246,42 @@ public partial class StorageContext(DataVoConfig config) : IDisposable
             && patchStorage.TryPatchFixedWidthRow(databaseName, tableName, rowId, columns, ordinals, values);
     }
 
+    /// <summary>
+    /// Appends a copy of an in-memory row with fixed-width cells replaced (see
+    /// <see cref="InMemoryStorageEngine.TryAppendPatchedFixedWidthRow"/>). The original row stays until the
+    /// caller deletes it with <see cref="DeleteOneFromTable"/>, after re-pointing its index entries.
+    /// </summary>
+    /// <returns><see langword="false"/>, with nothing written, when the backend is not in-memory or the row cannot be patched.</returns>
+    internal bool TryAppendPatchedFixedWidthRow(
+        string tableName,
+        string databaseName,
+        RowKey rowId,
+        IReadOnlyList<Column> columns,
+        ReadOnlySpan<int> ordinals,
+        ReadOnlySpan<DataVoFixedWidthValue> values,
+        out RowKey newRowId)
+    {
+        if (_storageEngine is InMemoryStorageBackend memory
+            && memory.TryAppendPatchedFixedWidthRow(databaseName, tableName, RowKeyConversions.ToRowId(rowId), columns, ordinals, values, out long appended))
+        {
+            newRowId = appended;
+            return true;
+        }
+
+        newRowId = default;
+        return false;
+    }
+
+    /// <summary>Whether an in-memory row of either kind is live; <see langword="false"/> on other backends.</summary>
+    internal bool IsInMemoryRowLive(RowKey rowId, string tableName, string databaseName) =>
+        _storageEngine is InMemoryStorageBackend memory && memory.IsRowLive(databaseName, tableName, RowKeyConversions.ToRowId(rowId));
+
+    /// <summary>Deletes one row, without the list <see cref="DeleteFromTable"/> takes.</summary>
+    internal void DeleteOneFromTable(RowKey rowId, string tableName, string databaseName)
+    {
+        _storageEngine.DeleteRow(databaseName, tableName, rowId);
+    }
+
     internal int TryPatchFixedWidthRows(
         string tableName,
         string databaseName,
