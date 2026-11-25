@@ -1,4 +1,5 @@
 using DataVo.Core.Indexing;
+using DataVo.Core.Logging;
 using DataVo.Core.BTree;
 using DataVo.Core.Models.Catalog;
 using DataVo.Core.Runtime.Changes;
@@ -38,9 +39,11 @@ public sealed partial class DataVoEngine : IDisposable
     private readonly ReaderWriterLockSlim _snapshotLock = new(LockRecursionPolicy.NoRecursion);
     private readonly TransactionIdStateStore? _transactionIdStateStore;
     private bool _disposed;
-    private const long TransactionIdReservationBlock = 4096;
+    private const long TransactionIdReservationBlock = 65_536;
     private readonly object _transactionIdReservationGate = new();
     private long _reservedTransactionIdsThrough;
+    private int _transactionIdRefillQueued;
+    private Task? _transactionIdRefill;
     private string? _sharedRoot;
 
     private DataVoEngine(StorageContext storageContext)
@@ -94,23 +97,85 @@ public sealed partial class DataVoEngine : IDisposable
         }
     }
 
+    /// <summary>
+    /// Runs for every issued transaction id, inside the commit clock's lock. An id inside the durable reservation
+    /// returns at once; once half the block is used, the next block is made durable in the background, so the
+    /// state file's fsync stays off the commit path. Only an id past the reservation (ids issued faster than the
+    /// background write) waits for the disk.
+    /// </summary>
     private void ReserveTransactionIdsThrough(long transactionId)
     {
-        if (transactionId <= Volatile.Read(ref _reservedTransactionIdsThrough))
+        long reserved = Volatile.Read(ref _reservedTransactionIdsThrough);
+        if (transactionId <= reserved)
         {
+            if (reserved - transactionId < TransactionIdReservationBlock / 2)
+            {
+                QueueTransactionIdRefill();
+            }
+
             return;
         }
 
         lock (_transactionIdReservationGate)
         {
-            if (transactionId <= _reservedTransactionIdsThrough)
+            if (transactionId > _reservedTransactionIdsThrough)
             {
-                return;
+                ReserveTransactionIdBlockNoLock(transactionId);
             }
+        }
+    }
 
-            long reserved = transactionId + TransactionIdReservationBlock;
-            _transactionIdStateStore!.ForcePersistHighWaterMark(reserved);
-            Volatile.Write(ref _reservedTransactionIdsThrough, reserved);
+    private void QueueTransactionIdRefill()
+    {
+        if (Interlocked.CompareExchange(ref _transactionIdRefillQueued, 1, 0) != 0)
+        {
+            return;
+        }
+
+        Volatile.Write(ref _transactionIdRefill, Task.Run(RefillTransactionIdReservation));
+    }
+
+    private void RefillTransactionIdReservation()
+    {
+        try
+        {
+            lock (_transactionIdReservationGate)
+            {
+                long issued = TransactionIdAllocator.GetCurrentHighWaterMark();
+                if (!Volatile.Read(ref _disposed) && _reservedTransactionIdsThrough - issued < TransactionIdReservationBlock / 2)
+                {
+                    ReserveTransactionIdBlockNoLock(Math.Max(issued, _reservedTransactionIdsThrough));
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            // The next id past the reservation retries synchronously and surfaces the error to its statement.
+            Logger.Error($"Reserving transaction ids in the background failed: {ex.Message}");
+        }
+        finally
+        {
+            Volatile.Write(ref _transactionIdRefillQueued, 0);
+        }
+    }
+
+    /// <summary>Makes ids through <paramref name="from"/> plus one block durable, then publishes the new bound.</summary>
+    private void ReserveTransactionIdBlockNoLock(long from)
+    {
+        long reserved = from + TransactionIdReservationBlock;
+        _transactionIdStateStore!.ForcePersistHighWaterMark(reserved);
+        Volatile.Write(ref _reservedTransactionIdsThrough, reserved);
+    }
+
+    private void WaitForTransactionIdRefill()
+    {
+        try
+        {
+            Volatile.Read(ref _transactionIdRefill)?.Wait();
+        }
+        catch (AggregateException)
+        {
+            // Logged by the refill; the final high-water mark below is written synchronously.
         }
     }
 
@@ -690,10 +755,11 @@ public sealed partial class DataVoEngine : IDisposable
             return;
         }
 
-        _disposed = true;
+        Volatile.Write(ref _disposed, true);
 
         if (_transactionIdStateStore != null)
         {
+            WaitForTransactionIdRefill();
             _transactionIdStateStore.ForcePersistHighWaterMark(TransactionIdAllocator.GetCurrentHighWaterMark());
         }
 
