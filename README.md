@@ -85,6 +85,7 @@ dotnet add package DataVo.Core --prerelease
 dotnet add package DataVo.Data --prerelease                  # ADO.NET provider, also used by Dapper
 dotnet add package DataVo.Generators --prerelease            # compiled LINQ, no EF Core dependency
 dotnet add package DataVo.EntityFrameworkCore --prerelease   # EF Core bridge (not a full provider)
+dotnet add package DataVo.VectorData --prerelease            # Microsoft.Extensions.VectorData vector store
 ```
 
 To build packages locally from this repository:
@@ -98,9 +99,10 @@ Releases are published from CI with [NuGet Trusted Publishing](https://learn.mic
 
 ## More Examples
 
-Two runnable demos live under [`examples/`](examples) (`dotnet run -c Release` in either folder):
+Three runnable demos live under [`examples/`](examples) (`dotnet run -c Release` in any of them):
 
 - [**HybridVectorRagAot**](examples/HybridVectorRagAot): hybrid retrieval with SQL metadata filters (`Category`, `CreatedAt DATETIME`) and HNSW vector similarity, published as one Native AOT binary with no native library beside it.
+- [**MicrosoftAiLocalRag**](examples/MicrosoftAiLocalRag): local RAG retrieval over this repository's manual with `IEmbeddingGenerator<string, Embedding<float>>` and `DataVoVectorStore` (Microsoft.Extensions.VectorData): semantic and filtered hybrid search, `EXPLAIN`, and an LSM reopen. Runs offline; `--ollama` uses a local model.
 - [**LiveReactiveLeaderboard**](examples/LiveReactiveLeaderboard): high-frequency game events feeding incremental `GROUP BY`, top-N and `JOIN` views through `SubscribeZeroAlloc`, checked against a full re-query.
 
 ### Compiled LINQ over a typed table (`DataVo.Generators`)

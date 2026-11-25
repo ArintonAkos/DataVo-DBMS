@@ -55,7 +55,6 @@ Every client interface—`DataVoContext`, compiled LINQ, ADO.NET, Dapper, and th
 | --- | --- | --- |
 | `StorageMode.InMemory` | Packed contiguous row buffers (`FlatRowStore`) | Ephemeral caches, tests, simulations, game state |
 | `StorageMode.Lsm` | Commit log (WAL), arena MemTables, memory-mapped SSTables, 4,096-row columnar segments | Production embedded persistence with `LsmStrictFsync = true` |
-| `StorageMode.Disk` | Legacy paged file engine | Reading existing v0.1/v0.2 data only; prefer `Lsm` for new work |
 
 ### Typed Fast Paths & Vector Search
 
@@ -105,10 +104,11 @@ dotnet add package DataVo.EntityFrameworkCore --prerelease
 
 | Package | Install When You Need | Includes |
 | --- | --- | --- |
-| `DataVo.Core` | Embedded SQL, typed tables, vector search, reactive views | `DataVoContext`, `InMemory`/`Lsm`/`Disk` engines, HNSW/FLAT/columnar indexes |
+| `DataVo.Core` | Embedded SQL, typed tables, vector search, reactive views | `DataVoContext`, `InMemory`/`Lsm` engines, HNSW/FLAT/columnar indexes |
 | `DataVo.Generators` | Build-time compiled LINQ and `[DataVoQuery]` methods | Roslyn source generator & interceptors (build-time only, no runtime dependency) |
 | `DataVo.Data` | Standard ADO.NET or Dapper micro-ORM | `DataVoConnection`, `DataVoCommand`, `DataVoDataReader`, `DataVoTransaction`, `DataVoParameter` |
 | `DataVo.EntityFrameworkCore` | Experimental EF Core `DbContext` bridge | `UseDataVo(...)`, `EnsureDataVoCreated()`, `DataVoVectorDbFunctions` |
+| `DataVo.VectorData` | `Microsoft.Extensions.VectorData` / Microsoft.Extensions.AI RAG pipelines | `DataVoVectorStore`, `DataVoVectorStoreCollection<TKey, TRecord>`, `AddDataVoVectorStore(...)` ([guide](/manual/client-interfaces/vector-data)) |
 
 ## Recommended Combinations
 
@@ -267,7 +267,7 @@ Add `DataVo.Generators` and annotate a C# `Player` class with `[DataVoTable("pla
 ## See Also
 
 - [Choosing an Interface](/manual/getting-started/choosing-an-interface): Compare SQL, Compiled LINQ, ADO.NET, Dapper, and EF Core.
-- [Storage Modes](/manual/fundamentals/storage-modes): Understand `InMemory`, `Lsm`, and `Disk` trade-offs.
+- [Storage Modes](/manual/fundamentals/storage-modes): Understand the `InMemory` and `Lsm` trade-offs.
 - [DataVoContext API](/manual/client-interfaces/datavo-context-api): Full reference for prepared statements, typed writes, and streaming.
 - [Vector Search](/manual/fundamentals/vector-search): Store `VECTOR(n)` embeddings alongside relational columns.
 
@@ -372,7 +372,7 @@ The current release on NuGet is **0.4.0-rc.1 (release candidate, 17 November 202
 - **Supported shape:** One `.NET 10` process owns a database directory (enforced via `datavo.lock`) or an in-memory database, executing SQL or compiled LINQ through `DataVoContext`, ADO.NET, or the EF Core bridge.
 - **Durability:** Under `StorageMode.Lsm` with `LsmStrictFsync = true` (default), acknowledged commits are flushed to stable storage. With `LsmStrictFsync = false`, writes hand off to the OS page cache. See [LSM & Durability](/manual/fundamentals/lsm-and-durability).
 - **Isolation:** Explicit transactions provide MVCC snapshot isolation with read-your-own-writes and first-committer-wins conflict detection, but not serializable predicate locking (write skew is possible). See [Transactions & MVCC](/manual/fundamentals/transactions-and-mvcc).
-- **On-disk format:** v0.4 writes SSTable format version 8 and still reads versions 2, 4, and 6, but does not yet carry a long-term cross-version compatibility guarantee. Keep an export or seed script for critical data.
+- **On-disk format:** v0.5 writes SSTable format version 8 (and reads the row-file versions 2, 4 and 6 it still writes for small integer keys). Pre-release formats are not upgraded: the v1 SSTable reader, the per-table WAL migration and the paged `Disk` engine were removed in v0.5. The format does not yet carry a long-term cross-version compatibility guarantee; keep an export or seed script for critical data.
 - **SQL `DATE` contract:** SQL `DATE` materializes as `DataVo.Core.DataVoDate` in row APIs (`CellValue.AsDate()`, compiled `GetDate`), with explicit `FromDateOnly` / `ToDateOnly` / `AsDateOnly` / `GetDateOnly` adapters for `System.DateOnly`.
 
 ## Subsystem Status
@@ -380,7 +380,7 @@ The current release on NuGet is **0.4.0-rc.1 (release candidate, 17 November 202
 | Subsystem | Status | Notes |
 | --- | --- | --- |
 | `DataVoContext` & SQL dialect | Release candidate | DataVo's own dialect; see [SQL Compatibility](/manual/sql/compatibility) |
-| `InMemory` & `Lsm` storage | Release candidate | Active engines; `Disk` (paged) is legacy |
+| `InMemory` & `Lsm` storage | Release candidate | The two storage modes (the paged `Disk` engine was removed in v0.5) |
 | Transactions & MVCC | Release candidate | Snapshot isolation, savepoints, atomic `COMMIT` |
 | Vector search (`HNSW`, `FLAT`) | Release candidate | Cosine (`<=>`) and L2 (`<->`), cost-based exact fallback |
 | Columnar indexes & SSTable segments | Release candidate | In-memory buffers + persisted 4,096-row zone-mapped segments |
@@ -417,21 +417,24 @@ The current release on NuGet is **0.4.0-rc.1 (release candidate, 17 November 202
 - **Typed execution:** `OR`/`LIKE` fast paths, integer-key hash joins, index-driven joins, dense bit-set anti-joins, unboxed `GROUP BY`, UTF-8 byte matching, and in-place top-k.
 - **Vector search:** HNSW diversity heuristic on by default (100% recall@10 on clustered data), cost-based exact scan fallback, SQL `WITH (...)` HNSW parameters, and pre-optimized SIMD kernels.
 
-### v0.5: Native Interop & Client Ergonomics *(planned)*
+### v0.5: AI Integration, Client Ergonomics & Native Interop *(release candidate `0.5.0-rc.1` in preparation)*
 - **Track A (Native Interop):** Native AOT C ABI (`dv_open`, `dv_exec`, `dv_prepare`) for C/Python/Rust/Go, zero-copy Apache Arrow C Data Interface export from columnar buffers/SSTables, and a reference Python binding.
 - **Track B (Client Applications):**
   - *Done:* Build-time compiled `OrderBy`/`ThenBy`, `Skip`/`Take`, `Select` projections, and single-table `ExecuteUpdate`/`ExecuteDelete` in `DataVo.Generators`.
-  - *Planned:* 2D geographic WGS84 points with haversine distance and spatial indexing, plus multi-target NuGet packages (`net8.0`, `net9.0`, `net10.0`, `netstandard2.1`).
+  - *Done:* Multi-target NuGet packages (`net8.0`, `net9.0`, `net10.0`, `netstandard2.1`), native `DATETIME`, `EXPLAIN` with the executed operator, a sharded LSM block cache, and typed reactive top-K/join views.
+  - *Done:* [`DataVo.VectorData`](/manual/client-interfaces/vector-data): a `Microsoft.Extensions.VectorData` vector store with HNSW/FLAT indexes, LINQ filters translated to SQL, embedding generation and dependency injection; native `ReadOnlyMemory<float>` vectors in `[DataVoTable]` models (`[VectorDimensions(n)]`), parameters and `SearchNearest`.
+  - *Done:* The paged `Disk` storage mode and pre-release format upgrades (v1 SSTables, per-table WAL migration) were removed: `InMemory` and `Lsm` are the two storage modes.
+  - *Planned:* 2D geographic WGS84 points with haversine distance and spatial indexing.
 
 ## Unity Evaluation Status {#unity-evaluation-status}
 
-Unity is an **evaluation target**, not a supported runtime. The public `DataVo.Core` package ships `net10.0` only; `DataVoEnablePortableTarget=true` produces an experimental local `netstandard2.1` candidate.
+Unity is an **evaluation target**, not a supported runtime. The public `DataVo.Core` package ships `net8.0`, `net9.0`, `net10.0` and `netstandard2.1` assets; the `netstandard2.1` asset is what Unity evaluation builds use.
 
 ::: details Unity Evaluation Matrix (Unity 6000.5.4f1)
 | Target / Boundary | Status | Notes |
 | --- | --- | --- |
 | Unity 6000.5.4f1 Editor (macOS) | Narrow smoke pass | EditMode smoke suite passes on local portable candidate |
-| macOS IL2CPP Player | Narrow smoke pass | Medium-stripping Player builds and passes type-binding + Disk/LSM reopen smoke |
+| macOS IL2CPP Player | Narrow smoke pass | Medium-stripping Player builds and passes type-binding + LSM reopen smoke |
 | Windows x64 IL2CPP | Unverified | Requires separate Player proof |
 | Direct Burst calls | Unsupported by design | Managed engine types cannot run inside Burst jobs |
 :::
@@ -449,7 +452,7 @@ Unity is an **evaluation target**, not a supported runtime. The public `DataVo.C
 > Source route: /manual/fundamentals/storage-modes
 > Source file: manual/fundamentals/storage-modes.md
 
-`StorageMode` selects where DataVo stores table rows and how writes survive process restarts. Pick `InMemory` for ephemeral workloads and tests, or `Lsm` for durable on-disk persistence.
+`StorageMode` selects where DataVo stores table rows and how writes survive process restarts. DataVo has two storage modes: `InMemory` for ephemeral workloads and tests, and `Lsm` for durable on-disk persistence.
 
 ```csharp
 using DataVo.Core;
@@ -476,7 +479,6 @@ using var persisted = new DataVoContext(new DataVoConfig
 | --- | --- | --- | --- |
 | `StorageMode.InMemory` | Ephemeral; packed chunks in RAM | Direct append into `FlatRowStore` + hash/sorted PK map | Unit tests, caches, game state, low-latency ephemeral datasets |
 | `StorageMode.Lsm` | Durable (`commit.wal` + `.sst`); memory-mapped reads | Commit log -> 32 MB MemTable -> background SSTable flush & compaction | Production embedded persistence, write-heavy and local-first apps |
-| `StorageMode.Disk` *(Legacy)* | File-backed with optional WAL | Page/file append; **not crash-safe for `UPDATE`** | Reading existing legacy directories only |
 | `StorageMode.Wasm` *(Experimental)* | Browser/OPFS via `WasmStorageEngine` (falls back to in-memory) | Delegated to injected WASM engine | Interactive browser playground (`DataVo.Browser`); not on npm |
 | `StorageMode.Custom` | Defined by your `IStorageEngine` | Delegated to `CustomStorageEngine` | Custom storage adapters, encryption wrappers, or test mocks |
 
@@ -486,15 +488,13 @@ using var persisted = new DataVoContext(new DataVoConfig
 
 > `FlatRowStore` is an internal engine component, not a `StorageMode` enum value. Always configure `StorageMode.InMemory`.
 
-## `Lsm` vs Legacy `Disk`
+## `Lsm`
 
-Use `StorageMode.Lsm` for all new persistent applications. It provides single-record crash atomicity, clustered `INT`/`GUID` primary keys, memory-mapped SSTables, persistent secondary indexes, and out-of-core columnar segments. See [LSM & Durability](/manual/fundamentals/lsm-and-durability) for tuning `LsmStrictFsync` and recovery behavior.
+Use `StorageMode.Lsm` for every persistent application. Each statement or transaction commits as one commit-log frame (crash-atomic), tables with a single `INT`/`GUID` primary key are clustered on it, SSTables are memory-mapped, secondary indexes are persisted, and tables can carry out-of-core columnar segments. See [LSM & Durability](/manual/fundamentals/lsm-and-durability) for tuning `LsmStrictFsync` and recovery behavior.
 
-`StorageMode.Disk` is kept solely so older data directories remain readable. It receives no new durability work and performs `UPDATE` as two separate durable steps (write new row, tombstone old row), which means a crash between steps can lose the updated row.
+## `Wasm` and `Custom` Hooks
 
-## `Wasm` and `Custom` Backends
-
-Both modes accept an `IStorageEngine` instance on `DataVoConfig`:
+`Wasm` and `Custom` are not storage engines of their own: they plug an `IStorageEngine` you supply into DataVo (the browser playground uses `Custom`). Both accept an `IStorageEngine` instance on `DataVoConfig`:
 
 ```csharp
 using var customDb = new DataVoContext(new DataVoConfig
@@ -508,7 +508,7 @@ For `StorageMode.Wasm`, set `WasmStorageEngine` to an OPFS-backed or browser sto
 
 ## Directory Sharing and Locking
 
-For `Lsm` and `Disk`, DataVo serves one engine per directory per process:
+For `Lsm`, DataVo serves one engine per directory per process:
 
 - **Within one process:** Multiple `DataVoContext` instances and ADO.NET connections targeting the same `DiskStoragePath` share a single engine until the last handle is disposed. Their configurations must match, or the second open throws `DatabaseInUseException`.
 - **Across processes:** DataVo holds a `datavo.lock` file while the directory is open. Opening the same directory from a second process throws `DatabaseInUseException`.
@@ -558,16 +558,24 @@ Each SSTable is written sequentially to a temporary file, fsynced, atomically re
 
 - **4 KiB data blocks + Bloom filters:** Sorted entries with a sparse block index and per-file blocked Bloom filter let point lookups skip absent files and touch at most one block on a hit.
 - **Memory-mapped reads (`LsmReadMode`):** `LsmReadMode.Auto` (default) memory-maps `.sst` files on 64-bit platforms so reads hit the OS page cache with no syscall per lookup. Use `LsmReadMode.PositionalRead` to force standard file reads.
+- **Positional reads + block cache (`LsmBlockCacheSizeBytes`):** with `LsmReadMode.PositionalRead`, data blocks are read with `RandomAccess.Read` into a sharded user-space block cache (32 shards, SIEVE eviction, 64 MiB by default). Every physical read verifies the block's CRC32C before the bytes are served or cached, and a truncated or damaged file surfaces as a managed `InvalidDataException` on the reading thread, never as a `SIGBUS`. Bytes that rot on disk after a block was evicted are caught on the next read. Warm hits allocate nothing.
+
+  | 200,000-row SSTable, Apple M4 Pro | Point lookup | Full scan | Engine `ReadRow` | Allocated per lookup |
+  | --- | ---: | ---: | ---: | ---: |
+  | `Auto` (mmap) | 179 ns | 1.74 ms | 172 ns | 0 B |
+  | `PositionalRead`, no cache | 5,963 ns | 4.47 ms | 6,074 ns | 0 B |
+  | `PositionalRead` + 64 MiB block cache | 204 ns | 1.76 ms | 203 ns | 0 B |
+
+  Measured with `benchmarks/DataVo.Benchmarks` (`--filter '*LsmReadMode*' --job short`); `ReadRow` includes its 64 B row copy. Choose `PositionalRead` when you want checksummed reads and clean I/O errors at near-mmap speed (network or removable volumes, files other processes might truncate); keep `Auto` for the last ~15 % of point-read latency.
 - **Out-of-core columnar segments (v8):** Tables with a `USING COLUMNAR` (`[Columnar]`) index store 4,096-row columnar chunks, NULL/NaN masks, tombstone runs, and per-chunk min/max zone maps inside each `.sst` file.
 
-## Durability Settings & `IoSchedulerMode`
+## Durability Settings
 
 | Setting | Default | Behavior | When to Use |
 | --- | --- | --- | --- |
 | `LsmStrictFsync = true` | Yes | Forces `commit.wal` to stable storage before acknowledging writes; concurrent commits share fsyncs | Production data that must survive power loss or OS crash |
 | `LsmStrictFsync = false` | No | Acknowledges after OS-buffered WAL append; recent writes can be lost on power/kernel failure | Caches, rebuildable data, and throughput ceiling benchmarks |
 | `ClusteredPrimaryKeys` | `true` | Stores single `INT` or `GUID` PK tables directly under their key (no separate PK index) | Keep `true` for fast PK seeks and range scans (set at `CREATE TABLE`) |
-| `IoSchedulerMode` | `Off` | Controls legacy `Disk` I/O scheduling (`Off`, `PoolingOnly`, or reserved `GroupCommit`) | Only relevant for legacy `StorageMode.Disk` (`Lsm` uses its own commit log) |
 
 > When reporting or comparing write throughput, always pair the number with its durability setting (for example, `LSM Strict` vs. `LSM Relaxed`).
 
@@ -611,11 +619,11 @@ var row = reopened.Execute("SELECT name FROM players WHERE id = 1")[0].Data[0]; 
 | **`USING HNSW`** | Loads snapshot written on clean close and catches up from `commit.wal`; rebuilds if missing, corrupt, or >50% changed |
 | **`USING FLAT`** | Rebuilt sequentially from table rows on open |
 
-Like `Disk` mode, an LSM directory is owned by one process at a time via `datavo.lock`, while multiple contexts inside the same process share one engine (requiring identical settings). Note that prior to v1.0, the on-disk LSM format does not guarantee cross-version binary compatibility.
+An LSM directory is owned by one process at a time via `datavo.lock`, while multiple contexts inside the same process share one engine (requiring identical settings). Before v1.0 the on-disk format can change between releases, and older directories are not upgraded: recreate them from your source data when you move to a new pre-release version.
 
 ## See Also
 
-- [Storage Modes](/manual/fundamentals/storage-modes): Compare `InMemory`, `Lsm`, `Disk`, `Wasm`, and `Custom`
+- [Storage Modes](/manual/fundamentals/storage-modes): The two storage modes, `InMemory` and `Lsm`, and the `Wasm`/`Custom` hooks
 - [Transactions & MVCC](/manual/fundamentals/transactions-and-mvcc): Snapshot isolation and atomic multi-statement commits
 - [Configuration Reference](/manual/reference/configuration): Full `DataVoConfig` reference
 
@@ -850,7 +858,7 @@ DataVo guarantees the requested `LIMIT` whenever enough matching rows exist:
 
 ## C# Direct Vector Search (`SearchNearest`)
 
-When you already have a `float[]`, `ReadOnlySpan<float>`, or vector string in C# and want to query a named index without building SQL text, call `db.SearchNearest(...)`:
+When you already have a `float[]`, `ReadOnlySpan<float>`, `ReadOnlyMemory<float>` (such as a Microsoft.Extensions.AI `Embedding<float>.Vector`), or vector string in C# and want to query a named index without building SQL text, call `db.SearchNearest(...)`. Spans and memory are read in place, with no `ToArray()` copy:
 
 ```csharp
 ReadOnlySpan<float> query = [1f, 0f, 0f];
@@ -861,6 +869,8 @@ List<Dictionary<string, object?>> hits = db.SearchNearest(
     topK: 5);
 ```
 
+Vector parameters bind the same way: `new DataVoQueryParameter("q", embedding.Vector.Span)`, or `DataVoQueryParameter.FromObject("q", embedding.Vector)` with a `ReadOnlyMemory<float>`. For the standard .NET vector store abstraction over DataVo, see [Microsoft.Extensions.VectorData](/manual/client-interfaces/vector-data).
+
 ::: details API Reference
 ```csharp
 public List<Dictionary<string, object?>> SearchNearest(
@@ -868,6 +878,9 @@ public List<Dictionary<string, object?>> SearchNearest(
 
 public List<Dictionary<string, object?>> SearchNearest(
     string tableName, string indexName, ReadOnlySpan<float> queryVector, int topK = 10);
+
+public List<Dictionary<string, object?>> SearchNearest(
+    string tableName, string indexName, ReadOnlyMemory<float> queryVector, int topK = 10);
 
 public List<Dictionary<string, object?>> SearchNearest(
     string tableName, string indexName, string queryVector, int topK = 10);
@@ -1358,9 +1371,20 @@ Annotating a model with `[DataVoTable("table_name")]` generates zero-reflection 
 | --- | --- |
 | `[DataVoTable("players")]` | Binds the class to a table and generates `EnsurePlayerTable()`, `GetPlayerById(key)`, `Insert(player)`, and `Update(player)`. |
 | `[PrimaryKey]` | Marks the primary key column used by `Get<Model>ById` and `Update`. |
-| `[Indexed]` | Causes `Ensure<Model>Table()` to create a secondary B-Tree index (or HNSW index on `Vector3`). |
+| `[Indexed]` | Causes `Ensure<Model>Table()` to create a secondary B-Tree index (a spatial HNSW index on `Vector3`, a cosine HNSW index on a vector column). |
 | `[Columnar]` | Adds the column to the table's columnar index (`cx_<table>`) for fast analytical aggregations (`int`, `long`, `float`, `double`, `bool`, and date columns). |
 | `[SpatialIndex]` | Creates a Euclidean HNSW index (`sx_<table>_<column>`) on a `System.Numerics.Vector3` property for 3D spatial queries. |
+| `[VectorDimensions(n)]` | Stores a `float[]`, `ReadOnlyMemory<float>` or `ReadOnlyMemory<float>?` property as a `VECTOR(n)` column. Without it such a property is a compile error (`DATAVOT009`); on any other type it is `DATAVOT010`. |
+
+```csharp
+[DataVoTable("docs")]
+public sealed class Doc
+{
+    [PrimaryKey] public int Id { get; set; }
+    public string Title { get; set; } = "";
+    [VectorDimensions(384), Indexed] public ReadOnlyMemory<float> Embedding { get; set; } // cosine HNSW index
+}
+```
 
 Calling `db.EnsurePlayerTable()` creates the table and all annotated indexes if they do not exist. On compilers without module initializers (such as Unity), call `Ensure<Model>Table()` before accessing `db.Table<Player>()`.
 
@@ -1473,7 +1497,7 @@ On compilers without interceptors (such as Unity), the same code compiles and re
 | `Where` | Translates `==`, `!=`, `<`, `<=`, `>`, `>=`, `&&`, `\|\|`, boolean flags, and `null` checks. Uses PK/B-Tree indexes when available; streams in 1,024-row pages otherwise. |
 | `FirstOrDefault`, `SingleOrDefault` | PK equality on `Lsm` reads a single row (0 B on miss). |
 | `Count`, `Any`, `Sum`, `Min`, `Max` | Compiles directly into the storage scan (or `[Columnar]` index) for numeric/bool/date/Guid columns (**0 B allocated** once warm). |
-| `OrderBy`, `OrderByDescending`, `ThenBy`, `ThenByDescending` | Emits `ORDER BY`; combined with `Take`, retains only top-K rows during the scan. |
+| `OrderBy`, `OrderByDescending`, `ThenBy`, `ThenByDescending` | Emits `ORDER BY`; combined with `Take`, retains only top-K rows during the scan. `string` keys order ordinally (as SQL `ORDER BY` does), not by the current culture; pass a comparer (`OrderBy(p => p.Name, comparer)`) to order in memory instead. |
 | `Skip`, `Take` | Emits `OFFSET @offset LIMIT @limit` following `Enumerable` clamping semantics. |
 | `Select` | Projects only the referenced columns (`SELECT name, score ...`) without instantiating full models. |
 | `ExecuteDelete`, `ExecuteUpdate` | Emits single atomic `DELETE` or `UPDATE` statements (`Set`, `SetNull`, and `+`, `-`, `*` column arithmetic). |
@@ -1630,9 +1654,8 @@ Use `DataVoConnectionStringBuilder` or a semicolon-delimited string with three s
 
 | Key | Default | Description |
 | --- | --- | --- |
-| `StorageMode` | `InMemory` | `InMemory`, `Lsm`, or `Disk` (legacy). |
-| `DataSource` | `"datavo"` | Database name (and storage directory path for `Lsm`/`Disk`). |
-| `WalEnabled` | `true` (`Disk`) | Enables WAL in legacy `Disk` mode. |
+| `StorageMode` | `InMemory` | `InMemory` or `Lsm`. Any other value throws `ArgumentException`. |
+| `DataSource` | `"datavo"` | Database name (and storage directory path for `Lsm`). |
 
 When `conn.Open()` runs, it initializes the embedded engine, executes `CREATE DATABASE IF NOT EXISTS` for the `DataSource` database name, and selects it with `USE`. `Close()` rolls back any uncommitted transaction and releases the session.
 
@@ -1645,7 +1668,7 @@ When `conn.Open()` runs, it initializes the embedded engine, executes `CREATE DA
 | `DbDataReader` | `DataVoDataReader` | Forward-only reader over materialized command results. |
 | `DbTransaction` | `DataVoTransaction` | Supports `Commit()`, `Rollback()`, and savepoints (`Save`, `Rollback(name)`, `Release`). |
 | `DbParameter` | `DataVoParameter` | Supports `Parameters.AddWithValue("@name", value)`. |
-| `DbConnectionStringBuilder` | `DataVoConnectionStringBuilder` | Strongly-typed builder for `StorageMode`, `DataSource`, and `WalEnabled`. |
+| `DbConnectionStringBuilder` | `DataVoConnectionStringBuilder` | Strongly-typed builder for `StorageMode` and `DataSource`. |
 | `Exception` | `DataVoException` | Exposes `ErrorCode`, `Line`, and `Column`. |
 
 `DataVo.Data` does **not** ship a `DbProviderFactory`.
@@ -1915,7 +1938,7 @@ Every construct marked **Supported** returns identical results across storage mo
 
 - **`FLOAT` is 32-bit** (`System.Single`), unlike SQLite `REAL` or SQL Server `FLOAT` (64-bit). Use `DOUBLE` for 64-bit floating-point values.
 - **`VARCHAR` comparisons are ordinal** (UTF-8 byte/code-point order), not collation-aware or case-insensitive.
-- **No silent type fallbacks:** Unsupported types such as `DECIMAL`, `NUMERIC`, `DATETIME`, and `TIMESTAMP` throw an explicit `ParserException` instead of silently storing text.
+- **No silent type fallbacks:** Unsupported types such as `DECIMAL`, `NUMERIC`, and `TIME` throw an explicit `ParserException` instead of silently storing text.
 
 ## See Also
 - [Data Types](/manual/sql/data-types): Supported SQL types, .NET CLR mappings, and unsupported type errors
@@ -1953,9 +1976,10 @@ CREATE TABLE documents (
 | `DOUBLE` | `DOUBLE PRECISION` | `double` (`Double`) | 64-bit IEEE 754 double. |
 | `BIT` | `BOOL`, `BOOLEAN` | `bool` (`Boolean`) | Accepts `TRUE`/`FALSE` (any case); `1`/`0` and `'true'`/`'false'` are also parsed. |
 | `DATE` | — | `DataVoDate` | Calendar date stored as a 32-bit day count since `0001-01-01`. |
+| `DATETIME` | `TIMESTAMP`, `DATETIME2`, `TIMESTAMPTZ` | `DateTime` (UTC), `DateTimeOffset` | A point in time stored as 8-byte UTC ticks (100 ns precision, `0001-01-01` to `9999-12-31`). |
 | `GUID` | `UUID`, `UNIQUEIDENTIFIER` | `Guid` | 128-bit UUID. Single `GUID` primary key is clustered on `Lsm`. |
 | `VARCHAR(n)` | `NVARCHAR`, `CHAR`, `NCHAR`, `TEXT`, `STRING` | `string` | UTF-8 variable-length text. Comparisons and sorting are ordinal (case-sensitive). |
-| `VECTOR(n)` | `VEC2`, `VEC3`, `VEC4`, `FLOAT[n]`, `REAL[n]` | `float[]` | Fixed-dimension `n`-element array of 32-bit floats. |
+| `VECTOR(n)` | `VEC2`, `VEC3`, `VEC4`, `FLOAT[n]`, `REAL[n]` | `float[]`, `ReadOnlyMemory<float>` | Fixed-dimension `n`-element array of 32-bit floats. `[DataVoTable]` models declare it with `[VectorDimensions(n)]`. |
 
 ::: info DataVo Extension
 `VECTOR(n)` (with `VEC2`, `VEC3`, `VEC4`, `FLOAT[n]`, and `REAL[n]` shorthands) and `GUID` (`UUID`, `UNIQUEIDENTIFIER`) are first-class DataVo extensions beyond standard SQLite. `VECTOR` is a reserved keyword, so a column cannot be named `Vector`.
@@ -1967,7 +1991,23 @@ CREATE TABLE documents (
 
 - **Query materialization:** Reading a `DATE` column returns a `DataVoDate` struct (`DataVo.Core.DataVoDate`).
 - **.NET interoperability:** On `.NET 10`, convert cleanly with `DataVoDate.FromDateOnly(DateOnly)` / `.ToDateOnly()` or `DataVoDate.FromDateTime(DateTime)` / `.ToDateTime()` (midnight `DateTimeKind.Unspecified`).
-- **Timestamps:** If you need a point in time with sub-day precision, store Unix epoch milliseconds or ticks in a `BIGINT` column.
+- **Timestamps:** For a point in time with sub-day precision, use `DATETIME` (below).
+
+## The `DATETIME` / `TIMESTAMP` Storage & Row Contract
+
+`DATETIME` (aliases `TIMESTAMP`, `DATETIME2`, `TIMESTAMPTZ`) stores an instant as the `Ticks` of its UTC time: an 8-byte `long`. Packed rows, B-Tree keys, clustered keys and SIMD columnar scans (including LSM zone maps) compare it as a plain 64-bit integer, with no per-row conversion.
+
+- **Writing:** a `DateTime` of kind `Local` is converted to UTC; kinds `Utc` and `Unspecified` are taken as UTC as they are. A `DateTimeOffset` keeps its instant (`UtcTicks`). SQL literals are ISO 8601 in the invariant culture: `'2026-11-24'`, `'2026-11-24 10:15:00'`, `'2026-11-24T10:15:00.1234567Z'`, `'2026-11-24T12:15:00+02:00'`. Text without an offset is UTC.
+- **Reading:** SQL results return `DateTime` with `Kind = Utc`. Generated tables map `DateTime`, `DateTimeOffset` (returned at offset zero) and their nullable forms; compiled readers have `GetDateTime`, `GetDateTimeOffset` and their `...OrNull` forms.
+- **Parameters:** `DataVoQueryParameter` accepts `DateTime` and `DateTimeOffset`. A `DATE` column given a `DateTime` keeps its date as given.
+- **Indexes:** secondary indexes key a `DATETIME` on its fixed-width canonical UTC text (`yyyy-MM-ddTHH:mm:ss.fffffffZ`), so any spelling of the same instant finds the row through the index.
+- **Aggregates:** `MIN`, `MAX` and `COUNT` work everywhere, including `USING COLUMNAR` indexes. `SUM`/`AVG` of instants are not computed by the columnar kernels.
+
+```sql
+CREATE TABLE events (id INT PRIMARY KEY, at DATETIME, label VARCHAR(40));
+INSERT INTO events VALUES (1, '2026-11-24T12:15:00+02:00', 'deploy');
+SELECT id FROM events WHERE at >= '2026-11-24 10:00:00' ORDER BY at DESC;
+```
 
 ## Unsupported Types (`ParserException`)
 
@@ -1976,7 +2016,7 @@ DataVo throws a `ParserException` at `CREATE TABLE` or `ALTER TABLE` time for ty
 | Unsupported Type | Error Guidance / Workaround |
 | --- | --- |
 | `DECIMAL`, `NUMERIC`, `MONEY` | Use `DOUBLE` for approximate numeric values, or `VARCHAR` to preserve exact decimal digits. |
-| `DATETIME`, `TIMESTAMP`, `TIME` | Use `DATE` for calendar dates, or `BIGINT` for Unix timestamps / ticks. |
+| `TIME` | Use `DATETIME` (or `TIMESTAMP`) for a point in time, or `DATE` for a calendar date. |
 | `LONG` | Use `BIGINT` for 64-bit integers. |
 | `BLOB`, `BINARY`, `VARBINARY`, `JSON`, `JSONB` | Not supported as native column types in `v0.4`; encode as `VARCHAR` (e.g., Base64 or JSON text). |
 
@@ -2652,7 +2692,7 @@ COMMIT;
 
 ## Reclaiming Space with `VACUUM`
 
-In legacy `Disk` storage mode (or when manually compacting table storage after heavy deletes), deleted rows remain as tombstones in the physical table file until compacted. Run `VACUUM` on a table to reclaim that space:
+Deleted rows remain as tombstones until storage compacts them. `Lsm` compacts them during background merges; to rewrite one table immediately (for example after a large purge), run `VACUUM` on it:
 
 ```sql
 VACUUM players;
@@ -2661,11 +2701,11 @@ VACUUM players;
 `VACUUM table_name` performs three steps:
 
 1. Scans the table and strips all tombstoned (soft-deleted) rows.
-2. Rewrites the surviving rows into a compacted table file with fresh, contiguous internal row IDs.
+2. Rewrites the surviving rows with fresh, contiguous internal row IDs.
 3. Drops and rebuilds all B-Tree indexes on the table against the new row IDs.
 
 ::: info When You Need `VACUUM`
-The default `Lsm` storage mode compacts deleted keys automatically during background/flush merges. `VACUUM <table>` is primarily intended for manual space reclamation in legacy `Disk` mode or after large one-time purges.
+`Lsm` compacts deleted keys automatically during background and flush merges. `VACUUM <table>` is for reclaiming space at once after a large one-time purge.
 :::
 
 ## See Also
@@ -3043,7 +3083,7 @@ CREATE INDEX ix_players_region_score ON players (region, score) USING BTREE;
 
 ### Behavior & Query Acceleration
 
-- **Non-`NULL` indexing:** A B-Tree index stores entries only for rows where **all** indexed columns are non-`NULL`. Rows containing a `NULL` key receive no index entry, so `IS NULL` predicates scan table rows and multiple `NULL`s may coexist in a `UNIQUE` column.
+- **`NULL` keys:** A row whose key has a `NULL` in any indexed column never matches an equality or range lookup, so `IS NULL` predicates scan table rows and multiple `NULL`s may coexist in a `UNIQUE` column. `Lsm` indexes still record such rows under a dedicated `NULL` key (every `INSERT`, `UPDATE`, `DELETE`, `COMMIT` and rebuild path does this the same way), so a counting `GROUP BY` on an indexed integer column gets its `NULL` group from the index without reading the table. `InMemory` indexes hold no entry for them and count that group from the rows' null flags.
 - **When B-Tree accelerates queries:**
   - Single-column equality predicates (`WHERE score = 500`) use an index point lookup.
   - Selective `INNER JOIN` probes on indexed integer keys probe the B-Tree instead of streaming the full table.
@@ -3096,11 +3136,10 @@ CREATE INDEX cx_players_stats ON players (score, id) USING COLUMNAR;
 
 ### Eligibility & Storage Rules
 
-- **Allowed column types:** `INT`, `BIGINT`, `FLOAT`, `DOUBLE`, `BIT`, and `DATE` only. Any other type (such as `VARCHAR`, `GUID`, or `VECTOR`) is rejected at `CREATE INDEX` time.
+- **Allowed column types:** `INT`, `BIGINT`, `FLOAT`, `DOUBLE`, `BIT`, `DATE`, and `DATETIME` only (a `DATETIME` is kept as its UTC ticks and scanned with the 64-bit integer kernels; `MIN`/`MAX`/`COUNT` fold natively). Any other type (such as `VARCHAR`, `GUID`, or `VECTOR`) is rejected at `CREATE INDEX` time.
 - **Storage modes:**
   - `InMemory`: Stores 4–8 bytes per row per indexed column in RAM for SIMD-accelerated scans.
   - `Lsm`: Persists format-v8 columnar segments inside `.sst` files with `min`/`max`/`NULL`/`NaN` zone maps for chunk skipping.
-  - Legacy `Disk`: Records the index in the catalog but falls back to row scans.
 - **Query eligibility:** Accelerates `COUNT`, `SUM`, `AVG`, `MIN`, and `MAX` queries **without `GROUP BY`** whose `WHERE` clause is an `AND` of column-to-literal comparisons or `IS NULL` checks over indexed columns. Queries fall back cleanly to row scans when:
   - Running inside an explicit `BEGIN` ... `COMMIT` transaction.
   - Using `GROUP BY`.
@@ -3136,7 +3175,10 @@ DROP INDEX ix_players_score ON players;
 > Source route: /manual/sql/statements/explain
 > Source file: manual/sql/statements/explain.md
 
-`EXPLAIN` validates a `SELECT` query against the active catalog and returns a single diagnostic row describing which logical plan and physical execution path the planner selects, along with its estimated cost and decision rationale, without executing the query or returning table rows.
+`EXPLAIN` answers two questions about a `SELECT`:
+
+1. **How does it execute?** The physical operator that produced the rows (`PrimaryKeyPointLookup`, `CompiledIndexLookup`, `ColumnarSimdAggregate`, `IntegerHashJoin`, `VectorHnswScan`, `StreamingTableScan`, …) and whether that is a typed, zero-allocation fast path.
+2. **If it is slow, why?** When the statement falls back to the general dictionary evaluator, `FallbackReason` names the exact clause that disqualified each fast path (`SELECT DISTINCT`, `a computed projection`, `OR across joined tables`, `Explicit transaction MVCC scan`, …).
 
 ## Syntax
 
@@ -3145,37 +3187,90 @@ EXPLAIN SELECT ...;
 ```
 
 ::: warning Supported Statements
-In DataVo `v0.4`, `EXPLAIN` accepts **only a single `SELECT` statement**. Queries using `UNION`, common table expressions (`WITH ...`), or DML statements (`INSERT`, `UPDATE`, `DELETE`) are not supported by `EXPLAIN` and throw a `ParserException`.
+`EXPLAIN` accepts **only a single `SELECT` statement**. Queries using `UNION`, common table expressions (`WITH ...`), or DML statements (`INSERT`, `UPDATE`, `DELETE`) are not supported by `EXPLAIN` and throw a `ParserException`.
+:::
+
+::: info EXPLAIN runs the query once
+Which fast path takes a statement is decided while it reads (an index may be missing a key, a storage engine may not stream a shape), so a static estimate cannot report it faithfully. `EXPLAIN` therefore runs the `SELECT` once under an execution trace, discards the result rows, and reports what actually ran, like `EXPLAIN ANALYZE` in other databases. `SELECT` has no side effects, but on a very large scan `EXPLAIN` costs one execution. If the statement fails when run (for example a subquery over a missing table), `EXPLAIN` still returns the planner columns and puts the error in `Details`.
 :::
 
 ## Output Columns
 
-`EXPLAIN` always returns **1 row** with the following **4 columns** (produced by `SelectPlannerDiagnostics`):
+`EXPLAIN` returns **1 row** with these **15 columns**:
 
 | Column | .NET Type | Description |
 | --- | --- | --- |
-| `Plan` | `string` | Logical plan variant chosen by the planner (`VolcanoNoJoin`, `VolcanoInnerJoin`, `LegacyNoJoinScan`, `LegacyWhereExpression`, `LegacyWhereJoin`, or `LegacyJoinOnly`). |
-| `Physical` | `string` | Physical execution strategy selected: `"Volcano"` or `"Legacy"`. |
-| `EstimatedCost` | `int` | Heuristic relative cost estimate (integer `>= 1`) combining startup cost, selectivity-weighted row cost, predicate complexity, and pipeline features (`ORDER BY`, `DISTINCT`, `GROUP BY`, `LIMIT`/`OFFSET`). |
-| `Reason` | `string` | Human-readable explanation of why the plan was selected, including the competing plan's cost when Volcano and Legacy were both eligible. |
+| `Plan` | `string` | The general evaluator's logical plan (`VolcanoNoJoin`, `VolcanoInnerJoin`, `LegacyNoJoinScan`, `LegacyWhereExpression`, `LegacyWhereJoin`, `LegacyJoinOnly`). Applies only when `Operator` is `GeneralDictionaryEvaluator`. |
+| `Physical` | `string` | The general evaluator's pipeline: `"Volcano"` or `"Legacy"`. |
+| `EstimatedCost` | `int` | Heuristic relative cost of that plan (`>= 1`). |
+| `Reason` | `string` | Why the planner chose that plan over the alternative. |
+| `Operator` | `string` | The operator that actually produced the rows (see [Operators](#operators)). `null` when the statement failed to run. |
+| `FastPath` | `bool` | `true` when `Operator` is a typed fast path (no per-row dictionaries; zero managed allocation per scanned row). |
+| `FallbackReason` | `string` | `null` on a fast path. Otherwise the first fast path that declined and why, as `"<Path>: <reason>"` — e.g. `TypedJoin: OR across joined tables`. |
+| `DeclinedPaths` | `string` | Every fast path that declined, in the order they were tried, separated by `; `. Also filled when a later fast path (such as `VectorHnswScan`) accepted. |
+| `EstimatedRows` | `long` | The planner's row estimate for the `FROM` table. |
+| `RowsScanned` | `long` | Rows the operator read from storage (index lookups: rows fetched by key; scans: rows visited; columnar aggregates and index counts: `0`). `null` when the operator does not count them. |
+| `RowsReturned` | `long` | Rows the `SELECT` returned. |
+| `SegmentsRead` | `long` | Columnar chunk groups read from SSTables (LSM out-of-core columnar scans). |
+| `SegmentsSkipped` | `long` | Columnar chunk groups skipped because their zone maps (per-chunk min/max) ruled the `WHERE` out — never paged in, never copied. |
+| `IndexesUsed` | `string` | Indexes the operator read, comma separated (`_PK_<table>` is the primary key). |
+| `Details` | `string` | Operator detail: join probe and build steps, vector routing, the general plan and reason, or the execution error. |
+
+## Operators
+
+| `Operator` | `FastPath` | When it runs |
+| --- | --- | --- |
+| `PrimaryKeyPointLookup` | ✅ | Equality on a single-column primary key. Reads only the matching row through the key index. |
+| `CompiledIndexLookup` | ✅ | Equality on a secondary B-Tree index. Reads only the rows the index names, decoded typed. |
+| `PrimaryKeyRangeScan` | ✅ | A range (`<`, `<=`, `>`, `>=`) on an integer or clustered primary key: only the rows in the range are read. |
+| `ColumnarSimdAggregate` | ✅ | `COUNT`/`SUM`/`MIN`/`MAX`/`AVG` over a table with a `USING COLUMNAR` index: folded over dense columns with SIMD kernels, no row decoded. On LSM this includes flushed SSTable segments with zone-map skipping. |
+| `IndexGroupCount` | ✅ | `COUNT(*) ... GROUP BY` answered from an index's key counts. |
+| `StreamingTableScan` | ✅ | A typed scan that decodes only the columns the query reads, with filters, aggregates or a bounded top-N applied while streaming. |
+| `MvccSnapshotScan` | ✅ | The typed scan inside an explicit transaction: committed rows of the snapshot, retained images, and the transaction's own writes. |
+| `IntegerHashJoin` | ✅ | `INNER`/`LEFT` equi-joins on integer columns of stored tables: hash builds per joined table, a streaming (or index-driven) probe. |
+| `VectorHnswScan` | ✅ | `ORDER BY <distance> LIMIT k` or a distance-threshold `WHERE` served by an HNSW index; `Details` shows expansion passes and hybrid routing. |
+| `ConstantProjection` | ✅ | `SELECT` of constants without `FROM`. |
+| `GeneralDictionaryEvaluator` | ❌ | The general evaluator: rows materialized as dictionaries and run through the Volcano or legacy pipeline chosen by the planner (`Plan`, `Physical`). |
+
+## Fallback Reasons
+
+A `FallbackReason` is `"<Path>: <reason>"`, where `<Path>` is `TypedScan` (single table) or `TypedJoin`.
+
+| Reason | What to change |
+| --- | --- |
+| `SELECT DISTINCT` | Use `GROUP BY` on the same columns (typed), or accept the general path. |
+| `a computed projection` | Project plain columns and compute in the application, or accept the general path. Vector distance projections are still served by `VectorHnswScan`. |
+| `a window function` | Window functions run on the general evaluator. |
+| `a common table expression (WITH)` / `a derived table or CTE source` | Query the stored table directly. |
+| `OR across joined tables` | Each `OR` must read one table; split the query or move the condition into the join. |
+| `Explicit transaction MVCC scan` | Joins inside an explicit transaction read the snapshot through the general evaluator; single-table reads stay typed (`MvccSnapshotScan`). |
+| `a subquery in WHERE` | Join instead, or accept the general path. |
+| `a comparison that is not column-versus-literal (<op>)` | Compare a column with a literal or parameter (no arithmetic, no column-to-column comparison). |
+| `the operator <op>` / `a comparison with a NULL literal` | Use `=`, `<>`, `<`, `<=`, `>`, `>=`, `LIKE`, `IS [NOT] NULL`. |
+| `LIKE whose pattern is not a literal` | Pass the pattern as a literal or parameter. |
+| `equality on <col>, one column of a composite primary key` | Composite-key lookups use the general key path. |
+| `GROUP BY without aggregates` / `GROUP BY or HAVING without aggregates` | Add an aggregate or use the general path. |
+| `the join is not an INNER/LEFT equality of integer columns of distinct stored tables` | Typed joins need integer keys; text, GUID, `RIGHT`/`FULL`/`CROSS` joins and self-joins use the general path. |
+| `an ORDER BY key that is not a joined column` | Order joined rows by a column of a joined table. |
+| `the storage engine cannot stream typed rows` | A custom (`Custom`/`Wasm`) storage engine that does not stream typed rows. |
 
 ## Usage Examples
 
 ### SQL
 
 ```sql
--- Single-table filtered query
-EXPLAIN SELECT id, name, score
-FROM players
-WHERE region = 'EU' AND score >= 500
-ORDER BY score DESC
-LIMIT 10;
+-- A fast path: Operator = PrimaryKeyPointLookup, FastPath = true, RowsScanned = 1
+EXPLAIN SELECT name FROM players WHERE id = 42;
 
--- Multi-table INNER JOIN query
-EXPLAIN SELECT p.name, d.name
+-- A fallback: Operator = GeneralDictionaryEvaluator,
+-- FallbackReason = 'TypedJoin: OR across joined tables'
+EXPLAIN SELECT p.name
 FROM players p
-INNER JOIN departments d ON p.department_id = d.id
-WHERE p.score > 100;
+INNER JOIN teams t ON p.team_id = t.id
+WHERE p.score > 48 OR t.name = 'team-3';
+
+-- LSM out-of-core columnar aggregate: SegmentsSkipped counts zone-map skips
+EXPLAIN SELECT COUNT(*) FROM readings WHERE reading > 49000;
 ```
 
 ### Inspecting `EXPLAIN` Output in C#
@@ -3184,25 +3279,21 @@ WHERE p.score > 100;
 using DataVo.Core;
 using DataVo.Core.StorageEngine.Config;
 
-using var db = new DataVoContext(new DataVoConfig
-{
-    StorageMode = StorageMode.InMemory
-});
+using var db = new DataVoContext(new DataVoConfig { StorageMode = StorageMode.InMemory });
 
 db.Execute("CREATE DATABASE App; USE App;");
 db.Execute("CREATE TABLE players (id INT PRIMARY KEY, name VARCHAR(80), region VARCHAR(16), score INT)");
 
-var result = db.Execute(
-    "EXPLAIN SELECT id, name FROM players WHERE region = 'EU' AND score >= 500")[0];
+var row = db.Execute("EXPLAIN SELECT DISTINCT region FROM players")[0].Data[0];
 
-var row = result.Data[0];
-Console.WriteLine($"Plan:          {row["Plan"]}");
-Console.WriteLine($"Physical:      {row["Physical"]}");
-Console.WriteLine($"EstimatedCost: {row["EstimatedCost"]}");
-Console.WriteLine($"Reason:        {row["Reason"]}");
+Console.WriteLine($"Operator:       {row["Operator"]}");       // GeneralDictionaryEvaluator
+Console.WriteLine($"FastPath:       {row["FastPath"]}");       // False
+Console.WriteLine($"FallbackReason: {row["FallbackReason"]}"); // TypedScan: SELECT DISTINCT
+Console.WriteLine($"RowsScanned:    {row["RowsScanned"]}");
+Console.WriteLine($"Details:        {row["Details"]}");        // the general plan and its reason
 ```
 
-## Logical Plans & Physical Paths
+## General Evaluator Plans (`Plan` / `Physical`)
 
 | `Plan` | `Physical` | When Selected |
 | --- | --- | --- |
@@ -3229,9 +3320,9 @@ Console.WriteLine($"Reason:        {row["Reason"]}");
 | `join without where uses legacy join strategy` | Join without `WHERE` uses a non-`INNER` or disconnected join, or Volcano is disabled. |
 | `volcano disabled or unsupported` | Single-table query without `WHERE` could not use Volcano (disabled in config or `HAVING` present). |
 
-::: tip Diagnostic Estimates vs. Runtime Fast Paths
-- `EXPLAIN` intentionally avoids materializing table rows when estimating costs, so small or diagnostic row counts often favor `Legacy` due to its lower startup overhead (`7–10`) compared to `Volcano` (`20–30`).
-- During actual query execution, DataVo also runs its **typed fast-path cascade** (B-Tree point lookup, PK range seek, SIMD columnar aggregate, typed hash/index join, and hybrid vector search) ahead of the general evaluator. See [Query Planner & Fast Paths](/manual/internals/query-planner) for runtime routing rules.
+::: tip Planner estimate vs. executed operator
+- `Plan`, `Physical`, `EstimatedCost` and `Reason` come from the planner's cost model, which avoids materializing table rows, so small row counts often favor `Legacy` (startup `7–10`) over `Volcano` (`20–30`). They describe what the general evaluator *would* do.
+- `Operator`, `FastPath` and `FallbackReason` describe what *did* run: the typed fast-path cascade (point lookup, key range, SIMD columnar aggregate, typed hash join, HNSW) runs ahead of the general evaluator. See [Query Planner & Fast Paths](/manual/internals/query-planner).
 :::
 
 ## See Also
@@ -3994,7 +4085,7 @@ int totalScore = db.Table<Player>()
 1. **Analyze:** The incremental Roslyn generator locates `DataVoTable<T>` query chains and validates static lambdas containing comparisons, boolean checks, null tests, `&&`, `||`, and parentheses.
 2. **Emit interceptor:** For each qualifying call site, the generator emits an interceptor in the `DataVo.Generated` namespace marked with `[InterceptsLocation]`, routing that exact call to generated C# with zero runtime reflection.
 3. **Specialize the condition struct:** When the predicate references only unindexed fixed-width columns (`int`, `long`, `float`, `double`, `bool`, `Guid`, `DataVoDate`, `DateOnly`), the generator emits a `struct` implementing the engine's predicate interface.
-4. **Inline into the storage loop:** Because the storage scan is generic over the condition struct across `InMemory`, `Lsm`, and `Disk`, the JIT / Native AOT compiler inlines the predicate directly into the row loop, with no virtual dispatch or delegate call per row.
+4. **Inline into the storage loop:** Because the storage scan is generic over the condition struct across `InMemory` and `Lsm`, the JIT / Native AOT compiler inlines the predicate directly into the row loop, with no virtual dispatch or delegate call per row.
 
 ## Fixed-Offset Byte Evaluation
 
@@ -4427,7 +4518,7 @@ Key cross-platform findings:
 
 - **Point lookups (20 Nov refresh):** Linux x64 `130.8 ns` (Memory, 56 B) / `288.3 ns` (LSM, 144 B) vs. SQLite `1,398 ns` / `3,643 ns`. Windows x64 `239.6 ns` (Memory) / `666.9 ns` (LSM) vs. SQLite `2,024 ns` / `6,741 ns`.
 - **Columnar aggregates (20 Nov refresh, 200k rows):** Linux x64 `9.29 µs` (`COUNT`) and `27.7–40.6 µs` (`SUM`/`MIN`/`MAX`, 0 B alloc); Windows x64 `16.2 µs` and `84.3–102.9 µs`, outperforming both SQLite and 1-thread DuckDB on all platforms.
-- **Concurrent ops (20–21 Nov CI):** The 20 Nov concurrency fixes (`44748508039`) eliminated writer starvation in that run, sustaining **1.53M ops/s** on 4-vCPU Linux (`302,878` writes, `0.125 ms` write P99) and Windows (`98,696` writes, `1.084 ms` write P99). However, the 21 Nov re-run (`44916996459`, adding a file-backed `SQLite WAL NORMAL` comparator) still observed intermittent writer starvation under 10-worker oversubscription on the 4-vCPU Windows runner (`0` writes in `9,297 ms`, while Linux completed `50,986` writes at `1.55M ops/s` and `0.212 ms` write P99, and `SQLite WAL NORMAL` completed `20,592` writes on Windows). Windows 4-vCPU contention remains an open issue.
+- **Concurrent ops (20–21 Nov CI):** The 20 Nov concurrency fixes (`44748508039`) eliminated writer starvation in that run, sustaining **1.53M ops/s** on 4-vCPU Linux (`302,878` writes, `0.125 ms` write P99) and Windows (`98,696` writes, `1.084 ms` write P99). However, the 21 Nov re-run (`44916996459`, adding a file-backed `SQLite WAL NORMAL` comparator) still observed intermittent writer starvation under 10-worker oversubscription on the 4-vCPU Windows runner (`0` writes in `9,297 ms`, while Linux completed `50,986` writes at `1.55M ops/s` and `0.212 ms` write P99, and `SQLite WAL NORMAL` completed `20,592` writes on Windows). Root cause (v0.5): the benchmark harness, not the engine. Its ten never-blocking workers ran as thread-pool work items, so on 4 cores the two writers (queued last) waited for the pool's slow thread injection and the `CancelAfter` timer that ends the run fired late on the same starved pool. Reproduced locally with `DOTNET_PROCESSOR_COUNT=4`: the old harness reports 0 writes and 4.0 s elapsed for a 3 s run; the fixed harness (dedicated threads, one start barrier, writers first, coordinator-owned deadline) reports 237,338 writes in 3.01 s. `WriterProgressUnderReadLoadTests` now pins per-300 ms writer progress under 2.5× oversubscribed continuous reads for `InMemory`, `Lsm` and the MVCC snapshot gate.
 - **Durability differences:** On Linux VMs with fast virtual-disk flushes (`~0.1 ms`), SQLite's durable update (`0.097 ms`) leads DataVo Production (`0.223 ms`). On Windows (`~2.5 ms`) and macOS (`~4.0 ms`), hardware flush latency dominates and both engines tie.
 - **SIMD paths:** `SimdDistanceKernels` auto-dispatches AVX2 (256-bit) on x64, AdvSimd/NEON (128-bit) on Arm64, and `TensorPrimitives` / `Vector<T>` on portable targets.
 
@@ -4565,6 +4656,8 @@ var relaxed = new DataVoConfig { StorageMode = StorageMode.Lsm, DiskStoragePath 
 ## 4. Arena Live Views, Unity IL2CPP & Charts
 
 ::: details Arena Live Views Matrix (Desktop .NET & Unity macOS IL2CPP)
+DuckDB runs only in the desktop .NET lane; the Unity lanes compare DataVo with SQLite.
+
 **Desktop .NET lane (7 repetitions per profile):**
 ```bash
 dotnet "$DLL" --scenario arena-live-views --profile gameplay --engine all --repetitions 7 --output /private/tmp/datavo-arena-gameplay --format markdown
@@ -4622,16 +4715,11 @@ using var db = new DataVoContext(new DataVoConfig
 
 | Property | Default | Description |
 | --- | --- | --- |
-| `StorageMode` | `StorageMode.InMemory` | Storage backend: `InMemory`, `Lsm`, `Disk` (legacy), `Wasm` (browser playground), or `Custom`. |
-| `DiskStoragePath` | `null` | Directory for persisted `Lsm` and `Disk` files. Guarded by a single-process `datavo.lock`. |
+| `StorageMode` | `StorageMode.InMemory` | Storage mode: `InMemory` or `Lsm` (`Wasm` and `Custom` plug in an `IStorageEngine` you supply). |
+| `DiskStoragePath` | `null` (`./datavo_lsm_data`) | Directory for persisted `Lsm` files. Guarded by a single-process `datavo.lock`. |
 | `CustomStorageEngine` | `null` | Custom `IStorageEngine` instance when `StorageMode = StorageMode.Custom`. |
 | `WasmStorageEngine` | `null` | Browser storage engine when `StorageMode = StorageMode.Wasm`. |
 | `LockAcquireTimeoutMs` | `30000` | Maximum milliseconds to wait for a lock before failing (`-1` waits indefinitely). |
-| `WalEnabled` | `true` (`Disk`), `false` (other) | Enables WAL in legacy `Disk` mode. |
-| `SyncDiskWrites` | `false` | Forces fsync on legacy `Disk` mode writes. |
-| `WalFilePath` | `"datavo.wal"` | Legacy `Disk` WAL file name or path. |
-| `WalCheckpointThreshold` | `1000` | Legacy `Disk` WAL entry threshold before checkpointing. |
-| `WalCheckpointIntervalMs` | `1000` | Background WAL checkpoint interval (ms) for `IoSchedulerMode.GroupCommit`. |
 | `TransactionIdStateFilePath` | `"datavo.txid"` | Persisted MVCC transaction ID watermark file. |
 | `CheckpointStateFilePath` | `"datavo.ckpt"` | Persisted binary WAL checkpoint LSN watermark file. |
 
@@ -4641,8 +4729,8 @@ using var db = new DataVoContext(new DataVoConfig
 | --- | --- | --- |
 | `LsmStrictFsync` | `true` | `true` flushes the LSM commit log to stable storage before acknowledging writes; `false` (Relaxed) acknowledges in OS page cache. |
 | `LsmReadMode` | `LsmReadMode.Auto` | `Auto` memory-maps SSTables on 64-bit platforms; `PositionalRead` uses standard file reads. |
+| `LsmBlockCacheSizeBytes` | `67108864` (64 MiB) | Byte budget of the sharded (32-shard, SIEVE-evicted) block cache that serves positional SSTable reads. Every block read from disk is CRC32C-verified before it is served or cached; warm hits allocate 0 B. `0` disables the cache. Ignored when SSTables are memory-mapped. |
 | `ClusteredPrimaryKeys` | `true` | Stores new LSM tables with single-column `INT` or `GUID` primary keys clustered under that key. |
-| `IoSchedulerMode` | `IoSchedulerMode.Off` | Disk I/O scheduler mode (`Off`, pooled positioned I/O, or `GroupCommit`). |
 | `EnableZeroAllocCompiledUpdate` | `true` | Allows eligible fixed-width single-row compiled `UPDATE`s to byte-patch stored rows in place. |
 
 The LSM MemTable flush threshold (32 MB) is an internal engine constant rather than a `DataVoConfig` property.
@@ -4683,9 +4771,9 @@ Telemetry flags (`EnableVectorPredicateFastPathTelemetry`, `EnableHybridRoutingT
 
 ## See Also
 
-- [Storage Modes](/manual/fundamentals/storage-modes): Comparing `InMemory`, `Lsm`, and legacy `Disk`
+- [Storage Modes](/manual/fundamentals/storage-modes): Comparing `InMemory` and `Lsm`
 - [LSM & Durability](/manual/fundamentals/lsm-and-durability): `LsmStrictFsync` trade-offs and recovery guarantees
-- [ADO.NET Provider](/manual/client-interfaces/ado-net): Connection string keys (`StorageMode`, `DataSource`, `WalEnabled`)
+- [ADO.NET Provider](/manual/client-interfaces/ado-net): Connection string keys (`StorageMode`, `DataSource`)
 
 ---
 
@@ -4831,13 +4919,11 @@ Correctness does not depend on query shape, but allocation and latency do. Queri
 
 See [Query Planner](/manual/internals/query-planner) for how to stay on zero-allocation fast paths.
 
-## SQL `DATE` Contract
+## SQL `DATE` and `DATETIME` Contract
 
-DataVo provides a calendar `DATE` type (`YYYY-MM-DD`) and has **no** `DATETIME` or `TIMESTAMP` column type:
-
-- Store timestamps or points in time as `BIGINT` (UTC ticks or Unix milliseconds).
-- In C# models and source-generated projections, SQL `DATE` maps to `DataVo.Core.DataVoDate` across all targets, and additionally supports `System.DateOnly` on `.NET 10`.
-- `System.DateTime` properties are not mapped to SQL `DATE`.
+- `DATE` is a calendar date (`YYYY-MM-DD`). In C# models it maps to `DataVo.Core.DataVoDate` on every target, and to `System.DateOnly` on `net8.0` and later.
+- `DATETIME` / `TIMESTAMP` is a point in time stored as UTC ticks. In C# models it maps to `System.DateTime` (read back with `Kind = Utc`) and `System.DateTimeOffset` (read back at offset zero). See [Data Types](/manual/sql/data-types).
+- There is no `TIME` (time-of-day) or interval type.
 
 ## Unsupported Features
 

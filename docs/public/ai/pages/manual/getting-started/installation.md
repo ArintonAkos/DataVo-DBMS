@@ -16,10 +16,11 @@ dotnet add package DataVo.EntityFrameworkCore --prerelease
 
 | Package | Install When You Need | Includes |
 | --- | --- | --- |
-| `DataVo.Core` | Embedded SQL, typed tables, vector search, reactive views | `DataVoContext`, `InMemory`/`Lsm`/`Disk` engines, HNSW/FLAT/columnar indexes |
+| `DataVo.Core` | Embedded SQL, typed tables, vector search, reactive views | `DataVoContext`, `InMemory`/`Lsm` engines, HNSW/FLAT/columnar indexes |
 | `DataVo.Generators` | Build-time compiled LINQ and `[DataVoQuery]` methods | Roslyn source generator & interceptors (build-time only, no runtime dependency) |
 | `DataVo.Data` | Standard ADO.NET or Dapper micro-ORM | `DataVoConnection`, `DataVoCommand`, `DataVoDataReader`, `DataVoTransaction`, `DataVoParameter` |
 | `DataVo.EntityFrameworkCore` | Experimental EF Core `DbContext` bridge | `UseDataVo(...)`, `EnsureDataVoCreated()`, `DataVoVectorDbFunctions` |
+| `DataVo.VectorData` | `Microsoft.Extensions.VectorData` / Microsoft.Extensions.AI RAG pipelines | `DataVoVectorStore`, `DataVoVectorStoreCollection<TKey, TRecord>`, `AddDataVoVectorStore(...)` ([guide](/manual/client-interfaces/vector-data)) |
 
 ## Recommended Combinations
 

@@ -28,9 +28,8 @@ Use `DataVoConnectionStringBuilder` or a semicolon-delimited string with three s
 
 | Key | Default | Description |
 | --- | --- | --- |
-| `StorageMode` | `InMemory` | `InMemory`, `Lsm`, or `Disk` (legacy). |
-| `DataSource` | `"datavo"` | Database name (and storage directory path for `Lsm`/`Disk`). |
-| `WalEnabled` | `true` (`Disk`) | Enables WAL in legacy `Disk` mode. |
+| `StorageMode` | `InMemory` | `InMemory` or `Lsm`. Any other value throws `ArgumentException`. |
+| `DataSource` | `"datavo"` | Database name (and storage directory path for `Lsm`). |
 
 When `conn.Open()` runs, it initializes the embedded engine, executes `CREATE DATABASE IF NOT EXISTS` for the `DataSource` database name, and selects it with `USE`. `Close()` rolls back any uncommitted transaction and releases the session.
 
@@ -43,7 +42,7 @@ When `conn.Open()` runs, it initializes the embedded engine, executes `CREATE DA
 | `DbDataReader` | `DataVoDataReader` | Forward-only reader over materialized command results. |
 | `DbTransaction` | `DataVoTransaction` | Supports `Commit()`, `Rollback()`, and savepoints (`Save`, `Rollback(name)`, `Release`). |
 | `DbParameter` | `DataVoParameter` | Supports `Parameters.AddWithValue("@name", value)`. |
-| `DbConnectionStringBuilder` | `DataVoConnectionStringBuilder` | Strongly-typed builder for `StorageMode`, `DataSource`, and `WalEnabled`. |
+| `DbConnectionStringBuilder` | `DataVoConnectionStringBuilder` | Strongly-typed builder for `StorageMode` and `DataSource`. |
 | `Exception` | `DataVoException` | Exposes `ErrorCode`, `Line`, and `Column`. |
 
 `DataVo.Data` does **not** ship a `DbProviderFactory`.

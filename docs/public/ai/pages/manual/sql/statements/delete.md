@@ -84,7 +84,7 @@ COMMIT;
 
 ## Reclaiming Space with `VACUUM`
 
-In legacy `Disk` storage mode (or when manually compacting table storage after heavy deletes), deleted rows remain as tombstones in the physical table file until compacted. Run `VACUUM` on a table to reclaim that space:
+Deleted rows remain as tombstones until storage compacts them. `Lsm` compacts them during background merges; to rewrite one table immediately (for example after a large purge), run `VACUUM` on it:
 
 ```sql
 VACUUM players;
@@ -93,11 +93,11 @@ VACUUM players;
 `VACUUM table_name` performs three steps:
 
 1. Scans the table and strips all tombstoned (soft-deleted) rows.
-2. Rewrites the surviving rows into a compacted table file with fresh, contiguous internal row IDs.
+2. Rewrites the surviving rows with fresh, contiguous internal row IDs.
 3. Drops and rebuilds all B-Tree indexes on the table against the new row IDs.
 
 ::: info When You Need `VACUUM`
-The default `Lsm` storage mode compacts deleted keys automatically during background/flush merges. `VACUUM <table>` is primarily intended for manual space reclamation in legacy `Disk` mode or after large one-time purges.
+`Lsm` compacts deleted keys automatically during background and flush merges. `VACUUM <table>` is for reclaiming space at once after a large one-time purge.
 :::
 
 ## See Also

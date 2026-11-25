@@ -10,7 +10,7 @@ The current release on NuGet is **0.4.0-rc.1 (release candidate, 17 November 202
 - **Supported shape:** One `.NET 10` process owns a database directory (enforced via `datavo.lock`) or an in-memory database, executing SQL or compiled LINQ through `DataVoContext`, ADO.NET, or the EF Core bridge.
 - **Durability:** Under `StorageMode.Lsm` with `LsmStrictFsync = true` (default), acknowledged commits are flushed to stable storage. With `LsmStrictFsync = false`, writes hand off to the OS page cache. See [LSM & Durability](/manual/fundamentals/lsm-and-durability).
 - **Isolation:** Explicit transactions provide MVCC snapshot isolation with read-your-own-writes and first-committer-wins conflict detection, but not serializable predicate locking (write skew is possible). See [Transactions & MVCC](/manual/fundamentals/transactions-and-mvcc).
-- **On-disk format:** v0.4 writes SSTable format version 8 and still reads versions 2, 4, and 6, but does not yet carry a long-term cross-version compatibility guarantee. Keep an export or seed script for critical data.
+- **On-disk format:** v0.5 writes SSTable format version 8 (and reads the row-file versions 2, 4 and 6 it still writes for small integer keys). Pre-release formats are not upgraded: the v1 SSTable reader, the per-table WAL migration and the paged `Disk` engine were removed in v0.5. The format does not yet carry a long-term cross-version compatibility guarantee; keep an export or seed script for critical data.
 - **SQL `DATE` contract:** SQL `DATE` materializes as `DataVo.Core.DataVoDate` in row APIs (`CellValue.AsDate()`, compiled `GetDate`), with explicit `FromDateOnly` / `ToDateOnly` / `AsDateOnly` / `GetDateOnly` adapters for `System.DateOnly`.
 
 ## Subsystem Status
@@ -18,7 +18,7 @@ The current release on NuGet is **0.4.0-rc.1 (release candidate, 17 November 202
 | Subsystem | Status | Notes |
 | --- | --- | --- |
 | `DataVoContext` & SQL dialect | Release candidate | DataVo's own dialect; see [SQL Compatibility](/manual/sql/compatibility) |
-| `InMemory` & `Lsm` storage | Release candidate | Active engines; `Disk` (paged) is legacy |
+| `InMemory` & `Lsm` storage | Release candidate | The two storage modes (the paged `Disk` engine was removed in v0.5) |
 | Transactions & MVCC | Release candidate | Snapshot isolation, savepoints, atomic `COMMIT` |
 | Vector search (`HNSW`, `FLAT`) | Release candidate | Cosine (`<=>`) and L2 (`<->`), cost-based exact fallback |
 | Columnar indexes & SSTable segments | Release candidate | In-memory buffers + persisted 4,096-row zone-mapped segments |
@@ -55,21 +55,24 @@ The current release on NuGet is **0.4.0-rc.1 (release candidate, 17 November 202
 - **Typed execution:** `OR`/`LIKE` fast paths, integer-key hash joins, index-driven joins, dense bit-set anti-joins, unboxed `GROUP BY`, UTF-8 byte matching, and in-place top-k.
 - **Vector search:** HNSW diversity heuristic on by default (100% recall@10 on clustered data), cost-based exact scan fallback, SQL `WITH (...)` HNSW parameters, and pre-optimized SIMD kernels.
 
-### v0.5: Native Interop & Client Ergonomics *(planned)*
+### v0.5: AI Integration, Client Ergonomics & Native Interop *(release candidate `0.5.0-rc.1` in preparation)*
 - **Track A (Native Interop):** Native AOT C ABI (`dv_open`, `dv_exec`, `dv_prepare`) for C/Python/Rust/Go, zero-copy Apache Arrow C Data Interface export from columnar buffers/SSTables, and a reference Python binding.
 - **Track B (Client Applications):**
   - *Done:* Build-time compiled `OrderBy`/`ThenBy`, `Skip`/`Take`, `Select` projections, and single-table `ExecuteUpdate`/`ExecuteDelete` in `DataVo.Generators`.
-  - *Planned:* 2D geographic WGS84 points with haversine distance and spatial indexing, plus multi-target NuGet packages (`net8.0`, `net9.0`, `net10.0`, `netstandard2.1`).
+  - *Done:* Multi-target NuGet packages (`net8.0`, `net9.0`, `net10.0`, `netstandard2.1`), native `DATETIME`, `EXPLAIN` with the executed operator, a sharded LSM block cache, and typed reactive top-K/join views.
+  - *Done:* [`DataVo.VectorData`](/manual/client-interfaces/vector-data): a `Microsoft.Extensions.VectorData` vector store with HNSW/FLAT indexes, LINQ filters translated to SQL, embedding generation and dependency injection; native `ReadOnlyMemory<float>` vectors in `[DataVoTable]` models (`[VectorDimensions(n)]`), parameters and `SearchNearest`.
+  - *Done:* The paged `Disk` storage mode and pre-release format upgrades (v1 SSTables, per-table WAL migration) were removed: `InMemory` and `Lsm` are the two storage modes.
+  - *Planned:* 2D geographic WGS84 points with haversine distance and spatial indexing.
 
 ## Unity Evaluation Status {#unity-evaluation-status}
 
-Unity is an **evaluation target**, not a supported runtime. The public `DataVo.Core` package ships `net10.0` only; `DataVoEnablePortableTarget=true` produces an experimental local `netstandard2.1` candidate.
+Unity is an **evaluation target**, not a supported runtime. The public `DataVo.Core` package ships `net8.0`, `net9.0`, `net10.0` and `netstandard2.1` assets; the `netstandard2.1` asset is what Unity evaluation builds use.
 
 ::: details Unity Evaluation Matrix (Unity 6000.5.4f1)
 | Target / Boundary | Status | Notes |
 | --- | --- | --- |
 | Unity 6000.5.4f1 Editor (macOS) | Narrow smoke pass | EditMode smoke suite passes on local portable candidate |
-| macOS IL2CPP Player | Narrow smoke pass | Medium-stripping Player builds and passes type-binding + Disk/LSM reopen smoke |
+| macOS IL2CPP Player | Narrow smoke pass | Medium-stripping Player builds and passes type-binding + LSM reopen smoke |
 | Windows x64 IL2CPP | Unverified | Requires separate Player proof |
 | Direct Burst calls | Unsupported by design | Managed engine types cannot run inside Burst jobs |
 :::

@@ -3,7 +3,7 @@
 > Source route: /manual/fundamentals/storage-modes
 > Source file: manual/fundamentals/storage-modes.md
 
-`StorageMode` selects where DataVo stores table rows and how writes survive process restarts. Pick `InMemory` for ephemeral workloads and tests, or `Lsm` for durable on-disk persistence.
+`StorageMode` selects where DataVo stores table rows and how writes survive process restarts. DataVo has two storage modes: `InMemory` for ephemeral workloads and tests, and `Lsm` for durable on-disk persistence.
 
 ```csharp
 using DataVo.Core;
@@ -30,7 +30,6 @@ using var persisted = new DataVoContext(new DataVoConfig
 | --- | --- | --- | --- |
 | `StorageMode.InMemory` | Ephemeral; packed chunks in RAM | Direct append into `FlatRowStore` + hash/sorted PK map | Unit tests, caches, game state, low-latency ephemeral datasets |
 | `StorageMode.Lsm` | Durable (`commit.wal` + `.sst`); memory-mapped reads | Commit log -> 32 MB MemTable -> background SSTable flush & compaction | Production embedded persistence, write-heavy and local-first apps |
-| `StorageMode.Disk` *(Legacy)* | File-backed with optional WAL | Page/file append; **not crash-safe for `UPDATE`** | Reading existing legacy directories only |
 | `StorageMode.Wasm` *(Experimental)* | Browser/OPFS via `WasmStorageEngine` (falls back to in-memory) | Delegated to injected WASM engine | Interactive browser playground (`DataVo.Browser`); not on npm |
 | `StorageMode.Custom` | Defined by your `IStorageEngine` | Delegated to `CustomStorageEngine` | Custom storage adapters, encryption wrappers, or test mocks |
 
@@ -40,15 +39,13 @@ using var persisted = new DataVoContext(new DataVoConfig
 
 > `FlatRowStore` is an internal engine component, not a `StorageMode` enum value. Always configure `StorageMode.InMemory`.
 
-## `Lsm` vs Legacy `Disk`
+## `Lsm`
 
-Use `StorageMode.Lsm` for all new persistent applications. It provides single-record crash atomicity, clustered `INT`/`GUID` primary keys, memory-mapped SSTables, persistent secondary indexes, and out-of-core columnar segments. See [LSM & Durability](/manual/fundamentals/lsm-and-durability) for tuning `LsmStrictFsync` and recovery behavior.
+Use `StorageMode.Lsm` for every persistent application. Each statement or transaction commits as one commit-log frame (crash-atomic), tables with a single `INT`/`GUID` primary key are clustered on it, SSTables are memory-mapped, secondary indexes are persisted, and tables can carry out-of-core columnar segments. See [LSM & Durability](/manual/fundamentals/lsm-and-durability) for tuning `LsmStrictFsync` and recovery behavior.
 
-`StorageMode.Disk` is kept solely so older data directories remain readable. It receives no new durability work and performs `UPDATE` as two separate durable steps (write new row, tombstone old row), which means a crash between steps can lose the updated row.
+## `Wasm` and `Custom` Hooks
 
-## `Wasm` and `Custom` Backends
-
-Both modes accept an `IStorageEngine` instance on `DataVoConfig`:
+`Wasm` and `Custom` are not storage engines of their own: they plug an `IStorageEngine` you supply into DataVo (the browser playground uses `Custom`). Both accept an `IStorageEngine` instance on `DataVoConfig`:
 
 ```csharp
 using var customDb = new DataVoContext(new DataVoConfig
@@ -62,7 +59,7 @@ For `StorageMode.Wasm`, set `WasmStorageEngine` to an OPFS-backed or browser sto
 
 ## Directory Sharing and Locking
 
-For `Lsm` and `Disk`, DataVo serves one engine per directory per process:
+For `Lsm`, DataVo serves one engine per directory per process:
 
 - **Within one process:** Multiple `DataVoContext` instances and ADO.NET connections targeting the same `DiskStoragePath` share a single engine until the last handle is disposed. Their configurations must match, or the second open throws `DatabaseInUseException`.
 - **Across processes:** DataVo holds a `datavo.lock` file while the directory is open. Opening the same directory from a second process throws `DatabaseInUseException`.

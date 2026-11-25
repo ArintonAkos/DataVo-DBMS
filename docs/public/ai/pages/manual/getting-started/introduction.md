@@ -55,7 +55,6 @@ Every client interface—`DataVoContext`, compiled LINQ, ADO.NET, Dapper, and th
 | --- | --- | --- |
 | `StorageMode.InMemory` | Packed contiguous row buffers (`FlatRowStore`) | Ephemeral caches, tests, simulations, game state |
 | `StorageMode.Lsm` | Commit log (WAL), arena MemTables, memory-mapped SSTables, 4,096-row columnar segments | Production embedded persistence with `LsmStrictFsync = true` |
-| `StorageMode.Disk` | Legacy paged file engine | Reading existing v0.1/v0.2 data only; prefer `Lsm` for new work |
 
 ### Typed Fast Paths & Vector Search
 

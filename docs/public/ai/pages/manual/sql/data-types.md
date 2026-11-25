@@ -27,9 +27,10 @@ CREATE TABLE documents (
 | `DOUBLE` | `DOUBLE PRECISION` | `double` (`Double`) | 64-bit IEEE 754 double. |
 | `BIT` | `BOOL`, `BOOLEAN` | `bool` (`Boolean`) | Accepts `TRUE`/`FALSE` (any case); `1`/`0` and `'true'`/`'false'` are also parsed. |
 | `DATE` | — | `DataVoDate` | Calendar date stored as a 32-bit day count since `0001-01-01`. |
+| `DATETIME` | `TIMESTAMP`, `DATETIME2`, `TIMESTAMPTZ` | `DateTime` (UTC), `DateTimeOffset` | A point in time stored as 8-byte UTC ticks (100 ns precision, `0001-01-01` to `9999-12-31`). |
 | `GUID` | `UUID`, `UNIQUEIDENTIFIER` | `Guid` | 128-bit UUID. Single `GUID` primary key is clustered on `Lsm`. |
 | `VARCHAR(n)` | `NVARCHAR`, `CHAR`, `NCHAR`, `TEXT`, `STRING` | `string` | UTF-8 variable-length text. Comparisons and sorting are ordinal (case-sensitive). |
-| `VECTOR(n)` | `VEC2`, `VEC3`, `VEC4`, `FLOAT[n]`, `REAL[n]` | `float[]` | Fixed-dimension `n`-element array of 32-bit floats. |
+| `VECTOR(n)` | `VEC2`, `VEC3`, `VEC4`, `FLOAT[n]`, `REAL[n]` | `float[]`, `ReadOnlyMemory<float>` | Fixed-dimension `n`-element array of 32-bit floats. `[DataVoTable]` models declare it with `[VectorDimensions(n)]`. |
 
 ::: info DataVo Extension
 `VECTOR(n)` (with `VEC2`, `VEC3`, `VEC4`, `FLOAT[n]`, and `REAL[n]` shorthands) and `GUID` (`UUID`, `UNIQUEIDENTIFIER`) are first-class DataVo extensions beyond standard SQLite. `VECTOR` is a reserved keyword, so a column cannot be named `Vector`.
@@ -41,7 +42,23 @@ CREATE TABLE documents (
 
 - **Query materialization:** Reading a `DATE` column returns a `DataVoDate` struct (`DataVo.Core.DataVoDate`).
 - **.NET interoperability:** On `.NET 10`, convert cleanly with `DataVoDate.FromDateOnly(DateOnly)` / `.ToDateOnly()` or `DataVoDate.FromDateTime(DateTime)` / `.ToDateTime()` (midnight `DateTimeKind.Unspecified`).
-- **Timestamps:** If you need a point in time with sub-day precision, store Unix epoch milliseconds or ticks in a `BIGINT` column.
+- **Timestamps:** For a point in time with sub-day precision, use `DATETIME` (below).
+
+## The `DATETIME` / `TIMESTAMP` Storage & Row Contract
+
+`DATETIME` (aliases `TIMESTAMP`, `DATETIME2`, `TIMESTAMPTZ`) stores an instant as the `Ticks` of its UTC time: an 8-byte `long`. Packed rows, B-Tree keys, clustered keys and SIMD columnar scans (including LSM zone maps) compare it as a plain 64-bit integer, with no per-row conversion.
+
+- **Writing:** a `DateTime` of kind `Local` is converted to UTC; kinds `Utc` and `Unspecified` are taken as UTC as they are. A `DateTimeOffset` keeps its instant (`UtcTicks`). SQL literals are ISO 8601 in the invariant culture: `'2026-11-24'`, `'2026-11-24 10:15:00'`, `'2026-11-24T10:15:00.1234567Z'`, `'2026-11-24T12:15:00+02:00'`. Text without an offset is UTC.
+- **Reading:** SQL results return `DateTime` with `Kind = Utc`. Generated tables map `DateTime`, `DateTimeOffset` (returned at offset zero) and their nullable forms; compiled readers have `GetDateTime`, `GetDateTimeOffset` and their `...OrNull` forms.
+- **Parameters:** `DataVoQueryParameter` accepts `DateTime` and `DateTimeOffset`. A `DATE` column given a `DateTime` keeps its date as given.
+- **Indexes:** secondary indexes key a `DATETIME` on its fixed-width canonical UTC text (`yyyy-MM-ddTHH:mm:ss.fffffffZ`), so any spelling of the same instant finds the row through the index.
+- **Aggregates:** `MIN`, `MAX` and `COUNT` work everywhere, including `USING COLUMNAR` indexes. `SUM`/`AVG` of instants are not computed by the columnar kernels.
+
+```sql
+CREATE TABLE events (id INT PRIMARY KEY, at DATETIME, label VARCHAR(40));
+INSERT INTO events VALUES (1, '2026-11-24T12:15:00+02:00', 'deploy');
+SELECT id FROM events WHERE at >= '2026-11-24 10:00:00' ORDER BY at DESC;
+```
 
 ## Unsupported Types (`ParserException`)
 
@@ -50,7 +67,7 @@ DataVo throws a `ParserException` at `CREATE TABLE` or `ALTER TABLE` time for ty
 | Unsupported Type | Error Guidance / Workaround |
 | --- | --- |
 | `DECIMAL`, `NUMERIC`, `MONEY` | Use `DOUBLE` for approximate numeric values, or `VARCHAR` to preserve exact decimal digits. |
-| `DATETIME`, `TIMESTAMP`, `TIME` | Use `DATE` for calendar dates, or `BIGINT` for Unix timestamps / ticks. |
+| `TIME` | Use `DATETIME` (or `TIMESTAMP`) for a point in time, or `DATE` for a calendar date. |
 | `LONG` | Use `BIGINT` for 64-bit integers. |
 | `BLOB`, `BINARY`, `VARBINARY`, `JSON`, `JSONB` | Not supported as native column types in `v0.4`; encode as `VARCHAR` (e.g., Base64 or JSON text). |
 

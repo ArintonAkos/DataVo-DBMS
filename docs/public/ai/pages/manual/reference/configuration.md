@@ -21,16 +21,11 @@ using var db = new DataVoContext(new DataVoConfig
 
 | Property | Default | Description |
 | --- | --- | --- |
-| `StorageMode` | `StorageMode.InMemory` | Storage backend: `InMemory`, `Lsm`, `Disk` (legacy), `Wasm` (browser playground), or `Custom`. |
-| `DiskStoragePath` | `null` | Directory for persisted `Lsm` and `Disk` files. Guarded by a single-process `datavo.lock`. |
+| `StorageMode` | `StorageMode.InMemory` | Storage mode: `InMemory` or `Lsm` (`Wasm` and `Custom` plug in an `IStorageEngine` you supply). |
+| `DiskStoragePath` | `null` (`./datavo_lsm_data`) | Directory for persisted `Lsm` files. Guarded by a single-process `datavo.lock`. |
 | `CustomStorageEngine` | `null` | Custom `IStorageEngine` instance when `StorageMode = StorageMode.Custom`. |
 | `WasmStorageEngine` | `null` | Browser storage engine when `StorageMode = StorageMode.Wasm`. |
 | `LockAcquireTimeoutMs` | `30000` | Maximum milliseconds to wait for a lock before failing (`-1` waits indefinitely). |
-| `WalEnabled` | `true` (`Disk`), `false` (other) | Enables WAL in legacy `Disk` mode. |
-| `SyncDiskWrites` | `false` | Forces fsync on legacy `Disk` mode writes. |
-| `WalFilePath` | `"datavo.wal"` | Legacy `Disk` WAL file name or path. |
-| `WalCheckpointThreshold` | `1000` | Legacy `Disk` WAL entry threshold before checkpointing. |
-| `WalCheckpointIntervalMs` | `1000` | Background WAL checkpoint interval (ms) for `IoSchedulerMode.GroupCommit`. |
 | `TransactionIdStateFilePath` | `"datavo.txid"` | Persisted MVCC transaction ID watermark file. |
 | `CheckpointStateFilePath` | `"datavo.ckpt"` | Persisted binary WAL checkpoint LSN watermark file. |
 
@@ -40,8 +35,8 @@ using var db = new DataVoContext(new DataVoConfig
 | --- | --- | --- |
 | `LsmStrictFsync` | `true` | `true` flushes the LSM commit log to stable storage before acknowledging writes; `false` (Relaxed) acknowledges in OS page cache. |
 | `LsmReadMode` | `LsmReadMode.Auto` | `Auto` memory-maps SSTables on 64-bit platforms; `PositionalRead` uses standard file reads. |
+| `LsmBlockCacheSizeBytes` | `67108864` (64 MiB) | Byte budget of the sharded (32-shard, SIEVE-evicted) block cache that serves positional SSTable reads. Every block read from disk is CRC32C-verified before it is served or cached; warm hits allocate 0 B. `0` disables the cache. Ignored when SSTables are memory-mapped. |
 | `ClusteredPrimaryKeys` | `true` | Stores new LSM tables with single-column `INT` or `GUID` primary keys clustered under that key. |
-| `IoSchedulerMode` | `IoSchedulerMode.Off` | Disk I/O scheduler mode (`Off`, pooled positioned I/O, or `GroupCommit`). |
 | `EnableZeroAllocCompiledUpdate` | `true` | Allows eligible fixed-width single-row compiled `UPDATE`s to byte-patch stored rows in place. |
 
 The LSM MemTable flush threshold (32 MB) is an internal engine constant rather than a `DataVoConfig` property.
@@ -82,6 +77,6 @@ Telemetry flags (`EnableVectorPredicateFastPathTelemetry`, `EnableHybridRoutingT
 
 ## See Also
 
-- [Storage Modes](/manual/fundamentals/storage-modes): Comparing `InMemory`, `Lsm`, and legacy `Disk`
+- [Storage Modes](/manual/fundamentals/storage-modes): Comparing `InMemory` and `Lsm`
 - [LSM & Durability](/manual/fundamentals/lsm-and-durability): `LsmStrictFsync` trade-offs and recovery guarantees
-- [ADO.NET Provider](/manual/client-interfaces/ado-net): Connection string keys (`StorageMode`, `DataSource`, `WalEnabled`)
+- [ADO.NET Provider](/manual/client-interfaces/ado-net): Connection string keys (`StorageMode`, `DataSource`)

@@ -180,6 +180,7 @@ export default withMermaid(
               { text: "ADO.NET Provider", link: "/manual/client-interfaces/ado-net" },
               { text: "Dapper", link: "/manual/client-interfaces/dapper" },
               { text: "Entity Framework Core", link: "/manual/client-interfaces/entity-framework" },
+              { text: "Microsoft.Extensions.VectorData", link: "/manual/client-interfaces/vector-data" },
             ],
           },
           {

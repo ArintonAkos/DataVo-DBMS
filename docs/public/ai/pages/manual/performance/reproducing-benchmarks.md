@@ -82,6 +82,8 @@ var relaxed = new DataVoConfig { StorageMode = StorageMode.Lsm, DiskStoragePath 
 ## 4. Arena Live Views, Unity IL2CPP & Charts
 
 ::: details Arena Live Views Matrix (Desktop .NET & Unity macOS IL2CPP)
+DuckDB runs only in the desktop .NET lane; the Unity lanes compare DataVo with SQLite.
+
 **Desktop .NET lane (7 repetitions per profile):**
 ```bash
 dotnet "$DLL" --scenario arena-live-views --profile gameplay --engine all --repetitions 7 --output /private/tmp/datavo-arena-gameplay --format markdown

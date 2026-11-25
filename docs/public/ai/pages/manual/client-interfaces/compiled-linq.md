@@ -47,7 +47,7 @@ On compilers without interceptors (such as Unity), the same code compiles and re
 | `Where` | Translates `==`, `!=`, `<`, `<=`, `>`, `>=`, `&&`, `\|\|`, boolean flags, and `null` checks. Uses PK/B-Tree indexes when available; streams in 1,024-row pages otherwise. |
 | `FirstOrDefault`, `SingleOrDefault` | PK equality on `Lsm` reads a single row (0 B on miss). |
 | `Count`, `Any`, `Sum`, `Min`, `Max` | Compiles directly into the storage scan (or `[Columnar]` index) for numeric/bool/date/Guid columns (**0 B allocated** once warm). |
-| `OrderBy`, `OrderByDescending`, `ThenBy`, `ThenByDescending` | Emits `ORDER BY`; combined with `Take`, retains only top-K rows during the scan. |
+| `OrderBy`, `OrderByDescending`, `ThenBy`, `ThenByDescending` | Emits `ORDER BY`; combined with `Take`, retains only top-K rows during the scan. `string` keys order ordinally (as SQL `ORDER BY` does), not by the current culture; pass a comparer (`OrderBy(p => p.Name, comparer)`) to order in memory instead. |
 | `Skip`, `Take` | Emits `OFFSET @offset LIMIT @limit` following `Enumerable` clamping semantics. |
 | `Select` | Projects only the referenced columns (`SELECT name, score ...`) without instantiating full models. |
 | `ExecuteDelete`, `ExecuteUpdate` | Emits single atomic `DELETE` or `UPDATE` statements (`Set`, `SetNull`, and `+`, `-`, `*` column arithmetic). |

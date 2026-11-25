@@ -116,6 +116,6 @@ Add `DataVo.Generators` and annotate a C# `Player` class with `[DataVoTable("pla
 ## See Also
 
 - [Choosing an Interface](/manual/getting-started/choosing-an-interface): Compare SQL, Compiled LINQ, ADO.NET, Dapper, and EF Core.
-- [Storage Modes](/manual/fundamentals/storage-modes): Understand `InMemory`, `Lsm`, and `Disk` trade-offs.
+- [Storage Modes](/manual/fundamentals/storage-modes): Understand the `InMemory` and `Lsm` trade-offs.
 - [DataVoContext API](/manual/client-interfaces/datavo-context-api): Full reference for prepared statements, typed writes, and streaming.
 - [Vector Search](/manual/fundamentals/vector-search): Store `VECTOR(n)` embeddings alongside relational columns.
