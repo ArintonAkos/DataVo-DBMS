@@ -63,7 +63,7 @@ ROLLBACK;
 - transaction state is tracked per logical session
 - execution paths coordinate with the transaction manager
 - table-scoped locks reduce conflicting write behavior
-- in disk mode, WAL-backed durability and recovery can participate in commit flows
+- in LSM mode, the commit log provides durability and crash recovery for committed transactions
 
 ## Current behavior summary
 
@@ -71,4 +71,4 @@ ROLLBACK;
 | :------------ | :--------------------------------------------------- |
 | Session scope | transaction state is session-bound                   |
 | Locking       | table-scoped locking                                 |
-| Durability    | WAL-enabled disk mode participates in recovery story |
+| Durability    | LSM commit log replays committed work on reopen      |

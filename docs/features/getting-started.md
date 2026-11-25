@@ -108,7 +108,7 @@ var results = context.Execute(@"
 | Mode       | Best for                                              |
 | :--------- | :---------------------------------------------------- |
 | `InMemory` | tests, examples, and benchmarks                       |
-| `Disk`     | persistent local data and recovery-oriented scenarios |
+| `Lsm`      | persistent local data and recovery-oriented scenarios |
 
 ## Where to go next
 

@@ -32,7 +32,7 @@ Host builders can expose their own diagnostics settings and apply them to `conte
 | Vectors | vector-index usage, top-k, and expansion passes |
 | Errors | error state and error message |
 
-`StorageMode.InMemory` and `StorageMode.Disk` both flow through the same diagnostics surface, so storage-mode parity can be checked from `RuntimeQueryStats.StorageMode`.
+`StorageMode.InMemory` and `StorageMode.Lsm` both flow through the same diagnostics surface, so storage-mode parity can be checked from `RuntimeQueryStats.StorageMode`.
 
 ## Recent and slow histories
 

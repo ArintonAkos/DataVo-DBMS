@@ -2,6 +2,8 @@
 
 _Last updated: 2026-03-26_ (session: phase-3 closeout: large-dataset HNSW recall/latency profiling)
 
+> Historical record: the `Disk` storage mode mentioned below was removed in v0.5; persistent storage is now `StorageMode.Lsm`.
+
 This status table tracks the active multi-phase plan execution in one place.
 Percentages are practical delivery estimates (implementation + test confidence), not formal completion gates.
 

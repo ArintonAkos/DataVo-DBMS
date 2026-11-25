@@ -171,7 +171,7 @@ private bool IsNearestJoinTwoPhaseEligible(out ExpressionNode? embeddingFilter)
 - [ ] Add tests for multiple AND predicates
 - [ ] Add tests for WHERE + nearest + join combinations
 - [ ] Add negative tests (OR predicates, joined table references, etc.)
-- [ ] Add tests for both in-memory and disk storage
+- [ ] Add tests for both in-memory and LSM storage
 
 ### Phase 4: Documentation & Future Work
 
@@ -214,7 +214,7 @@ Invalid/Unsupported Scenarios (should fallback to normal execution):
   
 Storage  Modes:
   [x] InMemory
-  [x] Disk
+  [x] Disk (mode removed in v0.5)
 ```
 
 ## Example Data Flow

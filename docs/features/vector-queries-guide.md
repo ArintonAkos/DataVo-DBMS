@@ -275,7 +275,7 @@ If ineligible, the query falls back to brute-force evaluation.
 ```csharp
 using DataVo.Data;
 
-using var connection = new DataVoConnection("StorageMode=Disk;DataSource=Products");
+using var connection = new DataVoConnection("StorageMode=Lsm;DataSource=./products");
 connection.Open();
 
 using var create = connection.CreateCommand();
@@ -398,7 +398,7 @@ public class AppDbContext : DataVoDbContext
     public DbSet<ItemEmbedding> Items { get; set; } = null!;
 
     protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
-        => optionsBuilder.UseDataVo("DataSource=./embeddings.db;StorageMode=Disk");
+        => optionsBuilder.UseDataVo("DataSource=./embeddings;StorageMode=Lsm");
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -421,7 +421,7 @@ using DataVo.Data;
 using Microsoft.EntityFrameworkCore;
 
 // Create schema and insert using the ADO.NET package.
-using (var connection = new DataVoConnection("StorageMode=Disk;DataSource=VectorDemo"))
+using (var connection = new DataVoConnection("StorageMode=Lsm;DataSource=./vector-demo"))
 {
     connection.Open();
 
@@ -501,7 +501,7 @@ HNSW index adds overhead:
 ### Disk space
 
 - Table data: `(768 × 4) + metadata` bytes per row
-- Index file: Persisted HNSW structure
+- HNSW index: snapshot saved on close, replayed from the commit log on reopen
 
 ### Query latency
 
@@ -563,7 +563,7 @@ _Latencies are approximate and depend on hardware and vector dimensionality._
 
 **Solution**:
 
-- Use disk-backed storage mode
+- Use the LSM storage mode (`StorageMode=Lsm`) so table data lives on disk
 - Reduce vector dimension if possible
 - Consider filtering to smaller result sets
 

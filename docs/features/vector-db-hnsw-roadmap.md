@@ -3,6 +3,8 @@
 > Last updated: 2026-03-22  
 > Status: Planned (post EF baseline)  
 > Scope: Deliver production-usable vector search first, then HNSW as ANN acceleration.
+>
+> Historical record: the `Disk` storage mode mentioned below was removed in v0.5; persistent storage is now `StorageMode.Lsm`.
 
 ## Goal
 

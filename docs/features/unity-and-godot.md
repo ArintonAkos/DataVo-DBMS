@@ -14,7 +14,7 @@ The public `DataVo.Core` package ships a `netstandard2.1` asset next to `net8.0`
 | Direct Burst calls | Unsupported by design | DataVo contains managed classes, strings, collections, locks, exceptions, and storage services. |
 | Job-to-managed batch bridge | Planned proof | Jobs produce fixed-layout POD commands; managed code drains them after `JobHandle` completion. |
 | In-memory mode | Candidate scope | This is the only storage mode included in the Stage 3 Unity candidate proof. |
-| Disk/LSM persistence | Verified (narrow smoke) | Save, close and reopen pass for both modes in the Unity 6000.5.4f1 macOS Editor and a macOS IL2CPP Player. Other platforms and power-loss behaviour are unverified. |
+| LSM persistence | Verified (narrow smoke) | Save, close and reopen pass in the Unity 6000.5.4f1 macOS Editor and a macOS IL2CPP Player. Other platforms and power-loss behaviour are unverified. |
 | Godot C# | Unverified | Godot is not part of the first Unity proof and requires its own final-artifact validation. |
 
 ## Candidate use cases

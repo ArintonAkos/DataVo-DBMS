@@ -372,7 +372,7 @@ images satisfy the predicate:
 The incrementally maintained result is verified to **exactly equal** a full re-execution of the
 query — the L1, aggregate, top-K, inner/outer join, DISTINCT, UNION, uncorrelated and correlated
 subquery, and recursive-CTE oracle tests run long random operation sequences and assert
-incremental == recompute on both `InMemory` and `Disk` storage. (Where the batch engine has a
+incremental == recompute on both `InMemory` and `Lsm` storage. (Where the batch engine has a
 pre-existing gap — correlated subqueries and `WITH RECURSIVE` are not supported by the batch
 executor — the oracle's reference is computed independently from the raw rows so the gate still
 checks against true SQL semantics, not a broken batch path.)
