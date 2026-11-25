@@ -23,6 +23,12 @@ public sealed class TransactionManager
 {
     private readonly ConcurrentDictionary<Guid, TransactionContext> _activeTransactions = new();
 
+    // Upper bound on _activeTransactions.Count, read without a lock by every statement. It is raised before an
+    // add and lowered after a remove, so zero always means no transaction is open. (ConcurrentDictionary.IsEmpty
+    // and .Values take every bucket lock when the dictionary is empty, which made each point read contend with
+    // every commit.)
+    private int _activeCount;
+
     /// <summary>
     /// Creates a transaction manager instance.
     /// </summary>
@@ -58,7 +64,7 @@ public sealed class TransactionManager
             throw new InvalidOperationException("A transaction is already active for this session.");
         }
 
-        clock.BeginSnapshot(snapshot => Register(session, snapshot), () => _activeTransactions.TryRemove(session, out _));
+        clock.BeginSnapshot(snapshot => Register(session, snapshot), () => TryRemoveActive(session, out _));
     }
 
     private void Register(Guid session, TransactionSnapshot snapshot)
@@ -69,7 +75,7 @@ public sealed class TransactionManager
             Snapshot = snapshot
         };
 
-        if (!_activeTransactions.TryAdd(session, context))
+        if (!TryAddActive(session, context))
         {
             throw new InvalidOperationException("A transaction is already active for this session.");
         }
@@ -86,7 +92,7 @@ public sealed class TransactionManager
     /// <exception cref="InvalidOperationException">Thrown when no active transaction exists for this session.</exception>
     public TransactionContext Commit(Guid session)
     {
-        if (!_activeTransactions.TryRemove(session, out var context))
+        if (!TryRemoveActive(session, out TransactionContext? context))
         {
             throw new InvalidOperationException("No active transaction to commit.");
         }
@@ -117,7 +123,7 @@ public sealed class TransactionManager
     /// <param name="session">The unique session identifier.</param>
     public void EndCommit(Guid session)
     {
-        if (_activeTransactions.TryRemove(session, out _))
+        if (TryRemoveActive(session, out _))
         {
             Logger.Info("Transaction committed.");
         }
@@ -130,7 +136,7 @@ public sealed class TransactionManager
     /// <exception cref="InvalidOperationException">Thrown when no active transaction exists for this session.</exception>
     public void Rollback(Guid session)
     {
-        if (!_activeTransactions.TryRemove(session, out _))
+        if (!TryRemoveActive(session, out _))
         {
             throw new InvalidOperationException("No active transaction to roll back.");
         }
@@ -184,9 +190,10 @@ public sealed class TransactionManager
     /// <summary>
     /// Determines whether any session currently has an active explicit transaction.
     /// </summary>
+    /// <remarks>Lock-free: it runs on every statement.</remarks>
     public bool HasAnyActiveTransaction()
     {
-        return !_activeTransactions.IsEmpty;
+        return Volatile.Read(ref _activeCount) != 0;
     }
 
     /// <summary>
@@ -196,14 +203,14 @@ public sealed class TransactionManager
     /// <param name="excludedTransactionId">The committing transaction's id, or 0.</param>
     public bool HasAnyOtherActiveTransaction(long excludedTransactionId)
     {
-        if (_activeTransactions.IsEmpty)
+        if (Volatile.Read(ref _activeCount) == 0)
         {
             return false;
         }
 
-        foreach (TransactionContext context in _activeTransactions.Values)
+        foreach (KeyValuePair<Guid, TransactionContext> active in _activeTransactions)
         {
-            if (context.TransactionId != excludedTransactionId)
+            if (active.Value.TransactionId != excludedTransactionId)
             {
                 return true;
             }
@@ -217,8 +224,14 @@ public sealed class TransactionManager
     public long? OldestActiveSnapshot()
     {
         long? oldest = null;
-        foreach (TransactionContext context in _activeTransactions.Values)
+        if (Volatile.Read(ref _activeCount) == 0)
         {
+            return null;
+        }
+
+        foreach (KeyValuePair<Guid, TransactionContext> active in _activeTransactions)
+        {
+            TransactionContext context = active.Value;
             long timestamp = context.Snapshot?.SnapshotTimestamp ?? context.TransactionId;
             oldest = oldest is null ? timestamp : Math.Min(oldest.Value, timestamp);
         }
@@ -235,6 +248,31 @@ public sealed class TransactionManager
     public TransactionContext? GetContext(Guid session)
     {
         return _activeTransactions.GetValueOrDefault(session);
+    }
+
+    /// <summary>Registers an open transaction, raising the open count first so it never reads low.</summary>
+    private bool TryAddActive(Guid session, TransactionContext context)
+    {
+        Interlocked.Increment(ref _activeCount);
+        if (_activeTransactions.TryAdd(session, context))
+        {
+            return true;
+        }
+
+        Interlocked.Decrement(ref _activeCount);
+        return false;
+    }
+
+    /// <summary>Removes an open transaction, lowering the open count only after it is gone.</summary>
+    private bool TryRemoveActive(Guid session, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out TransactionContext? context)
+    {
+        if (!_activeTransactions.TryRemove(session, out context))
+        {
+            return false;
+        }
+
+        Interlocked.Decrement(ref _activeCount);
+        return true;
     }
 
     private TransactionContext GetRequiredContext(Guid session)
