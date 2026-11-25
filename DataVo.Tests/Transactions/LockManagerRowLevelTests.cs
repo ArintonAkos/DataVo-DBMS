@@ -113,7 +113,7 @@ public class LockManagerRowLevelTests
     }
 
     [Fact]
-    public void TableLocks_AreCleanedUp_WhenNoLongerInUse()
+    public void TableLocks_KeepOneStableEntry_WhenNoLongerInUse()
     {
         var locks = new LockManager();
         const string db = "db";
@@ -121,11 +121,85 @@ public class LockManagerRowLevelTests
 
         locks.AcquireReadLock(db, table);
         locks.ReleaseReadLock(db, table);
+        object entry = GetPrivateTableLockEntry(locks, "db.users");
 
         locks.AcquireWriteLock(db, table);
         locks.ReleaseWriteLock(db, table);
+        locks.AcquireRowWriteLock(db, table, 1);
+        locks.ReleaseRowWriteLock(db, table, 1);
 
+        Assert.False(LockManager.CurrentThreadHoldsLocks);
+        Assert.Equal(1, GetPrivateTableLockCount(locks));
+        Assert.Same(entry, GetPrivateTableLockEntry(locks, "db.users"));
+    }
+
+    [Fact]
+    public async Task TableIntentReleases_UnderConcurrentRowWriters_NeverRecreateTheTableLock()
+    {
+        var locks = new LockManager();
+        const string db = "db";
+        const string table = "users";
+        locks.AcquireRowWriteLock(db, table, 1);
+        locks.ReleaseRowWriteLock(db, table, 1);
+        object entry = GetPrivateTableLockEntry(locks, "db.users");
+
+        // Every row write's last intent release used to drop and dispose the table's lock, so a busy table
+        // allocated a new ReaderWriterLockSlim over and over.
+        Task[] writers = [.. Enumerable.Range(0, 4).Select(writer => Task.Run(() =>
+        {
+            for (int i = 0; i < 5_000; i++)
+            {
+                RowKey row = writer * 10_000 + i + 1;
+                locks.AcquireRowWriteLock(db, table, row);
+                locks.ReleaseRowWriteLock(db, table, row);
+            }
+        }))];
+        await Task.WhenAll(writers);
+
+        Assert.Same(entry, GetPrivateTableLockEntry(locks, "db.users"));
+        Assert.Equal(0, GetPrivateRowLockCount(locks));
+    }
+
+    [Fact]
+    public void ForgetTable_DropsTheIdleEntry_AndANewTableGetsAFreshOne()
+    {
+        var locks = new LockManager();
+        locks.AcquireWriteLock("db", "users");
+        locks.ReleaseWriteLock("db", "users");
+        object entry = GetPrivateTableLockEntry(locks, "db.users");
+
+        locks.ForgetTable("db", "users");
         Assert.Equal(0, GetPrivateTableLockCount(locks));
+
+        locks.AcquireWriteLock("db", "users");
+        locks.ReleaseWriteLock("db", "users");
+        Assert.NotSame(entry, GetPrivateTableLockEntry(locks, "db.users"));
+    }
+
+    [Fact]
+    public async Task ForgetTable_KeepsAnEntryInUse()
+    {
+        var locks = new LockManager();
+        var held = new ManualResetEventSlim(false);
+        var release = new ManualResetEventSlim(false);
+        Task holder = Task.Run(() =>
+        {
+            locks.AcquireWriteLock("db", "users");
+            held.Set();
+            release.Wait();
+            locks.ReleaseWriteLock("db", "users");
+        });
+
+        Assert.True(held.Wait(3000));
+        object entry = GetPrivateTableLockEntry(locks, "db.users");
+        locks.ForgetTable("db", "users");
+        Assert.Same(entry, GetPrivateTableLockEntry(locks, "db.users"));
+
+        release.Set();
+        await holder;
+        locks.AcquireWriteLock("db", "users");
+        locks.ReleaseWriteLock("db", "users");
+        Assert.Same(entry, GetPrivateTableLockEntry(locks, "db.users"));
     }
 
     [Fact]
@@ -484,7 +558,8 @@ public class LockManagerRowLevelTests
         locks.AcquireWriteLock(db, table);
         locks.ReleaseWriteLock(db, table);
         Assert.Equal(0, GetPrivateRowLockCount(locks));
-        Assert.Equal(0, GetPrivateTableLockCount(locks));
+        Assert.Equal(1, GetPrivateTableLockCount(locks));
+        Assert.False(LockManager.CurrentThreadHoldsLocks);
     }
 
     [Fact]
@@ -526,7 +601,8 @@ public class LockManagerRowLevelTests
         locks.AcquireRowWriteLock(db, table, 1);
         locks.ReleaseRowWriteLock(db, table, 1);
         Assert.Equal(0, GetPrivateRowLockCount(locks));
-        Assert.Equal(0, GetPrivateTableLockCount(locks));
+        Assert.Equal(1, GetPrivateTableLockCount(locks));
+        Assert.False(LockManager.CurrentThreadHoldsLocks);
     }
 
     [Fact]
@@ -549,7 +625,8 @@ public class LockManagerRowLevelTests
 
         Assert.False(LockManager.CurrentThreadHoldsLocks);
         Assert.Equal(0, GetPrivateRowLockCount(locks));
-        Assert.Equal(0, GetPrivateTableLockCount(locks));
+        Assert.Equal(1, GetPrivateTableLockCount(locks));
+        Assert.False(LockManager.CurrentThreadHoldsLocks);
     }
 
     private static int GetPrivateRowLockCount(LockManager locks)
@@ -584,5 +661,15 @@ public class LockManagerRowLevelTests
         Assert.NotNull(count);
 
         return (int)count!;
+    }
+
+    private static object GetPrivateTableLockEntry(LockManager locks, string tableKey)
+    {
+        var field = typeof(LockManager).GetField("_tableLocks", BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(field);
+        var dictionary = (System.Collections.IDictionary)field!.GetValue(locks)!;
+        object? entry = dictionary[tableKey];
+        Assert.NotNull(entry);
+        return entry!;
     }
 }
