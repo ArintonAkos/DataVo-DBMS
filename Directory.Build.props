@@ -16,10 +16,10 @@
 
   <PropertyGroup Condition="'$(MSBuildProjectName)' == 'DataVo.Core' Or '$(MSBuildProjectName)' == 'DataVo.Data'">
     <IsPackable>true</IsPackable>
-    <Version>0.4.0-rc.1</Version>
+    <Version>0.5.0-rc.1</Version>
     <Authors>Arinton Akos</Authors>
     <Company>DataVo</Company>
-    <Description>DataVo is a C#-native database engine focused on predictable SQL execution, in-memory and disk-backed storage, and embeddable .NET workflows.</Description>
+    <Description>DataVo is a C#-native database engine focused on predictable SQL execution, in-memory and LSM (log-structured, on-disk) storage, and embeddable .NET workflows.</Description>
     <PackageTags>database;sql;dbms;dotnet;csharp;storage;embedded</PackageTags>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageProjectUrl>https://github.com/ArintonAkos/DataVo-DBMS</PackageProjectUrl>
@@ -37,19 +37,19 @@
   <PropertyGroup Condition="'$(MSBuildProjectName)' == 'DataVo.Core'">
     <PackageId>DataVo.Core</PackageId>
     <Title>DataVo Core</Title>
-    <PackageReleaseNotes>0.4.0-rc.1 ships out-of-core columnar SSTables (format v8 with zone maps and delete vectors), compact in-memory FlatRowStore, typed SQL scan, join, GROUP BY and bounded top-k execution with UTF-8 byte filtering, HNSW SQL options (WITH) and diversity heuristic defaults, cost-based filtered vector exact-scan routing, eager-optimized SIMD distance kernels, and BIT/culture correctness fixes.</PackageReleaseNotes>
+    <PackageReleaseNotes>0.5.0-rc.1: net8.0/net9.0/net10.0/netstandard2.1 targets, native DATETIME, EXPLAIN with the executed operator, a sharded LSM block cache, typed reactive top-K and join views, ReadOnlyMemory&lt;float&gt; vectors ([VectorDimensions] models, parameters, SearchNearest), NULL keys held by LSM indexes (index-only GROUP BY counts), and ordinal text comparison on every path. Breaking: the paged Disk storage mode and pre-release on-disk format upgrades were removed; InMemory and Lsm remain.</PackageReleaseNotes>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(MSBuildProjectName)' == 'DataVo.Data'">
     <PackageId>DataVo.Data</PackageId>
     <Title>DataVo Data</Title>
     <Description>ADO.NET-facing abstractions and integration layer for the DataVo engine.</Description>
-    <PackageReleaseNotes>DataVo data-access package. 0.4.0-rc.1 aligns with DataVo.Core 0.4.0-rc.1.</PackageReleaseNotes>
+    <PackageReleaseNotes>DataVo data-access package. 0.5.0-rc.1 aligns with DataVo.Core 0.5.0-rc.1; StorageMode in connection strings accepts InMemory or Lsm and rejects anything else.</PackageReleaseNotes>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(MSBuildProjectName)' == 'DataVo.EntityFrameworkCore'">
     <IsPackable>true</IsPackable>
-    <Version>0.4.0-rc.1</Version>
+    <Version>0.5.0-rc.1</Version>
     <Authors>Arinton Akos</Authors>
     <Company>DataVo</Company>
     <PackageId>DataVo.EntityFrameworkCore</PackageId>
@@ -67,7 +67,30 @@
     <IncludeSymbols>true</IncludeSymbols>
     <SymbolPackageFormat>snupkg</SymbolPackageFormat>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
-    <PackageReleaseNotes>EF Core schema bridge for generating DataVo DDL from EF models. 0.4.0-rc.1 aligns with DataVo.Core 0.4.0-rc.1.</PackageReleaseNotes>
+    <PackageReleaseNotes>EF Core schema bridge for generating DataVo DDL from EF models. 0.5.0-rc.1 aligns with DataVo.Core 0.5.0-rc.1; the persistent mode is DataVoStorageMode.Lsm (UseLsmStorage).</PackageReleaseNotes>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'DataVo.VectorData'">
+    <IsPackable>true</IsPackable>
+    <Version>0.5.0-rc.1</Version>
+    <Authors>Arinton Akos</Authors>
+    <Company>DataVo</Company>
+    <PackageId>DataVo.VectorData</PackageId>
+    <Title>DataVo VectorData</Title>
+    <Description>Microsoft.Extensions.VectorData provider for DataVo: an embedded, Native AOT compatible vector store with HNSW and FLAT indexes, LINQ filters translated to SQL, and in-memory or LSM persistence.</Description>
+    <PackageTags>database;vector;vectordata;embeddings;rag;ai;hnsw;dotnet;embedded</PackageTags>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/ArintonAkos/DataVo-DBMS</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/ArintonAkos/DataVo-DBMS.git</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
+    <PackageOutputPath>$(MSBuildThisFileDirectory)artifacts/packages</PackageOutputPath>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <PackageReleaseNotes>First release: VectorStore and VectorStoreCollection over DataVo tables (int, long, Guid and string keys), HNSW/FLAT indexes for cosine and Euclidean distance, ReadOnlyMemory&lt;float&gt;, float[] and Embedding&lt;float&gt; vectors, embedding generation, LINQ filters, dynamic collections and dependency injection.</PackageReleaseNotes>
   </PropertyGroup>
 
   <ItemGroup Condition="'$(IsPackable)' == 'true'">

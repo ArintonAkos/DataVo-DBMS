@@ -57,11 +57,14 @@ The current release on NuGet is **0.4.0-rc.1 (release candidate, 17 November 202
 - **Typed execution:** `OR`/`LIKE` fast paths, integer-key hash joins, index-driven joins, dense bit-set anti-joins, unboxed `GROUP BY`, UTF-8 byte matching, and in-place top-k.
 - **Vector search:** HNSW diversity heuristic on by default (100% recall@10 on clustered data), cost-based exact scan fallback, SQL `WITH (...)` HNSW parameters, and pre-optimized SIMD kernels.
 
-### v0.5: Native Interop & Client Ergonomics *(planned)*
+### v0.5: AI Integration, Client Ergonomics & Native Interop *(release candidate `0.5.0-rc.1` in preparation)*
 - **Track A (Native Interop):** Native AOT C ABI (`dv_open`, `dv_exec`, `dv_prepare`) for C/Python/Rust/Go, zero-copy Apache Arrow C Data Interface export from columnar buffers/SSTables, and a reference Python binding.
 - **Track B (Client Applications):**
   - *Done:* Build-time compiled `OrderBy`/`ThenBy`, `Skip`/`Take`, `Select` projections, and single-table `ExecuteUpdate`/`ExecuteDelete` in `DataVo.Generators`.
-  - *Planned:* 2D geographic WGS84 points with haversine distance and spatial indexing, plus multi-target NuGet packages (`net8.0`, `net9.0`, `net10.0`, `netstandard2.1`).
+  - *Done:* Multi-target NuGet packages (`net8.0`, `net9.0`, `net10.0`, `netstandard2.1`), native `DATETIME`, `EXPLAIN` with the executed operator, a sharded LSM block cache, and typed reactive top-K/join views.
+  - *Done:* [`DataVo.VectorData`](/manual/client-interfaces/vector-data): a `Microsoft.Extensions.VectorData` vector store with HNSW/FLAT indexes, LINQ filters translated to SQL, embedding generation and dependency injection; native `ReadOnlyMemory<float>` vectors in `[DataVoTable]` models (`[VectorDimensions(n)]`), parameters and `SearchNearest`.
+  - *Done:* The paged `Disk` storage mode and pre-release format upgrades (v1 SSTables, per-table WAL migration) were removed: `InMemory` and `Lsm` are the two storage modes.
+  - *Planned:* 2D geographic WGS84 points with haversine distance and spatial indexing.
 
 ## Unity Evaluation Status {#unity-evaluation-status}
 
