@@ -186,6 +186,11 @@ public static class IndexKeyEncoder
         return builder.ToString();
     }
 
+    /// <summary>Builds the logical key string of one typed cell, as a single-column index stores it.</summary>
+    /// <param name="cell">The cell.</param>
+    /// <returns>The same key <see cref="BuildKeyString(ReactiveRowSchema, ReadOnlySpan{CellValue}, IReadOnlyList{string})"/> gives for one column.</returns>
+    internal static string BuildCellKeyString(CellValue cell) => NormalizeCell(cell);
+
     private static CellValue GetCell(ReactiveRowSchema schema, ReadOnlySpan<CellValue> cells, string columnName)
     {
         if (!schema.TryGetOrdinal(columnName, out int ordinal))

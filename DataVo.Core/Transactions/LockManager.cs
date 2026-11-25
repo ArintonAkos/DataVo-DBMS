@@ -6,25 +6,37 @@ using DataVo.Core.Exceptions;
 namespace DataVo.Core.Transactions;
 
 /// <summary>
-/// Thread-safe singleton that manages table-scoped reader/writer locks.
+/// Thread-safe manager of table, row and key locks for one engine.
 /// <para>
-/// Locks are keyed by the fully-qualified table identity <c>{database}.{table}</c>,
-/// allowing concurrent readers while guaranteeing exclusive access for writers.
+/// Table locks are keyed by the fully-qualified table identity <c>{database}.{table}</c>, allowing concurrent
+/// readers while guaranteeing exclusive access for writers. A row write lock or a key lock also holds the table's
+/// lock in shared mode as an <em>intent</em> lock, so exclusive table writers (DDL, bulk writes) wait for every
+/// row-level writer and the other way round, while row-level writers of different rows run side by side.
+/// </para>
+/// <para>
+/// A table's lock entry lives as long as the table: releasing the last lock keeps it, so a busy table never
+/// allocates or disposes its lock object; <see cref="ForgetTable"/> drops it when the table is dropped. Row and key
+/// lock entries come and go with their locks and are recycled through a small pool.
 /// </para>
 /// </summary>
 public sealed class LockManager
 {
     private const int DefaultLockAcquireTimeoutMs = 30000;
+    private const int MaxPooledRowLocks = 1024;
 
-    private sealed class TableLockEntry
+    private sealed class TableLockEntry(string key)
     {
-        public TableLockEntry()
-        {
-            Lock = new ReaderWriterLockSlim(LockRecursionPolicy.NoRecursion);
-        }
+        /// <summary>The table's lock key, <c>{database}.{table}</c>.</summary>
+        public string Key { get; } = key;
 
-        public ReaderWriterLockSlim Lock { get; }
+        public ReaderWriterLockSlim Lock { get; } = new(LockRecursionPolicy.NoRecursion);
+
+        /// <summary>Threads that retained the entry and have not released it yet; it is only forgotten at zero.</summary>
         public int ActiveUsers;
+
+        /// <summary>1 once <see cref="ForgetTable"/> started dropping the entry; a retainer that sees it backs off.</summary>
+        public int Forgotten;
+
         public readonly object OwnershipSync = new();
         public readonly Dictionary<int, int> ReadOwnerCounts = [];
         public int? WriteOwnerThreadId;
@@ -32,17 +44,82 @@ public sealed class LockManager
 
     private sealed class RowLockEntry
     {
-        public RowLockEntry()
-        {
-            Lock = new ReaderWriterLockSlim(LockRecursionPolicy.NoRecursion);
-        }
-
-        public ReaderWriterLockSlim Lock { get; }
+        public LockId Id;
+        public ReaderWriterLockSlim Lock { get; } = new(LockRecursionPolicy.NoRecursion);
         public int ActiveUsers;
         public readonly object OwnershipSync = new();
         public readonly HashSet<int> ReadOwnerThreadIds = [];
         public int? WriteOwnerThreadId;
-        public string? TableIntentKey;
+
+        /// <summary>The table whose intent lock this row write holds, or null when the thread held the table write lock.</summary>
+        public TableLockEntry? TableIntent;
+
+        /// <summary>Clears the entry for reuse; it is idle (no owner, no waiter) when this is called.</summary>
+        public void Reset()
+        {
+            Id = default;
+            ActiveUsers = 0;
+            WriteOwnerThreadId = null;
+            TableIntent = null;
+            ReadOwnerThreadIds.Clear();
+        }
+    }
+
+    /// <summary>
+    /// Identifies a row lock (<see cref="Scope"/> null) or a key lock: a value of a primary or unique key that an
+    /// insert reserves, whether or not a row holds it yet. Compared without allocating.
+    /// </summary>
+    private readonly struct LockId(string database, string table, string? scope, RowKey row, string? text)
+    {
+        public string Database { get; } = database;
+        public string Table { get; } = table;
+
+        /// <summary>The key constraint for a key lock (the primary key or a unique column); null for a row lock.</summary>
+        public string? Scope { get; } = scope;
+
+        /// <summary>The row, or the value of an integer key.</summary>
+        public RowKey Row { get; } = row;
+
+        /// <summary>The encoded value of a non-integer key; null otherwise.</summary>
+        public string? Text { get; } = text;
+
+        public override string ToString() => Scope is null
+            ? $"{Database}.{Table}#row:{Row}"
+            : $"{Database}.{Table}#key:{Scope}:{Text ?? Row.ToString()}";
+    }
+
+    private sealed class LockIdComparer : IEqualityComparer<LockId>
+    {
+        public static readonly LockIdComparer Instance = new();
+
+        public bool Equals(LockId x, LockId y) =>
+            x.Row == y.Row
+            && string.Equals(x.Text, y.Text, StringComparison.Ordinal)
+            && string.Equals(x.Table, y.Table, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(x.Database, y.Database, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(x.Scope, y.Scope, StringComparison.OrdinalIgnoreCase);
+
+        public int GetHashCode(LockId id) => HashCode.Combine(
+            id.Row,
+            StringComparer.OrdinalIgnoreCase.GetHashCode(id.Database),
+            StringComparer.OrdinalIgnoreCase.GetHashCode(id.Table),
+            id.Scope is null ? 0 : StringComparer.OrdinalIgnoreCase.GetHashCode(id.Scope),
+            id.Text is null ? 0 : StringComparer.Ordinal.GetHashCode(id.Text));
+    }
+
+    private readonly record struct TableName(string Database, string Table);
+
+    private sealed class TableNameComparer : IEqualityComparer<TableName>
+    {
+        public static readonly TableNameComparer Instance = new();
+
+        public bool Equals(TableName x, TableName y) =>
+            string.Equals(x.Table, y.Table, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(x.Database, y.Database, StringComparison.OrdinalIgnoreCase);
+
+        public int GetHashCode(TableName name) => HashCode.Combine(
+            StringComparer.OrdinalIgnoreCase.GetHashCode(name.Database),
+            StringComparer.OrdinalIgnoreCase.GetHashCode(name.Table));
     }
 
     private readonly record struct WaitRegistration(int ThreadId, bool Active)
@@ -59,10 +136,16 @@ public sealed class LockManager
     /// <summary>Gets whether the current thread holds any table or row lock.</summary>
     internal static bool CurrentThreadHoldsLocks => t_heldLocks > 0;
 
+    // Table entries by lock key, and by (database, table) so the row-level paths find them without building the key.
+    // Both are read without a lock; entries are only added and forgotten under _tableLockLifecycleSync.
     private readonly ConcurrentDictionary<string, TableLockEntry> _tableLocks =
         new(StringComparer.OrdinalIgnoreCase);
-    private readonly ConcurrentDictionary<string, RowLockEntry> _rowLocks =
-        new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<TableName, TableLockEntry> _tableLocksByName =
+        new(TableNameComparer.Instance);
+
+    // Row and key lock entries; read and written only under _rowLockLifecycleSync.
+    private readonly Dictionary<LockId, RowLockEntry> _rowLocks = new(LockIdComparer.Instance);
+    private readonly Stack<RowLockEntry> _rowLockPool = new();
     private readonly object _tableLockLifecycleSync = new();
     private readonly object _rowLockLifecycleSync = new();
     private readonly object _waitForGraphSync = new();
@@ -77,7 +160,8 @@ public sealed class LockManager
     private long _rowWriteLockEpoch;
 
     /// <summary>
-    /// Gets a value indicating whether any row-level write lock is currently held or being acquired.
+    /// Gets a value indicating whether any row-level write lock is currently held or being acquired. Key locks taken
+    /// by inserts do not count: an insert adds a row and never changes one a reader may be reading.
     /// </summary>
     internal bool HasActiveRowWriteLocks => Volatile.Read(ref _activeRowWriteLocks) > 0;
 
@@ -108,7 +192,7 @@ public sealed class LockManager
     /// <param name="tableName">The table name.</param>
     public void AcquireReadLock(string databaseName, string tableName)
     {
-        AcquireTableLock(BuildTableKey(databaseName, tableName), write: false);
+        AcquireTableLock(RetainTableLock(databaseName, tableName), write: false);
     }
 
     /// <summary>
@@ -118,7 +202,7 @@ public sealed class LockManager
     /// <param name="tableName">The table name.</param>
     public void AcquireWriteLock(string databaseName, string tableName)
     {
-        AcquireTableLock(BuildTableKey(databaseName, tableName), write: true);
+        AcquireTableLock(RetainTableLock(databaseName, tableName), write: true);
     }
 
     /// <summary>
@@ -128,7 +212,7 @@ public sealed class LockManager
     /// <param name="tableName">The table name.</param>
     public void ReleaseReadLock(string databaseName, string tableName)
     {
-        ReleaseTableLock(BuildTableKey(databaseName, tableName), write: false);
+        ReleaseTableLock(FindTableLock(databaseName, tableName, "read"), write: false);
     }
 
     /// <summary>
@@ -138,7 +222,7 @@ public sealed class LockManager
     /// <param name="tableName">The table name.</param>
     public void ReleaseWriteLock(string databaseName, string tableName)
     {
-        ReleaseTableLock(BuildTableKey(databaseName, tableName), write: true);
+        ReleaseTableLock(FindTableLock(databaseName, tableName, "write"), write: true);
     }
 
     /// <summary>
@@ -149,23 +233,23 @@ public sealed class LockManager
     /// <param name="rowId">The row identifier.</param>
     public void AcquireRowReadLock(string databaseName, string tableName, RowKey rowId)
     {
-        string rowKey = BuildRowKey(databaseName, tableName, rowId);
-        if (Runtime.DeferredPublication.Current?.TryReacquireHeldLock("R:" + rowKey) == true)
+        var id = new LockId(databaseName, tableName, scope: null, rowId, text: null);
+        if (Runtime.DeferredPublication.Current is { } publication && publication.TryReacquireHeldLock("R:" + id))
         {
             return;
         }
 
-        RowLockEntry rowLock = RetainRowLock(rowKey);
+        RowLockEntry rowLock = RetainRowLock(id);
         int threadId = Environment.CurrentManagedThreadId;
         WaitRegistration waitRegistration = WaitRegistration.None;
 
         try
         {
-            waitRegistration = RegisterWaitIfBlocked(rowKey, "row read", GetRowBlockingThreads(rowLock, threadId, write: false), threadId, rowLock, write: false);
+            waitRegistration = RegisterWaitIfBlocked(rowLock, "row read", GetRowBlockingThreads(rowLock, threadId, write: false), threadId, write: false);
 
             if (!rowLock.Lock.TryEnterReadLock(_lockAcquireTimeoutMs))
             {
-                throw new TimeoutException($"Timed out acquiring row read lock for '{rowKey}'.");
+                throw new TimeoutException($"Timed out acquiring row read lock for '{id}'.");
             }
 
             // See AcquireTableLock: edges must be gone before ownership becomes visible.
@@ -174,7 +258,7 @@ public sealed class LockManager
         }
         catch
         {
-            ReleaseRowLock(rowKey, rowLock);
+            ReleaseRowLock(rowLock);
             throw;
         }
         finally
@@ -192,50 +276,7 @@ public sealed class LockManager
     /// <param name="rowId">The row identifier.</param>
     public void AcquireRowWriteLock(string databaseName, string tableName, RowKey rowId)
     {
-        string rowKey = BuildRowKey(databaseName, tableName, rowId);
-        if (Runtime.DeferredPublication.Current?.TryReacquireHeldLock("R:" + rowKey) == true)
-        {
-            return;
-        }
-
-        string tableKey = BuildTableKey(databaseName, tableName);
-        bool acquiredTableIntent = AcquireTableIntentReadForRowWrite(tableKey);
-
-        RowLockEntry rowLock = RetainRowLock(rowKey);
-        Interlocked.Increment(ref _activeRowWriteLocks);
-        Interlocked.Increment(ref _rowWriteLockEpoch);
-        int threadId = Environment.CurrentManagedThreadId;
-        WaitRegistration waitRegistration = WaitRegistration.None;
-
-        try
-        {
-            waitRegistration = RegisterWaitIfBlocked(rowKey, "row write", GetRowBlockingThreads(rowLock, threadId, write: true), threadId, rowLock, write: true);
-
-            if (!rowLock.Lock.TryEnterWriteLock(_lockAcquireTimeoutMs))
-            {
-                throw new TimeoutException($"Timed out acquiring row write lock for '{rowKey}'.");
-            }
-
-            // See AcquireTableLock: edges must be gone before ownership becomes visible.
-            waitRegistration = ClearWaitRegistrationEarly(waitRegistration);
-            RegisterRowWriteOwner(rowLock, threadId);
-            rowLock.TableIntentKey = acquiredTableIntent ? tableKey : null;
-        }
-        catch
-        {
-            Interlocked.Decrement(ref _activeRowWriteLocks);
-            ReleaseRowLock(rowKey, rowLock);
-            if (acquiredTableIntent)
-            {
-                ReleaseTableReadLockCore(tableKey, removeWhenIdle: true);
-            }
-
-            throw;
-        }
-        finally
-        {
-            ClearWaitRegistration(waitRegistration);
-        }
+        AcquireRowEntryWriteLock(new LockId(databaseName, tableName, scope: null, rowId, text: null), "row write", countsAsRowWrite: true);
     }
 
     /// <summary>
@@ -246,21 +287,17 @@ public sealed class LockManager
     /// <param name="rowId">The row identifier.</param>
     public void ReleaseRowReadLock(string databaseName, string tableName, RowKey rowId)
     {
-        string rowKey = BuildRowKey(databaseName, tableName, rowId);
+        var id = new LockId(databaseName, tableName, scope: null, rowId, text: null);
         if (Runtime.DeferredPublication.Current is { } publication
-            && publication.TryHandleRelease("R:" + rowKey, write: false, static () => { }))
+            && publication.TryHandleRelease("R:" + id, write: false, static () => { }))
         {
             return;
         }
 
-        if (!_rowLocks.TryGetValue(rowKey, out RowLockEntry? rowLock))
-        {
-            throw new InvalidOperationException($"Row read lock not found for key '{rowKey}'.");
-        }
-
+        RowLockEntry rowLock = FindRowLock(id, "read");
         UnregisterRowReadOwner(rowLock, Environment.CurrentManagedThreadId);
         rowLock.Lock.ExitReadLock();
-        ReleaseRowLock(rowKey, rowLock);
+        ReleaseRowLock(rowLock);
     }
 
     /// <summary>
@@ -271,34 +308,113 @@ public sealed class LockManager
     /// <param name="rowId">The row identifier.</param>
     public void ReleaseRowWriteLock(string databaseName, string tableName, RowKey rowId)
     {
-        string rowKey = BuildRowKey(databaseName, tableName, rowId);
-        if (Runtime.DeferredPublication.Current is { } publication
-            && publication.TryHandleRelease("R:" + rowKey, write: true, () => ReleaseRowWriteLockCore(rowKey)))
+        ReleaseRowEntryWriteLock(new LockId(databaseName, tableName, scope: null, rowId, text: null), countsAsRowWrite: true);
+    }
+
+    /// <summary>
+    /// Reserves a value of an integer primary or unique key for an insert or a key-changing update: holds the table's
+    /// intent lock plus an exclusive lock on the value, so two writers giving rows the same value check for it one
+    /// after the other, and the second sees the first's row. Release with <see cref="ReleaseKeyLock(string, string, string, long)"/>;
+    /// inside a durable write batch the release waits for publication, like a row write lock.
+    /// </summary>
+    /// <param name="databaseName">The database name.</param>
+    /// <param name="tableName">The table name.</param>
+    /// <param name="constraint">The constraint the value belongs to: the primary-key index name, or a unique column.</param>
+    /// <param name="key">The key value.</param>
+    /// <returns>
+    /// <see langword="false"/> when nothing was locked because the current thread holds the table's write lock, which
+    /// already excludes every other writer; then nothing must be released.
+    /// </returns>
+    internal bool AcquireKeyLock(string databaseName, string tableName, string constraint, long key) =>
+        AcquireKeyLock(new LockId(databaseName, tableName, constraint, RowKey.FromInt64(key), text: null));
+
+    /// <summary>
+    /// Reserves an encoded key value; see <see cref="AcquireKeyLock(string, string, string, long)"/>.
+    /// </summary>
+    /// <param name="databaseName">The database name.</param>
+    /// <param name="tableName">The table name.</param>
+    /// <param name="constraint">The constraint the value belongs to: the primary-key index name, or a unique column.</param>
+    /// <param name="encodedKey">The key value, encoded as the key's index stores it.</param>
+    /// <returns><see langword="false"/> when the current thread holds the table's write lock and nothing was locked.</returns>
+    internal bool AcquireKeyLock(string databaseName, string tableName, string constraint, string encodedKey) =>
+        AcquireKeyLock(new LockId(databaseName, tableName, constraint, default, encodedKey));
+
+    /// <summary>Releases a key lock taken by <see cref="AcquireKeyLock(string, string, string, long)"/>.</summary>
+    internal void ReleaseKeyLock(string databaseName, string tableName, string constraint, long key) =>
+        ReleaseRowEntryWriteLock(new LockId(databaseName, tableName, constraint, RowKey.FromInt64(key), text: null), countsAsRowWrite: false);
+
+    /// <summary>Releases a key lock taken by <see cref="AcquireKeyLock(string, string, string, string)"/>.</summary>
+    internal void ReleaseKeyLock(string databaseName, string tableName, string constraint, string encodedKey) =>
+        ReleaseRowEntryWriteLock(new LockId(databaseName, tableName, constraint, default, encodedKey), countsAsRowWrite: false);
+
+    /// <summary>
+    /// Acquires the table's intent lock for a writer that then locks rows or keys of its own: it shares the table
+    /// with other such writers and excludes exclusive table writers. Pair with <see cref="ReleaseTableIntentLock"/>,
+    /// passing the result.
+    /// </summary>
+    /// <param name="databaseName">The database name.</param>
+    /// <param name="tableName">The table name.</param>
+    /// <returns><see langword="false"/> when the current thread already holds the table's write lock and nothing was taken.</returns>
+    internal bool AcquireTableIntentLock(string databaseName, string tableName)
+    {
+        return AcquireTableIntent(RetainTableLock(databaseName, tableName));
+    }
+
+    /// <summary>
+    /// Releases an intent lock taken by <see cref="AcquireTableIntentLock"/>. Inside a durable write batch the release
+    /// waits for publication, so no exclusive table writer sees the statement half published.
+    /// </summary>
+    /// <param name="databaseName">The database name.</param>
+    /// <param name="tableName">The table name.</param>
+    /// <param name="acquired">What <see cref="AcquireTableIntentLock"/> returned.</param>
+    internal void ReleaseTableIntentLock(string databaseName, string tableName, bool acquired)
+    {
+        if (!acquired)
         {
             return;
         }
 
-        ReleaseRowWriteLockCore(rowKey);
-    }
-
-    private void ReleaseRowWriteLockCore(string rowKey)
-    {
-        if (!_rowLocks.TryGetValue(rowKey, out RowLockEntry? rowLock))
+        TableLockEntry tableLock = FindTableLock(databaseName, tableName, "intent");
+        if (Runtime.DeferredPublication.Current is { } publication)
         {
-            throw new InvalidOperationException($"Row write lock not found for key '{rowKey}'.");
+            DeferTableReadRelease(publication, tableLock);
+            return;
         }
 
-        string? tableIntentKey = rowLock.TableIntentKey;
-        rowLock.TableIntentKey = null;
+        ReleaseTableRead(tableLock);
+    }
 
-        UnregisterRowWriteOwner(rowLock, Environment.CurrentManagedThreadId);
-        rowLock.Lock.ExitWriteLock();
-        ReleaseRowLock(rowKey, rowLock);
-        Interlocked.Decrement(ref _activeRowWriteLocks);
-
-        if (tableIntentKey is not null)
+    /// <summary>
+    /// Drops the lock entry of a table that no longer exists, unless a thread is using it. Called after a table is
+    /// dropped; a table that is created again later gets a new entry on its first lock.
+    /// </summary>
+    /// <param name="databaseName">The database name.</param>
+    /// <param name="tableName">The table name.</param>
+    internal void ForgetTable(string databaseName, string tableName)
+    {
+        lock (_tableLockLifecycleSync)
         {
-            ReleaseTableReadLockCore(tableIntentKey, removeWhenIdle: true);
+            if (_tableLocks.TryGetValue(BuildTableKey(databaseName, tableName), out TableLockEntry? entry))
+            {
+                ForgetTableEntryNoLock(entry);
+            }
+        }
+    }
+
+    /// <summary>Drops the lock entries of a dropped database's tables, except those a thread is using.</summary>
+    /// <param name="databaseName">The database name.</param>
+    internal void ForgetDatabase(string databaseName)
+    {
+        string prefix = databaseName + ".";
+        lock (_tableLockLifecycleSync)
+        {
+            foreach (KeyValuePair<string, TableLockEntry> pair in _tableLocks)
+            {
+                if (pair.Key.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                {
+                    ForgetTableEntryNoLock(pair.Value);
+                }
+            }
         }
     }
 
@@ -352,14 +468,14 @@ public sealed class LockManager
     {
         for (int i = rowIds.Count - 1; i >= 0; i--)
         {
-            string rowKey = BuildRowKey(databaseName, tableName, rowIds[i]);
+            var id = new LockId(databaseName, tableName, scope: null, rowIds[i], text: null);
             if (Runtime.DeferredPublication.Current is { } publication
-                && publication.TryReleaseHeldWriteLockIfDeferred("R:" + rowKey))
+                && publication.TryReleaseHeldWriteLockIfDeferred("R:" + id))
             {
                 continue;
             }
 
-            ReleaseRowWriteLockCore(rowKey);
+            ReleaseRowEntryWriteLockCore(id, countsAsRowWrite: true);
         }
     }
 
@@ -404,7 +520,7 @@ public sealed class LockManager
     /// </remarks>
     public void AcquireReadLock(string tableKey)
     {
-        AcquireTableLock(tableKey, write: false);
+        AcquireTableLock(RetainTableLock(tableKey), write: false);
     }
 
     /// <summary>
@@ -412,15 +528,15 @@ public sealed class LockManager
     /// </summary>
     public void AcquireWriteLock(string tableKey)
     {
-        AcquireTableLock(tableKey, write: true);
+        AcquireTableLock(RetainTableLock(tableKey), write: true);
     }
 
     /// <summary>
-    /// Acquires a table-scoped write lock and keeps the lock entry available after release.
+    /// Acquires a table-scoped write lock. Kept for callers that hold the key; every table entry is retained now.
     /// </summary>
     internal void AcquireRetainedWriteLock(string tableKey)
     {
-        AcquireTableLock(tableKey, write: true);
+        AcquireWriteLock(tableKey);
     }
 
     /// <summary>
@@ -428,7 +544,7 @@ public sealed class LockManager
     /// </summary>
     public void ReleaseReadLock(string tableKey)
     {
-        ReleaseTableLock(tableKey, write: false);
+        ReleaseTableLock(FindTableLock(tableKey, "read"), write: false);
     }
 
     /// <summary>
@@ -436,25 +552,25 @@ public sealed class LockManager
     /// </summary>
     public void ReleaseWriteLock(string tableKey)
     {
-        ReleaseTableLock(tableKey, write: true);
+        ReleaseTableLock(FindTableLock(tableKey, "write"), write: true);
     }
 
     /// <summary>
-    /// Releases a retained table-scoped write lock without disposing the table lock entry.
+    /// Releases a table-scoped write lock taken by <see cref="AcquireRetainedWriteLock"/>.
     /// </summary>
     internal void ReleaseRetainedWriteLock(string tableKey)
     {
-        ReleaseTableLock(tableKey, write: true, removeWhenIdle: false);
+        ReleaseWriteLock(tableKey);
     }
 
     /// <summary>
-    /// Acquires a shared table read lock on <paramref name="tableKey"/> to act as an intent lock for a row-level
-    /// write, blocking exclusive table writers while allowing concurrent row-level writers on other rows. Skips
-    /// acquisition when the current thread already holds the table write lock.
+    /// Takes the table's lock in shared mode as the intent lock of a row-level writer. Skips acquisition when the
+    /// current thread already holds the table write lock, and counts a repeat by a thread that already holds it
+    /// shared. Consumes the caller's retention of <paramref name="tableLock"/>.
     /// </summary>
-    private bool AcquireTableIntentReadForRowWrite(string tableKey)
+    /// <returns><see langword="false"/> when nothing was taken because the thread holds the table write lock.</returns>
+    private bool AcquireTableIntent(TableLockEntry tableLock)
     {
-        TableLockEntry tableLock = RetainTableLock(tableKey);
         int threadId = Environment.CurrentManagedThreadId;
 
         bool alreadyWriteOwner = false;
@@ -474,7 +590,7 @@ public sealed class LockManager
 
         if (alreadyWriteOwner)
         {
-            ReleaseTableLockEntry(tableKey, tableLock);
+            ReleaseTableLockEntry(tableLock);
             return false;
         }
 
@@ -486,11 +602,11 @@ public sealed class LockManager
         WaitRegistration waitRegistration = WaitRegistration.None;
         try
         {
-            waitRegistration = RegisterWaitIfBlocked(tableKey, "table read", GetTableBlockingThreads(tableLock, threadId, write: false), threadId, tableLock, write: false);
+            waitRegistration = RegisterWaitIfBlocked(tableLock, "table read", GetTableBlockingThreads(tableLock, threadId, write: false), threadId, write: false);
 
             if (!tableLock.Lock.TryEnterReadLock(_lockAcquireTimeoutMs))
             {
-                throw new TimeoutException($"Timed out acquiring table read lock for '{tableKey}'.");
+                throw new TimeoutException($"Timed out acquiring table read lock for '{tableLock.Key}'.");
             }
 
             waitRegistration = ClearWaitRegistrationEarly(waitRegistration);
@@ -499,7 +615,7 @@ public sealed class LockManager
         }
         catch
         {
-            ReleaseTableLockEntry(tableKey, tableLock);
+            ReleaseTableLockEntry(tableLock);
             throw;
         }
         finally
@@ -508,15 +624,138 @@ public sealed class LockManager
         }
     }
 
-    private void AcquireTableLock(string tableKey, bool write)
+    /// <summary>Takes a row or key lock exclusively, with the table's intent lock first.</summary>
+    private void AcquireRowEntryWriteLock(LockId id, string lockScope, bool countsAsRowWrite)
     {
-        // A write lock whose release is deferred until publication is still held by this flow.
-        if (Runtime.DeferredPublication.Current?.TryReacquireHeldLock("T:" + tableKey) == true)
+        if (Runtime.DeferredPublication.Current is { } publication && publication.TryReacquireHeldLock("R:" + id))
         {
             return;
         }
 
-        TableLockEntry tableLock = RetainTableLock(tableKey);
+        TableLockEntry tableLock = RetainTableLock(id.Database, id.Table);
+        bool acquiredTableIntent = AcquireTableIntent(tableLock);
+
+        RowLockEntry rowLock = RetainRowLock(id);
+        if (countsAsRowWrite)
+        {
+            Interlocked.Increment(ref _activeRowWriteLocks);
+            Interlocked.Increment(ref _rowWriteLockEpoch);
+        }
+
+        int threadId = Environment.CurrentManagedThreadId;
+        WaitRegistration waitRegistration = WaitRegistration.None;
+
+        try
+        {
+            waitRegistration = RegisterWaitIfBlocked(rowLock, lockScope, GetRowBlockingThreads(rowLock, threadId, write: true), threadId, write: true);
+
+            if (!rowLock.Lock.TryEnterWriteLock(_lockAcquireTimeoutMs))
+            {
+                throw new TimeoutException($"Timed out acquiring {lockScope} lock for '{id}'.");
+            }
+
+            // See AcquireTableLock: edges must be gone before ownership becomes visible.
+            waitRegistration = ClearWaitRegistrationEarly(waitRegistration);
+            RegisterRowWriteOwner(rowLock, threadId);
+            rowLock.TableIntent = acquiredTableIntent ? tableLock : null;
+        }
+        catch
+        {
+            if (countsAsRowWrite)
+            {
+                Interlocked.Decrement(ref _activeRowWriteLocks);
+            }
+
+            ReleaseRowLock(rowLock);
+            if (acquiredTableIntent)
+            {
+                ReleaseTableRead(tableLock);
+            }
+
+            throw;
+        }
+        finally
+        {
+            ClearWaitRegistration(waitRegistration);
+        }
+    }
+
+    private bool AcquireKeyLock(LockId id)
+    {
+        if (Runtime.DeferredPublication.Current is { } publication && publication.TryReacquireHeldLock("R:" + id))
+        {
+            return true;
+        }
+
+        // The table write lock already keeps every other writer out; a key lock under it would only cost.
+        TableLockEntry tableLock = RetainTableLock(id.Database, id.Table);
+        bool tableWriteOwner;
+        lock (tableLock.OwnershipSync)
+        {
+            tableWriteOwner = tableLock.WriteOwnerThreadId == Environment.CurrentManagedThreadId;
+        }
+
+        ReleaseTableLockEntry(tableLock);
+        if (tableWriteOwner)
+        {
+            return false;
+        }
+
+        AcquireRowEntryWriteLock(id, "key write", countsAsRowWrite: false);
+        return true;
+    }
+
+    private void ReleaseRowEntryWriteLock(LockId id, bool countsAsRowWrite)
+    {
+        if (Runtime.DeferredPublication.Current is { } publication && TryDeferRowEntryRelease(publication, id, countsAsRowWrite))
+        {
+            return;
+        }
+
+        ReleaseRowEntryWriteLockCore(id, countsAsRowWrite);
+    }
+
+    // Separate methods so the closures are only allocated when a release is deferred: a lambda capturing a
+    // method's parameters makes the compiler allocate its closure on every call of that method.
+    private bool TryDeferRowEntryRelease(Runtime.DeferredPublication publication, LockId id, bool countsAsRowWrite) =>
+        publication.TryHandleRelease("R:" + id, write: true, () => ReleaseRowEntryWriteLockCore(id, countsAsRowWrite));
+
+    private bool TryDeferTableRelease(Runtime.DeferredPublication publication, TableLockEntry tableLock, bool write) =>
+        publication.TryHandleRelease("T:" + tableLock.Key, write, () => ReleaseTableLockCore(tableLock, write));
+
+    private void DeferTableReadRelease(Runtime.DeferredPublication publication, TableLockEntry tableLock) =>
+        publication.DeferRelease(() => ReleaseTableRead(tableLock));
+
+    private void ReleaseRowEntryWriteLockCore(LockId id, bool countsAsRowWrite)
+    {
+        RowLockEntry rowLock = FindRowLock(id, "write");
+        TableLockEntry? tableIntent = rowLock.TableIntent;
+        rowLock.TableIntent = null;
+
+        UnregisterRowWriteOwner(rowLock, Environment.CurrentManagedThreadId);
+        rowLock.Lock.ExitWriteLock();
+        ReleaseRowLock(rowLock);
+        if (countsAsRowWrite)
+        {
+            Interlocked.Decrement(ref _activeRowWriteLocks);
+        }
+
+        if (tableIntent is not null)
+        {
+            ReleaseTableRead(tableIntent);
+        }
+    }
+
+    /// <summary>Takes a table lock. Consumes the caller's retention of <paramref name="tableLock"/>.</summary>
+    private void AcquireTableLock(TableLockEntry tableLock, bool write)
+    {
+        // A write lock whose release is deferred until publication is still held by this flow.
+        if (Runtime.DeferredPublication.Current is { } publication && publication.TryReacquireHeldLock("T:" + tableLock.Key))
+        {
+            ReleaseTableLockEntry(tableLock);
+            return;
+        }
+
         int threadId = Environment.CurrentManagedThreadId;
 
         if (!write)
@@ -535,13 +774,13 @@ public sealed class LockManager
 
         try
         {
-            waitRegistration = RegisterWaitIfBlocked(tableKey, write ? "table write" : "table read", GetTableBlockingThreads(tableLock, threadId, write), threadId, tableLock, write);
+            waitRegistration = RegisterWaitIfBlocked(tableLock, write ? "table write" : "table read", GetTableBlockingThreads(tableLock, threadId, write), threadId, write);
 
             if (write)
             {
                 if (!tableLock.Lock.TryEnterWriteLock(_lockAcquireTimeoutMs))
                 {
-                    throw new TimeoutException($"Timed out acquiring table write lock for '{tableKey}'.");
+                    throw new TimeoutException($"Timed out acquiring table write lock for '{tableLock.Key}'.");
                 }
 
                 // Clear wait edges BEFORE becoming a visible owner: a thread that is owner while its
@@ -554,7 +793,7 @@ public sealed class LockManager
             {
                 if (!tableLock.Lock.TryEnterReadLock(_lockAcquireTimeoutMs))
                 {
-                    throw new TimeoutException($"Timed out acquiring table read lock for '{tableKey}'.");
+                    throw new TimeoutException($"Timed out acquiring table read lock for '{tableLock.Key}'.");
                 }
 
                 waitRegistration = ClearWaitRegistrationEarly(waitRegistration);
@@ -563,7 +802,7 @@ public sealed class LockManager
         }
         catch
         {
-            ReleaseTableLockEntry(tableKey, tableLock);
+            ReleaseTableLockEntry(tableLock);
             throw;
         }
         finally
@@ -572,98 +811,174 @@ public sealed class LockManager
         }
     }
 
-    private void ReleaseTableLock(string tableKey, bool write, bool removeWhenIdle = true)
+    private void ReleaseTableLock(TableLockEntry tableLock, bool write)
     {
         // Inside a durable write batch, write locks stay held until the statement is published.
-        if (Runtime.DeferredPublication.Current is { } publication
-            && publication.TryHandleRelease("T:" + tableKey, write, () => ReleaseTableLockCore(tableKey, write, removeWhenIdle)))
+        if (Runtime.DeferredPublication.Current is { } publication && TryDeferTableRelease(publication, tableLock, write))
         {
             return;
         }
 
-        ReleaseTableLockCore(tableKey, write, removeWhenIdle);
+        ReleaseTableLockCore(tableLock, write);
     }
 
-    private void ReleaseTableLockCore(string tableKey, bool write, bool removeWhenIdle)
+    private void ReleaseTableLockCore(TableLockEntry tableLock, bool write)
     {
         if (!write)
         {
-            ReleaseTableReadLockCore(tableKey, removeWhenIdle);
+            ReleaseTableRead(tableLock);
             return;
-        }
-
-        if (!_tableLocks.TryGetValue(tableKey, out TableLockEntry? tableLock))
-        {
-            throw new InvalidOperationException($"Table write lock not found for key '{tableKey}'.");
         }
 
         UnregisterTableWriteOwner(tableLock, Environment.CurrentManagedThreadId);
         tableLock.Lock.ExitWriteLock();
-        ReleaseTableLockEntry(tableKey, tableLock, removeWhenIdle);
+        ReleaseTableLockEntry(tableLock);
     }
 
-    private void ReleaseTableReadLockCore(string tableKey, bool removeWhenIdle)
+    private void ReleaseTableRead(TableLockEntry tableLock)
     {
-        if (!_tableLocks.TryGetValue(tableKey, out TableLockEntry? tableLock))
-        {
-            throw new InvalidOperationException($"Table read lock not found for key '{tableKey}'.");
-        }
-
         bool exitReadLock = UnregisterTableReadOwner(tableLock, Environment.CurrentManagedThreadId);
         if (exitReadLock)
         {
             tableLock.Lock.ExitReadLock();
         }
 
-        ReleaseTableLockEntry(tableKey, tableLock, removeWhenIdle);
+        ReleaseTableLockEntry(tableLock);
+    }
+
+    private TableLockEntry RetainTableLock(string databaseName, string tableName)
+    {
+        var name = new TableName(databaseName, tableName);
+        if (_tableLocksByName.TryGetValue(name, out TableLockEntry? existing) && TryRetain(existing))
+        {
+            return existing;
+        }
+
+        lock (_tableLockLifecycleSync)
+        {
+            if (!_tableLocksByName.TryGetValue(name, out TableLockEntry? entry) || Volatile.Read(ref entry.Forgotten) != 0)
+            {
+                entry = _tableLocks.GetOrAdd(BuildTableKey(databaseName, tableName), static key => new TableLockEntry(key));
+                _tableLocksByName[name] = entry;
+            }
+
+            Interlocked.Increment(ref entry.ActiveUsers);
+            return entry;
+        }
     }
 
     private TableLockEntry RetainTableLock(string tableKey)
     {
+        if (_tableLocks.TryGetValue(tableKey, out TableLockEntry? existing) && TryRetain(existing))
+        {
+            return existing;
+        }
+
         lock (_tableLockLifecycleSync)
         {
-            TableLockEntry tableLock = _tableLocks.GetOrAdd(tableKey, _ => new TableLockEntry());
-            tableLock.ActiveUsers++;
-            return tableLock;
+            TableLockEntry entry = _tableLocks.GetOrAdd(tableKey, static key => new TableLockEntry(key));
+            Interlocked.Increment(ref entry.ActiveUsers);
+            return entry;
         }
     }
 
-    private void ReleaseTableLockEntry(string tableKey, TableLockEntry tableLock, bool removeWhenIdle = true)
+    /// <summary>
+    /// Retains an entry found without the lifecycle lock. Fails when <see cref="ForgetTable"/> is dropping it: the
+    /// increment and the check are both full fences, and so are the forgetter's mark and count check, so either the
+    /// forgetter sees this user and keeps the entry, or this user sees the mark and takes the locked path.
+    /// </summary>
+    private static bool TryRetain(TableLockEntry entry)
     {
-        lock (_tableLockLifecycleSync)
+        Interlocked.Increment(ref entry.ActiveUsers);
+        if (Volatile.Read(ref entry.Forgotten) == 0)
         {
-            if (!_tableLocks.TryGetValue(tableKey, out TableLockEntry? current)
-                || !ReferenceEquals(current, tableLock))
-            {
-                return;
-            }
-
-            current.ActiveUsers--;
-            if (current.ActiveUsers > 0 || !removeWhenIdle)
-            {
-                return;
-            }
-
-            _tableLocks.TryRemove(tableKey, out _);
-            current.Lock.Dispose();
+            return true;
         }
+
+        Interlocked.Decrement(ref entry.ActiveUsers);
+        return false;
     }
 
-    private RowLockEntry RetainRowLock(string rowKey)
+    private static void ReleaseTableLockEntry(TableLockEntry tableLock)
+    {
+        // The entry stays for the next user; only ForgetTable drops it.
+        Interlocked.Decrement(ref tableLock.ActiveUsers);
+    }
+
+    private void ForgetTableEntryNoLock(TableLockEntry entry)
+    {
+        Interlocked.Exchange(ref entry.Forgotten, 1);
+        if (Volatile.Read(ref entry.ActiveUsers) != 0)
+        {
+            Interlocked.Exchange(ref entry.Forgotten, 0);
+            return;
+        }
+
+        _tableLocks.TryRemove(entry.Key, out _);
+        foreach (KeyValuePair<TableName, TableLockEntry> pair in _tableLocksByName)
+        {
+            if (ReferenceEquals(pair.Value, entry))
+            {
+                _tableLocksByName.TryRemove(pair.Key, out _);
+            }
+        }
+
+        entry.Lock.Dispose();
+    }
+
+    private TableLockEntry FindTableLock(string databaseName, string tableName, string mode)
+    {
+        if (_tableLocksByName.TryGetValue(new TableName(databaseName, tableName), out TableLockEntry? entry)
+            || _tableLocks.TryGetValue(BuildTableKey(databaseName, tableName), out entry))
+        {
+            return entry;
+        }
+
+        throw new InvalidOperationException($"Table {mode} lock not found for key '{BuildTableKey(databaseName, tableName)}'.");
+    }
+
+    private TableLockEntry FindTableLock(string tableKey, string mode)
+    {
+        return _tableLocks.TryGetValue(tableKey, out TableLockEntry? entry)
+            ? entry
+            : throw new InvalidOperationException($"Table {mode} lock not found for key '{tableKey}'.");
+    }
+
+    private RowLockEntry RetainRowLock(LockId id)
     {
         lock (_rowLockLifecycleSync)
         {
-            RowLockEntry rowLock = _rowLocks.GetOrAdd(rowKey, _ => new RowLockEntry());
+            if (!_rowLocks.TryGetValue(id, out RowLockEntry? rowLock))
+            {
+                rowLock = _rowLockPool.Count > 0 ? _rowLockPool.Pop() : new RowLockEntry();
+                rowLock.Id = id;
+                _rowLocks.Add(id, rowLock);
+            }
+
             rowLock.ActiveUsers++;
             return rowLock;
         }
     }
 
-    private void ReleaseRowLock(string rowKey, RowLockEntry rowLock)
+    private RowLockEntry FindRowLock(LockId id, string mode)
     {
         lock (_rowLockLifecycleSync)
         {
-            if (!_rowLocks.TryGetValue(rowKey, out RowLockEntry? current)
+            if (_rowLocks.TryGetValue(id, out RowLockEntry? rowLock))
+            {
+                return rowLock;
+            }
+        }
+
+        string scope = id.Scope is null ? "Row" : "Key";
+        throw new InvalidOperationException($"{scope} {mode} lock not found for key '{id}'.");
+    }
+
+    private void ReleaseRowLock(RowLockEntry rowLock)
+    {
+        lock (_rowLockLifecycleSync)
+        {
+            if (!_rowLocks.TryGetValue(rowLock.Id, out RowLockEntry? current)
                 || !ReferenceEquals(current, rowLock))
             {
                 return;
@@ -675,8 +990,17 @@ public sealed class LockManager
                 return;
             }
 
-            _rowLocks.TryRemove(rowKey, out _);
-            current.Lock.Dispose();
+            // Idle: nobody owns it and nobody waits (a waiter counts as a user), so it can be reused as is.
+            _rowLocks.Remove(current.Id);
+            current.Reset();
+            if (_rowLockPool.Count < MaxPooledRowLocks)
+            {
+                _rowLockPool.Push(current);
+            }
+            else
+            {
+                current.Lock.Dispose();
+            }
         }
     }
 
@@ -694,20 +1018,16 @@ public sealed class LockManager
         return $"{databaseName}.{tableName}";
     }
 
-    private static string BuildRowKey(string databaseName, string tableName, RowKey rowId)
-    {
-        return $"{databaseName}.{tableName}#row:{rowId}";
-    }
-
-    private static IReadOnlyCollection<int> GetTableBlockingThreads(TableLockEntry tableLock, int threadId, bool write)
+    /// <summary>The threads a table lock request would wait for; null when there are none (the common case, no allocation).</summary>
+    private static HashSet<int>? GetTableBlockingThreads(TableLockEntry tableLock, int threadId, bool write)
     {
         lock (tableLock.OwnershipSync)
         {
-            HashSet<int> blockers = [];
+            HashSet<int>? blockers = null;
 
             if (tableLock.WriteOwnerThreadId.HasValue && tableLock.WriteOwnerThreadId.Value != threadId)
             {
-                blockers.Add(tableLock.WriteOwnerThreadId.Value);
+                (blockers ??= []).Add(tableLock.WriteOwnerThreadId.Value);
             }
 
             if (write)
@@ -716,7 +1036,7 @@ public sealed class LockManager
                 {
                     if (readerId != threadId)
                     {
-                        blockers.Add(readerId);
+                        (blockers ??= []).Add(readerId);
                     }
                 }
             }
@@ -725,15 +1045,16 @@ public sealed class LockManager
         }
     }
 
-    private static IReadOnlyCollection<int> GetRowBlockingThreads(RowLockEntry rowLock, int threadId, bool write)
+    /// <summary>The threads a row or key lock request would wait for; null when there are none.</summary>
+    private static HashSet<int>? GetRowBlockingThreads(RowLockEntry rowLock, int threadId, bool write)
     {
         lock (rowLock.OwnershipSync)
         {
-            HashSet<int> blockers = [];
+            HashSet<int>? blockers = null;
 
             if (rowLock.WriteOwnerThreadId.HasValue && rowLock.WriteOwnerThreadId.Value != threadId)
             {
-                blockers.Add(rowLock.WriteOwnerThreadId.Value);
+                (blockers ??= []).Add(rowLock.WriteOwnerThreadId.Value);
             }
 
             if (write)
@@ -742,7 +1063,7 @@ public sealed class LockManager
                 {
                     if (readerId != threadId)
                     {
-                        blockers.Add(readerId);
+                        (blockers ??= []).Add(readerId);
                     }
                 }
             }
@@ -864,19 +1185,24 @@ public sealed class LockManager
         }
     }
 
+    /// <summary>
+    /// Records that <paramref name="waitingThreadId"/> is about to wait for <paramref name="lockEntry"/> and throws
+    /// <see cref="DeadlockDetectedException"/> when that wait would close a cycle. Does nothing (and allocates
+    /// nothing) when no other thread owns what is wanted.
+    /// </summary>
     private WaitRegistration RegisterWaitIfBlocked(
-        string lockKey,
-        string lockScope,
-        IReadOnlyCollection<int> blockingThreadIds,
-        int waitingThreadId,
         object lockEntry,
+        string lockScope,
+        HashSet<int>? blockingThreadIds,
+        int waitingThreadId,
         bool write)
     {
-        if (blockingThreadIds.Count == 0)
+        if (blockingThreadIds is null || blockingThreadIds.Count == 0)
         {
             return WaitRegistration.None;
         }
 
+        string lockKey = DescribeLockEntry(lockEntry);
         lock (_waitForGraphSync)
         {
             HashSet<int> edges = GetOrCreateWaitEdges(waitingThreadId);
@@ -924,6 +1250,13 @@ public sealed class LockManager
         return new WaitRegistration(waitingThreadId, true);
     }
 
+    private static string DescribeLockEntry(object lockEntry) => lockEntry switch
+    {
+        TableLockEntry table => table.Key,
+        RowLockEntry row => row.Id.ToString(),
+        _ => lockEntry.ToString() ?? string.Empty,
+    };
+
     /// <summary>
     /// Removes edges to threads that no longer own what the waiter wants. An edge is recorded when a wait
     /// begins, so a waiter that has not been scheduled since its blocker released still points at that
@@ -936,12 +1269,21 @@ public sealed class LockManager
         {
             if (_waitTargets.TryGetValue(waiter.Key, out (object Entry, bool Write) target))
             {
-                waiter.Value.IntersectWith(target.Entry switch
+                HashSet<int>? owners = target.Entry switch
                 {
                     RowLockEntry row => GetRowBlockingThreads(row, waiter.Key, target.Write),
                     TableLockEntry table => GetTableBlockingThreads(table, waiter.Key, target.Write),
-                    _ => [],
-                });
+                    _ => null,
+                };
+
+                if (owners is null)
+                {
+                    waiter.Value.Clear();
+                }
+                else
+                {
+                    waiter.Value.IntersectWith(owners);
+                }
             }
         }
 

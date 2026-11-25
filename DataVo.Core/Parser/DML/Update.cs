@@ -99,6 +99,7 @@ internal class Update(UpdateStatement ast) : BaseDbAction
             }
 
             int rowsAffected;
+            KeyLockSet keyLocks = KeyLockSet.ForUpdate(Locks, databaseName, _model.TableName);
 
             try
             {
@@ -110,7 +111,7 @@ internal class Update(UpdateStatement ast) : BaseDbAction
                 }
                 else
                 {
-                    (List<Dictionary<string, object?>> newRows, List<RowKey> oldRowIds) = EvaluateAndVerifyConstraints(revalidatedRows, databaseName);
+                    (List<Dictionary<string, object?>> newRows, List<RowKey> oldRowIds) = EvaluateAndVerifyConstraints(revalidatedRows, databaseName, keyLocks: keyLocks);
 
                     foreach (RowKey rowId in oldRowIds)
                     {
@@ -125,7 +126,14 @@ internal class Update(UpdateStatement ast) : BaseDbAction
             }
             finally
             {
-                DmlRowLockCoordinator.Release(Locks, databaseName, _model.TableName, lockScope);
+                try
+                {
+                    keyLocks.Release();
+                }
+                finally
+                {
+                    DmlRowLockCoordinator.Release(Locks, databaseName, _model.TableName, lockScope);
+                }
             }
 
             Messages.Add($"Rows affected: {rowsAffected}");
@@ -243,11 +251,13 @@ internal class Update(UpdateStatement ast) : BaseDbAction
     /// <param name="existingRows">Dictionary of existing row IDs mapping to old row data.</param>
     /// <param name="databaseName">The active database name.</param>
     /// <param name="pending">Inside a transaction, the keys its buffered writes free and take.</param>
+    /// <param name="keyLocks">Outside a transaction, where the statement reserves the new key values it checks.</param>
     /// <returns>A tuple containing the newly evaluated rows and the corresponding old row IDs.</returns>
     private (List<Dictionary<string, object?>> NewRows, List<RowKey> OldRowIds) EvaluateAndVerifyConstraints(
         Dictionary<RowKey, Dictionary<string, object?>> existingRows,
         string databaseName,
-        InsertRowService.PendingKeys? pending = null)
+        InsertRowService.PendingKeys? pending = null,
+        KeyLockSet? keyLocks = null)
     {
         List<Dictionary<string, object?>> newRows = new(existingRows.Count);
         List<RowKey> oldRowIds = new(existingRows.Count);
@@ -257,7 +267,7 @@ internal class Update(UpdateStatement ast) : BaseDbAction
         var foreignKeysList = Catalog.GetTableForeignKeys(_model.TableName, databaseName);
         var childFks = Catalog.GetChildForeignKeys(_model.TableName, databaseName);
 
-        var keyValidator = new UpdateKeyValidator(Indexes, Context, _model.TableName, databaseName, pending);
+        var keyValidator = new UpdateKeyValidator(Indexes, Context, _model.TableName, databaseName, pending, keyLocks);
         List<Models.Catalog.Column> assignedColumns = [];
         foreach (Models.Catalog.Column column in Catalog.GetTableColumnsReadOnly(_model.TableName, databaseName))
         {

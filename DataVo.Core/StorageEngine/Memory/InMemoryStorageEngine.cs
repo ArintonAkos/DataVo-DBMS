@@ -541,6 +541,190 @@ public class InMemoryStorageEngine : IRowIdStorageEngine, ITypedRowStorageEngine
     }
 
     /// <summary>
+    /// Appends a copy of a row with some fixed-width cells replaced, for an UPDATE that only assigns such cells. The
+    /// original row stays: the caller re-points the row's index entries at the copy and then deletes it, so a reader
+    /// always finds one of the two. Rows are never changed in place, because typed rows are read without a lock.
+    /// </summary>
+    /// <remarks>
+    /// A typed row is copied through a borrowed cell buffer and appended typed, so nothing is allocated per row; a
+    /// serialized row is copied as bytes. The caller holds the row's write lock.
+    /// </remarks>
+    /// <param name="databaseName">The owning database name.</param>
+    /// <param name="tableName">The table name.</param>
+    /// <param name="rowId">The 1-based id of the row to copy.</param>
+    /// <param name="columns">The table's columns in catalog order.</param>
+    /// <param name="ordinals">The ordinals of the assigned columns.</param>
+    /// <param name="values">The assigned values, one per ordinal.</param>
+    /// <param name="newRowId">The copy's 1-based id.</param>
+    /// <returns>
+    /// <see langword="false"/>, with nothing written, when the row is gone, when an assigned cell is NULL, or when a
+    /// value does not have its column's type; the caller then takes the general update path.
+    /// </returns>
+    internal bool TryAppendPatchedFixedWidthRow(
+        string databaseName,
+        string tableName,
+        long rowId,
+        IReadOnlyList<Column> columns,
+        ReadOnlySpan<int> ordinals,
+        ReadOnlySpan<DataVo.Core.CompiledQueries.DataVoFixedWidthValue> values,
+        out long newRowId)
+    {
+        newRowId = 0;
+        if (!_databases.TryGetValue(GetKey(databaseName, tableName), out TableStore? store))
+        {
+            return false;
+        }
+
+        TableRows rows = store.Rows;
+        if (rowId < 1 || rowId > rows.Count)
+        {
+            return false;
+        }
+
+        int position = (int)(rowId - 1);
+        if (rows.IsTypedLive(position) && rows.Schema is { } schema)
+        {
+            return TryAppendPatchedTypedRow(store, rows, schema, position, columns, ordinals, values, out newRowId);
+        }
+
+        byte[] patched;
+        store.Lock.EnterReadLock();
+        try
+        {
+            if (store.Rows.RawAt(position) is not { } raw)
+            {
+                return false;
+            }
+
+            patched = raw.ToArray();
+        }
+        finally
+        {
+            store.Lock.ExitReadLock();
+        }
+
+        for (int i = 0; i < ordinals.Length; i++)
+        {
+            if (!Serialization.RowSerializer.TryOverwriteFixedWidthCell(patched, columns, ordinals[i], values[i]))
+            {
+                return false;
+            }
+        }
+
+        newRowId = InsertRow(databaseName, tableName, patched);
+        return true;
+    }
+
+    /// <summary>Whether a row of either kind (typed or serialized) is live, as of now.</summary>
+    /// <param name="databaseName">The owning database name.</param>
+    /// <param name="tableName">The table name.</param>
+    /// <param name="rowId">The 1-based row id.</param>
+    internal bool IsRowLive(string databaseName, string tableName, long rowId)
+    {
+        if (!_databases.TryGetValue(GetKey(databaseName, tableName), out TableStore? store))
+        {
+            return false;
+        }
+
+        store.Lock.EnterReadLock();
+        try
+        {
+            TableRows rows = store.Rows;
+            return rowId >= 1 && rowId <= rows.Count && rows.IsLive((int)(rowId - 1));
+        }
+        finally
+        {
+            store.Lock.ExitReadLock();
+        }
+    }
+
+    private static bool TryAppendPatchedTypedRow(
+        TableStore store,
+        TableRows rows,
+        ReactiveRowSchema schema,
+        int position,
+        IReadOnlyList<Column> columns,
+        ReadOnlySpan<int> ordinals,
+        ReadOnlySpan<DataVo.Core.CompiledQueries.DataVoFixedWidthValue> values,
+        out long newRowId)
+    {
+        newRowId = 0;
+        int columnCount = columns.Count;
+
+        // Rented before the reader's buffer and returned after it: scratch buffers are lent as a stack.
+        CellValue[] patched = CellScratch.Rent(columnCount);
+        try
+        {
+            var reader = new PackedRowReader();
+            try
+            {
+                if (!rows.TryReadTypedCells(position, ref reader, out ReadOnlySpan<CellValue> cells) || cells.Length != columnCount)
+                {
+                    return false;
+                }
+
+                cells.CopyTo(patched);
+            }
+            finally
+            {
+                reader.Dispose();
+            }
+
+            for (int i = 0; i < ordinals.Length; i++)
+            {
+                if (!TryPatchFixedWidthCell(columns[ordinals[i]], ref patched[ordinals[i]], values[i]))
+                {
+                    return false;
+                }
+            }
+
+            store.Lock.EnterWriteLock();
+            try
+            {
+                newRowId = store.AddTyped(columns, schema, patched.AsSpan(0, columnCount));
+                return true;
+            }
+            finally
+            {
+                store.Lock.ExitWriteLock();
+            }
+        }
+        finally
+        {
+            CellScratch.Return(patched, columnCount);
+        }
+    }
+
+    /// <summary>
+    /// Replaces a fixed-width cell with an assigned value of the column's type, as the serialized byte patch does:
+    /// a NULL cell, or a value of another type, is left to the general update path.
+    /// </summary>
+    private static bool TryPatchFixedWidthCell(Column column, ref CellValue cell, DataVo.Core.CompiledQueries.DataVoFixedWidthValue value)
+    {
+        if (cell.IsNull || !ColumnCellTypes.TryGet(column.Type, out CellType expected) || cell.Type != expected)
+        {
+            return false;
+        }
+
+        CellValue? patched = (expected, value.Type) switch
+        {
+            (CellType.Int32, DataVo.Core.CompiledQueries.DataVoFixedWidthValueType.Int32) => CellValue.From(value.AsInt32()),
+            (CellType.Int64, DataVo.Core.CompiledQueries.DataVoFixedWidthValueType.Int32 or DataVo.Core.CompiledQueries.DataVoFixedWidthValueType.Int64) => CellValue.From(value.AsInt64()),
+            (CellType.Double, DataVo.Core.CompiledQueries.DataVoFixedWidthValueType.Double) => CellValue.From(value.AsDouble()),
+            (CellType.Boolean, DataVo.Core.CompiledQueries.DataVoFixedWidthValueType.Boolean) => CellValue.From(value.AsBoolean()),
+            _ => null,
+        };
+
+        if (patched is not { } replacement)
+        {
+            return false;
+        }
+
+        cell = replacement;
+        return true;
+    }
+
+    /// <summary>
     /// Removes a table from the in-memory store.
     /// </summary>
     /// <param name="databaseName">The owning database name.</param>

@@ -406,6 +406,7 @@ public static class DataVoCompiledQuery
         using CommitClock.UnitScope writeUnit = CommitClock.OpenUnit();
         long statementTxId = MvccCoordinator.ResolveStatementTransactionId(context.Engine, null);
         List<RowKey> rowWriteLocks = context.Engine.LockManager.AcquireRowWriteLocks(databaseName, plan.TableName, candidateRowIds);
+        var keyLocks = DataVo.Core.Transactions.KeyLockSet.ForUpdate(context.Engine.LockManager, databaseName, plan.TableName);
 
         try
         {
@@ -436,7 +437,7 @@ public static class DataVoCompiledQuery
                 .Select(rowId => ApplyAssignments(context, existingRows[rowId], plan, parameterDictionary, columnsByName))
                 .ToList();
 
-            ValidateUpdatedRows(context, plan.TableName, databaseName, orderedRowIds, existingRows, newRows);
+            ValidateUpdatedRows(context, plan.TableName, databaseName, orderedRowIds, existingRows, newRows, keyLocks);
 
             List<Dictionary<string, object?>> oldRows = orderedRowIds
                 .Select(rowId => existingRows[rowId])
@@ -480,7 +481,14 @@ public static class DataVoCompiledQuery
         }
         finally
         {
-            context.Engine.LockManager.ReleaseRowWriteLocks(databaseName, plan.TableName, rowWriteLocks);
+            try
+            {
+                keyLocks.Release();
+            }
+            finally
+            {
+                context.Engine.LockManager.ReleaseRowWriteLocks(databaseName, plan.TableName, rowWriteLocks);
+            }
         }
     }
 
@@ -657,7 +665,7 @@ public static class DataVoCompiledQuery
 
         // Reactive change capture needs after-image materialization the byte-patch path deliberately skips.
         if (!engine.Config.EnableZeroAllocCompiledUpdate
-            || engine.Config.StorageMode != StorageMode.Lsm
+            || !HasFixedWidthPatchPath(engine)
             || engine.Changes.Enabled
             || MvccCoordinator.RecordsVersions(engine))
         {
@@ -698,55 +706,19 @@ public static class DataVoCompiledQuery
             return true;
         }
 
-        List<RowKey> rowWriteLocks = engine.LockManager.AcquireRowWriteLocks(databaseName, plan.TableName, [rowId]);
-        try
+        Span<DataVoFixedWidthValue> values = schema.AssignOrdinals.Length <= 16
+            ? stackalloc DataVoFixedWidthValue[schema.AssignOrdinals.Length]
+            : new DataVoFixedWidthValue[schema.AssignOrdinals.Length];
+        for (int i = 0; i < values.Length; i++)
         {
-            // Re-resolve under the lock: a concurrent update may have moved the row to a new id.
-            if (!engine.IndexManager.TryLookupIntegerPrimaryKey(primaryKey, schema.PkIndexName, plan.TableName, databaseName, out rowId))
+            object? newValue = FindParameterValue(parameters, schema.AssignParameterNames[i]);
+            if (newValue is null || !DataVoFixedWidthValue.TryFromObject(newValue, out values[i]))
             {
-                affected = 0;
-                return true;
+                return false;
             }
-
-            MvccCoordinator.ValidateCanModifyRow(engine, databaseName, plan.TableName, rowId, null, "UPDATE");
-
-            byte[]? rowBytes = engine.StorageContext.TryReadRowBytes(plan.TableName, databaseName, rowId);
-            if (rowBytes is null)
-            {
-                affected = 0;
-                return true;
-            }
-
-            // Byte-patch each assigned fixed-width cell in place. A cell that cannot be patched (null slot,
-            // null new value) aborts BEFORE any storage mutation, so the dictionary path can take over.
-            for (int i = 0; i < schema.AssignOrdinals.Length; i++)
-            {
-                object? newValue = FindParameterValue(parameters, schema.AssignParameterNames[i]);
-                if (newValue is null
-                    || !RowSerializer.TryOverwriteFixedWidthCell(rowBytes, schema.Columns, schema.AssignOrdinals[i], newValue))
-                {
-                    return false;
-                }
-            }
-
-            long statementTxId = MvccCoordinator.ResolveStatementTransactionId(engine, null);
-
-            // Out-of-place: tombstone the old row, append the patched bytes as the new row.
-            engine.StorageContext.DeleteFromTable([rowId], plan.TableName, databaseName);
-            RowKey newRowId = engine.StorageContext.InsertSerializedRow(rowBytes, plan.TableName, databaseName);
-
-            MvccCoordinator.RegisterUpdateVersion(engine, databaseName, plan.TableName, rowId, newRowId, statementTxId);
-
-            // The primary key is unchanged, so the fast-lane entry just re-points to the new row id (upsert).
-            engine.IndexManager.InsertIntegerPrimaryKeys([(primaryKey, newRowId)], schema.PkIndexName, plan.TableName, databaseName);
-
-            affected = 1;
-            return true;
         }
-        finally
-        {
-            engine.LockManager.ReleaseRowWriteLocks(databaseName, plan.TableName, rowWriteLocks);
-        }
+
+        return TryPatchInMemoryRow(engine, plan, schema, databaseName, primaryKey, rowId, values, out affected);
     }
 
     private static bool TryUpdateFixedWidthFastPath(
@@ -761,7 +733,7 @@ public static class DataVoCompiledQuery
         DataVoEngine engine = context.Engine;
 
         if (!engine.Config.EnableZeroAllocCompiledUpdate
-            || engine.Config.StorageMode != StorageMode.Lsm
+            || !HasFixedWidthPatchPath(engine)
             || engine.Changes.Enabled
             || MvccCoordinator.RecordsVersions(engine))
         {
@@ -821,47 +793,18 @@ public static class DataVoCompiledQuery
             return true;
         }
 
-        engine.LockManager.AcquireRowWriteLock(databaseName, plan.TableName, rowId);
-        try
+        Span<DataVoFixedWidthValue> values = schema.AssignOrdinals.Length <= 16
+            ? stackalloc DataVoFixedWidthValue[schema.AssignOrdinals.Length]
+            : new DataVoFixedWidthValue[schema.AssignOrdinals.Length];
+        for (int i = 0; i < values.Length; i++)
         {
-            if (!engine.IndexManager.TryLookupIntegerPrimaryKey(primaryKey, schema.PkIndexName, plan.TableName, databaseName, out rowId))
+            if (!TryFindParameterValue(parameters, schema.AssignParameterNames[i], out values[i]))
             {
-                affected = 0;
-                return true;
+                return false;
             }
-
-            MvccCoordinator.ValidateCanModifyRow(engine, databaseName, plan.TableName, rowId, null, "UPDATE");
-
-            byte[]? rowBytes = engine.StorageContext.TryReadRowBytes(plan.TableName, databaseName, rowId);
-            if (rowBytes is null)
-            {
-                affected = 0;
-                return true;
-            }
-
-            for (int i = 0; i < schema.AssignOrdinals.Length; i++)
-            {
-                if (!TryFindParameterValue(parameters, schema.AssignParameterNames[i], out DataVoFixedWidthValue newValue)
-                    || !RowSerializer.TryOverwriteFixedWidthCell(rowBytes, schema.Columns, schema.AssignOrdinals[i], newValue))
-                {
-                    return false;
-                }
-            }
-
-            long statementTxId = MvccCoordinator.ResolveStatementTransactionId(engine, null);
-            engine.StorageContext.DeleteFromTable([rowId], plan.TableName, databaseName);
-            RowKey newRowId = engine.StorageContext.InsertSerializedRow(rowBytes, plan.TableName, databaseName);
-
-            MvccCoordinator.RegisterUpdateVersion(engine, databaseName, plan.TableName, rowId, newRowId, statementTxId);
-            engine.IndexManager.InsertIntegerPrimaryKeys([(primaryKey, newRowId)], schema.PkIndexName, plan.TableName, databaseName);
-
-            affected = 1;
-            return true;
         }
-        finally
-        {
-            engine.LockManager.ReleaseRowWriteLock(databaseName, plan.TableName, rowId);
-        }
+
+        return TryPatchInMemoryRow(engine, plan, schema, databaseName, primaryKey, rowId, values, out affected);
     }
 
     private static bool TryUpdateFixedWidthFastPath(
@@ -896,7 +839,7 @@ public static class DataVoCompiledQuery
         plan = StoredTablePlan(engine, plan, databaseName);
 
         if (!engine.Config.EnableZeroAllocCompiledUpdate
-            || engine.Config.StorageMode != StorageMode.Lsm
+            || !HasFixedWidthPatchPath(engine)
             || engine.Changes.Enabled
             || MvccCoordinator.RecordsVersions(engine))
         {
@@ -961,45 +904,111 @@ public static class DataVoCompiledQuery
             return true;
         }
 
-        engine.LockManager.AcquireRowWriteLock(databaseName, plan.TableName, rowId);
-        try
+        return TryPatchInMemoryRow(engine, plan, schema, databaseName, primaryKey, rowId, assignmentValues, out affected);
+    }
+
+    /// <summary>Whether the storage mode has a zero-allocation fixed-width update: LSM patches in place, in-memory storage out of place.</summary>
+    private static bool HasFixedWidthPatchPath(DataVoEngine engine) =>
+        engine.Config.StorageMode is StorageMode.Lsm or StorageMode.InMemory;
+
+    /// <summary>
+    /// The in-memory zero-allocation update of one row found through the integer primary key. In-memory rows are never
+    /// changed in place (typed rows are read without a lock), so this does what the dictionary path does, in the same
+    /// order, without materializing the row: under the row's write lock it appends a copy with the assigned cells
+    /// patched, re-points the primary key at the copy (readers see the old row or the new one, never neither), and
+    /// deletes the old row. The fast-path schema guarantees the primary-key index is the table's only index and that
+    /// no assigned column is a key.
+    /// </summary>
+    /// <returns><see langword="false"/>, with nothing written, when the row cannot be patched; the caller then takes the dictionary path.</returns>
+    private static bool TryPatchInMemoryRow(
+        DataVoEngine engine,
+        DataVoCompiledQueryPlan plan,
+        UpdateFastPathSchema schema,
+        string databaseName,
+        long primaryKey,
+        RowKey rowId,
+        ReadOnlySpan<DataVoFixedWidthValue> values,
+        out int affected)
+    {
+        const int MaxRelocationRetries = 8;
+        affected = 0;
+        string tableName = plan.TableName;
+        LockManager locks = engine.LockManager;
+
+        for (int attempt = 0; attempt <= MaxRelocationRetries; attempt++)
         {
-            if (!engine.IndexManager.TryLookupIntegerPrimaryKey(primaryKey, schema.PkIndexName, plan.TableName, databaseName, out rowId))
+            RowKey lockedRowId = rowId;
+            locks.AcquireRowWriteLock(databaseName, tableName, lockedRowId);
+            try
             {
-                affected = 0;
-                return true;
-            }
+                // Re-resolve under the lock: a concurrent update may have moved the row to a new id meanwhile.
+                if (!engine.IndexManager.TryLookupIntegerPrimaryKey(primaryKey, schema.PkIndexName, tableName, databaseName, out rowId))
+                {
+                    return true; // deleted meanwhile: no row matches
+                }
 
-            MvccCoordinator.ValidateCanModifyRow(engine, databaseName, plan.TableName, rowId, null, "UPDATE");
+                if (rowId != lockedRowId)
+                {
+                    continue; // moved: lock the row where it is now
+                }
 
-            byte[]? rowBytes = engine.StorageContext.TryReadRowBytes(plan.TableName, databaseName, rowId);
-            if (rowBytes is null)
-            {
-                affected = 0;
-                return true;
-            }
-
-            for (int i = 0; i < schema.AssignOrdinals.Length; i++)
-            {
-                if (!RowSerializer.TryOverwriteFixedWidthCell(rowBytes, schema.Columns, schema.AssignOrdinals[i], assignmentValues[i]))
+                MvccCoordinator.ValidateCanModifyRow(engine, databaseName, tableName, rowId, null, "UPDATE");
+                if (!engine.StorageContext.TryAppendPatchedFixedWidthRow(tableName, databaseName, rowId, schema.Columns, schema.AssignOrdinals, values, out RowKey newRowId))
                 {
                     return false;
                 }
+
+                MoveIntegerPrimaryKey(engine, schema.PkIndexName, tableName, databaseName, primaryKey, rowId, newRowId);
+                affected = 1;
+                return true;
+            }
+            finally
+            {
+                locks.ReleaseRowWriteLock(databaseName, tableName, lockedRowId);
+            }
+        }
+
+        return false; // the row kept moving; the dictionary path retries with its own relocation handling
+    }
+
+    /// <summary>
+    /// Re-points an integer primary key from the row an update copied to the copy, then deletes the old row. The copy
+    /// is locked first, as the dictionary path locks relocated rows: a scan can see it as soon as it is appended.
+    /// </summary>
+    private static void MoveIntegerPrimaryKey(
+        DataVoEngine engine,
+        string pkIndexName,
+        string tableName,
+        string databaseName,
+        long primaryKey,
+        RowKey oldRowId,
+        RowKey newRowId)
+    {
+        LockManager locks = engine.LockManager;
+        locks.AcquireRowWriteLock(databaseName, tableName, newRowId);
+        try
+        {
+            // A writer that matched the copy by scan before it was locked may already have moved it on and
+            // re-pointed the key itself; then the key must not be pointed back at the deleted copy.
+            if (engine.StorageContext.IsInMemoryRowLive(newRowId, tableName, databaseName))
+            {
+                engine.IndexManager.RemoveIntegerPrimaryKeyMirror(primaryKey, oldRowId, pkIndexName, tableName, databaseName);
+                Span<long> keys = stackalloc long[1];
+                Span<RowKey> rowIds = stackalloc RowKey[1];
+                keys[0] = primaryKey;
+                rowIds[0] = newRowId;
+                engine.IndexManager.InsertIntegerPrimaryKeys(keys, rowIds, pkIndexName, tableName, databaseName);
             }
 
-            long statementTxId = MvccCoordinator.ResolveStatementTransactionId(engine, null);
-            engine.StorageContext.DeleteFromTable([rowId], plan.TableName, databaseName);
-            RowKey newRowId = engine.StorageContext.InsertSerializedRow(rowBytes, plan.TableName, databaseName);
+            engine.StorageContext.DeleteOneFromTable(oldRowId, tableName, databaseName);
 
-            MvccCoordinator.RegisterUpdateVersion(engine, databaseName, plan.TableName, rowId, newRowId, statementTxId);
-            engine.IndexManager.InsertIntegerPrimaryKeys([(primaryKey, newRowId)], schema.PkIndexName, plan.TableName, databaseName);
-
-            affected = 1;
-            return true;
+            // What RegisterUpdateVersion does when no snapshot needs versions (the fast path runs only then).
+            engine.VersionStorageManager.RemoveVersion(databaseName, tableName, oldRowId);
+            engine.VersionStorageManager.RemoveVersion(databaseName, tableName, newRowId);
         }
         finally
         {
-            engine.LockManager.ReleaseRowWriteLock(databaseName, plan.TableName, rowId);
+            locks.ReleaseRowWriteLock(databaseName, tableName, newRowId);
         }
     }
 
@@ -1860,7 +1869,8 @@ public static class DataVoCompiledQuery
         string databaseName,
         IReadOnlyList<RowKey> rowIds,
         IReadOnlyDictionary<RowKey, Dictionary<string, object?>> existingRows,
-        IReadOnlyList<Dictionary<string, object?>> newRows)
+        IReadOnlyList<Dictionary<string, object?>> newRows,
+        DataVo.Core.Transactions.KeyLockSet? keyLocks = null)
     {
         List<string> primaryKeys = context.Engine.Catalog.GetTablePrimaryKeys(tableName, databaseName);
         List<string> uniqueKeys = context.Engine.Catalog.GetTableUniqueKeys(tableName, databaseName);
@@ -1868,7 +1878,7 @@ public static class DataVoCompiledQuery
         List<(string ChildTable, string ChildColumn, string ParentColumn, string OnDeleteAction)> childForeignKeys =
             context.Engine.Catalog.GetChildForeignKeys(tableName, databaseName);
 
-        var keyValidator = new DataVo.Core.Parser.DML.UpdateKeyValidator(context.Engine.IndexManager, context.Engine.StorageContext, tableName, databaseName);
+        var keyValidator = new DataVo.Core.Parser.DML.UpdateKeyValidator(context.Engine.IndexManager, context.Engine.StorageContext, tableName, databaseName, keyLocks: keyLocks);
 
         for (int i = 0; i < rowIds.Count; i++)
         {

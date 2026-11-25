@@ -14,14 +14,16 @@ namespace DataVo.Core.Parser.DML;
 /// </summary>
 /// <remarks>
 /// Inside a transaction, <c>pending</c> describes the keys the transaction's buffered writes free and take: a freed
-/// key no longer clashes, a taken one does.
+/// key no longer clashes, a taken one does. With <c>keyLocks</c>, every new key value is reserved before it is
+/// checked, so a concurrent INSERT or UPDATE giving a row the same value waits for this statement to publish.
 /// </remarks>
 internal sealed class UpdateKeyValidator(
     IndexManager indexes,
     StorageContext storage,
     string tableName,
     string databaseName,
-    InsertRowService.PendingKeys? pending = null)
+    InsertRowService.PendingKeys? pending = null,
+    DataVo.Core.Transactions.KeyLockSet? keyLocks = null)
 {
     private const string PrimaryKeySlot = "\0primary-key";
     private readonly Dictionary<string, HashSet<string>> _assigned = new(StringComparer.OrdinalIgnoreCase);
@@ -51,6 +53,9 @@ internal sealed class UpdateKeyValidator(
                 throw new EvaluationException($"Primary key violation: the UPDATE gives two rows the key ({shown}) in table {tableName}.");
             }
 
+            // Reserved before it is checked, and kept until the update is published (see KeyLockSet).
+            keyLocks?.Reserve(DataVo.Core.Transactions.KeyLockSet.PrimaryKeyScope, key);
+
             if (pending?.TakenPrimaryKeys.Contains(key) == true
                 || (pending?.FreedPrimaryKeys.Contains(key) != true && KeyExists(key, $"_PK_{tableName}", primaryKeys)))
             {
@@ -71,6 +76,8 @@ internal sealed class UpdateKeyValidator(
             {
                 throw new EvaluationException($"Update conflict: Duplicate value '{shown}' generated within the same batch for unique column {col}.");
             }
+
+            keyLocks?.Reserve(col, key);
 
             if ((pending is not null && InsertRowService.PendingKeys.Has(pending.TakenUniqueValues, col, key))
                 || (pending is null || !InsertRowService.PendingKeys.Has(pending.FreedUniqueValues, col, key)) && KeyExists(key, $"_UK_{col}", [col]))

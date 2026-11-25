@@ -45,6 +45,13 @@ internal sealed class DeferredPublication
     internal bool HasPublishActions => _publish.Count > 0;
 
     /// <summary>
+    /// Queues the release of a counted (shared) lock until publication. Unlike <see cref="TryHandleRelease"/>, every
+    /// call queues its own release, so a flow may hold the lock several times at once.
+    /// </summary>
+    /// <param name="release">Releases one hold of the lock.</param>
+    internal void DeferRelease(Action release) => _finally.Add(release);
+
+    /// <summary>
     /// Called before acquiring a write or read lock on <paramref name="lockKey"/>. Returns true when this
     /// flow already holds the write lock (its release is only deferred), so the acquisition is virtual.
     /// </summary>

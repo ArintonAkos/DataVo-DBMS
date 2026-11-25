@@ -48,7 +48,11 @@ internal class InsertInto(InsertIntoStatement ast) : BaseDbAction
             else
             {
                 ChangeRecorder? recorder = ChangeRecorder.TryCreate(Engine, databaseName);
-                Locks.AcquireWriteLock(databaseName, _model.TableName);
+                KeyLockSet? keyLocks = TryLockSingleRowKeys(databaseName);
+                if (keyLocks is null)
+                {
+                    Locks.AcquireWriteLock(databaseName, _model.TableName);
+                }
 
                 try
                 {
@@ -56,7 +60,14 @@ internal class InsertInto(InsertIntoStatement ast) : BaseDbAction
                 }
                 finally
                 {
-                    Locks.ReleaseWriteLock(databaseName, _model.TableName);
+                    if (keyLocks is not null)
+                    {
+                        keyLocks.Release();
+                    }
+                    else
+                    {
+                        Locks.ReleaseWriteLock(databaseName, _model.TableName);
+                    }
                 }
 
                 recorder?.Publish();
@@ -68,6 +79,49 @@ internal class InsertInto(InsertIntoStatement ast) : BaseDbAction
         {
             AddError(e);
             Logger.Error(e.ToString());
+        }
+    }
+
+    /// <summary>
+    /// Locks what an auto-commit INSERT of one row needs instead of the table's write lock: the table's intent lock
+    /// and the row's primary-key and unique values, reserved from the row as converted to typed cells, the form both
+    /// insert paths validate and index. Returns <see langword="null"/> when the statement has several rows or a value
+    /// that does not convert; the caller then takes the table's write lock and the insert reports any error.
+    /// </summary>
+    private KeyLockSet? TryLockSingleRowKeys(string databaseName)
+    {
+        if (_model.RawRows.Count != 1 || !Catalog.TableExists(_model.TableName, databaseName))
+        {
+            return null;
+        }
+
+        List<Column> tableColumns = Catalog.GetTableColumns(_model.TableName, databaseName);
+        bool hasColumns = _model.Columns.Count > 0;
+        try
+        {
+            VerifyTableColumnsExist(tableColumns);
+            VerifyRowColumnCountMatches(_model.RawRows[0], tableColumns.Count, hasColumns);
+        }
+        catch (Exception)
+        {
+            return null; // the insert itself reports the error
+        }
+
+        if (!TryBuildTypedRows(tableColumns, hasColumns, out ReactiveRowSchema? schema, out List<CellValue[]>? rows))
+        {
+            return null;
+        }
+
+        KeyLockSet keyLocks = KeyLockSet.Rent(Locks, databaseName, _model.TableName, takeTableIntent: true);
+        try
+        {
+            keyLocks.ReserveInsertKeys(Catalog, schema, rows[0]);
+            return keyLocks;
+        }
+        catch
+        {
+            keyLocks.Release();
+            throw;
         }
     }
 

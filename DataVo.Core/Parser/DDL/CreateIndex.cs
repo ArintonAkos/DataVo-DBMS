@@ -69,60 +69,70 @@ internal class CreateIndex(CreateIndexStatement ast) : BaseDbAction
                 throw new BindingException($"Index options {Models.Catalog.HnswIndexOptions.OptionNames} apply only to HNSW indexes, not {_model.IndexKind}.");
             }
 
-            if (string.Equals(_model.IndexKind, Models.Catalog.IndexFile.ColumnarKind, StringComparison.OrdinalIgnoreCase))
+            // DDL is exclusive: it waits for every row-level writer (they hold the table's intent lock) and
+            // keeps new ones out until the index holds every row.
+            Locks.AcquireWriteLock(databaseName, _model.TableName);
+            try
             {
-                CreateColumnar(databaseName);
-                return;
-            }
-
-            Catalog.CreateIndex(_model.ToIndexFile(), _model.TableName, databaseName);
-
-            var tableDataRows = Context.GetTableContents(_model.TableName, databaseName);
-            if (Indexes.SupportsVectorIndexType(_model.IndexKind))
-            {
-                if (_model.Attributes.Count != 1)
+                if (string.Equals(_model.IndexKind, Models.Catalog.IndexFile.ColumnarKind, StringComparison.OrdinalIgnoreCase))
                 {
-                    throw new BindingException($"Vector index type '{_model.IndexKind}' currently supports exactly one VECTOR column.");
+                    CreateColumnar(databaseName);
+                    return;
                 }
 
-                string vectorColumnName = _model.Attributes[0];
-                string columnType = Catalog.GetTableColumnType(_model.TableName, databaseName, vectorColumnName);
-                if (!columnType.StartsWith("VECTOR", StringComparison.OrdinalIgnoreCase))
-                {
-                    throw new BindingException("HNSW index can only be created on VECTOR columns.");
-                }
+                Catalog.CreateIndex(_model.ToIndexFile(), _model.TableName, databaseName);
 
-                List<(RowKey RowId, float[] Vector)> vectors = [];
-                foreach (var row in tableDataRows)
+                var tableDataRows = Context.GetTableContents(_model.TableName, databaseName);
+                if (Indexes.SupportsVectorIndexType(_model.IndexKind))
                 {
-                    if (!row.Value.TryGetValue(vectorColumnName, out object? value) || value == null)
+                    if (_model.Attributes.Count != 1)
                     {
-                        continue;
+                        throw new BindingException($"Vector index type '{_model.IndexKind}' currently supports exactly one VECTOR column.");
                     }
 
-                    if (VectorParser.TryCoerceToVector(value, out float[] vector))
+                    string vectorColumnName = _model.Attributes[0];
+                    string columnType = Catalog.GetTableColumnType(_model.TableName, databaseName, vectorColumnName);
+                    if (!columnType.StartsWith("VECTOR", StringComparison.OrdinalIgnoreCase))
                     {
-                        vectors.Add((row.Key, vector));
+                        throw new BindingException("HNSW index can only be created on VECTOR columns.");
                     }
+
+                    List<(RowKey RowId, float[] Vector)> vectors = [];
+                    foreach (var row in tableDataRows)
+                    {
+                        if (!row.Value.TryGetValue(vectorColumnName, out object? value) || value == null)
+                        {
+                            continue;
+                        }
+
+                        if (VectorParser.TryCoerceToVector(value, out float[] vector))
+                        {
+                            vectors.Add((row.Key, vector));
+                        }
+                    }
+
+                    Indexes.CreateVectorIndex(
+                        vectors,
+                        _model.IndexName,
+                        _model.TableName,
+                        databaseName,
+                        metric: _model.Metric ?? Models.Catalog.IndexFile.CosineMetric,
+                        indexType: _model.IndexKind,
+                        hnswOptions: _model.Hnsw);
+                }
+                else
+                {
+                    ScalarIndexContents indexValues = CreateIndexContents(tableDataRows);
+                    Indexes.CreateIndex(indexValues, _model.IndexName, _model.TableName, databaseName);
                 }
 
-                Indexes.CreateVectorIndex(
-                    vectors,
-                    _model.IndexName,
-                    _model.TableName,
-                    databaseName,
-                    metric: _model.Metric ?? Models.Catalog.IndexFile.CosineMetric,
-                    indexType: _model.IndexKind,
-                    hnswOptions: _model.Hnsw);
+                Logger.Info($"New index file {_model.IndexName} successfully created!");
+                Messages.Add($"New index file {_model.IndexName} successfully created!");
             }
-            else
+            finally
             {
-                ScalarIndexContents indexValues = CreateIndexContents(tableDataRows);
-                Indexes.CreateIndex(indexValues, _model.IndexName, _model.TableName, databaseName);
+                Locks.ReleaseWriteLock(databaseName, _model.TableName);
             }
-
-            Logger.Info($"New index file {_model.IndexName} successfully created!");
-            Messages.Add($"New index file {_model.IndexName} successfully created!");
         }
         catch (Exception ex)
         {

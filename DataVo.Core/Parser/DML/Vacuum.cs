@@ -51,36 +51,45 @@ internal class Vacuum(VacuumStatement ast) : BaseDbAction
 
             string tableName = ast.TableName.Name;
 
-            // 1. Compact the storage: remove tombstoned rows, get surviving rows with new IDs
-            var compactedRows = Context.CompactTable(tableName, databaseName, allowIndexedCompaction: true);
-
-            // 2. Rebuild all indexes for this table from scratch
-            var indexes = Catalog.GetTableIndexes(tableName, databaseName);
-
-            foreach (var index in indexes)
+            // Compaction renumbers the rows: no row-level writer (they hold the table's intent lock) may run meanwhile.
+            Locks.AcquireWriteLock(databaseName, tableName);
+            try
             {
-                // Drop the old index
-                Indexes.DropIndex(index.IndexFileName, tableName, databaseName);
+                // 1. Compact the storage: remove tombstoned rows, get surviving rows with new IDs
+                var compactedRows = Context.CompactTable(tableName, databaseName, allowIndexedCompaction: true);
 
-                // Recreate with fresh data
-                var indexData = new ScalarIndexContents();
+                // 2. Rebuild all indexes for this table from scratch
+                var indexes = Catalog.GetTableIndexes(tableName, databaseName);
 
-                foreach (var (newRowId, rawRow) in compactedRows)
+                foreach (var index in indexes)
                 {
-                    var row = RowSerializer.Deserialize(
-                        databaseName,
-                        tableName,
-                        rawRow,
-                        null,
-                        Catalog,
-                        Engine.Id.ToString("N"));
-                    indexData.Add(row, newRowId, index.AttributeNames);
+                    // Drop the old index
+                    Indexes.DropIndex(index.IndexFileName, tableName, databaseName);
+
+                    // Recreate with fresh data
+                    var indexData = new ScalarIndexContents();
+
+                    foreach (var (newRowId, rawRow) in compactedRows)
+                    {
+                        var row = RowSerializer.Deserialize(
+                            databaseName,
+                            tableName,
+                            rawRow,
+                            null,
+                            Catalog,
+                            Engine.Id.ToString("N"));
+                        indexData.Add(row, newRowId, index.AttributeNames);
+                    }
+
+                    Indexes.CreateIndex(indexData, index.IndexFileName, tableName, databaseName);
                 }
 
-                Indexes.CreateIndex(indexData, index.IndexFileName, tableName, databaseName);
+                Messages.Add($"VACUUM complete. {compactedRows.Count} rows compacted in {tableName}.");
             }
-
-            Messages.Add($"VACUUM complete. {compactedRows.Count} rows compacted in {tableName}.");
+            finally
+            {
+                Locks.ReleaseWriteLock(databaseName, tableName);
+            }
         }
         catch (Exception ex)
         {
