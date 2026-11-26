@@ -38,12 +38,26 @@ internal sealed class DataVoSessionPool(DataVoContext context, string databaseNa
         return lease;
     }
 
+    /// <summary>The number of idle sessions kept for reuse (at most <see cref="MaxPooled"/>).</summary>
+    internal int IdleCount => _idle.Count;
+
+    /// <summary>The most idle sessions the pool keeps; a lease returned beyond it is evicted.</summary>
+    internal const int MaxIdleSessions = MaxPooled;
+
+    /// <summary>The most prepared statements one session caches before its cache is cleared.</summary>
+    internal const int MaxCachedStatements = MaxStatementsPerSession;
+
     private void Return(Lease lease)
     {
         if (_idle.Count < MaxPooled)
         {
             _idle.Add(lease);
+            return;
         }
+
+        // Evicted: drop its prepared statements and unregister its session so the engine does not keep it forever.
+        lease.Evict();
+        Context.Engine.Sessions.Remove(lease.Session);
     }
 
     /// <summary>One leased session and its prepared statements.</summary>
@@ -53,6 +67,12 @@ internal sealed class DataVoSessionPool(DataVoContext context, string databaseNa
         private int _schemaVersion = -1;
 
         public Guid Session { get; } = session;
+
+        /// <summary>The number of prepared statements the lease caches.</summary>
+        internal int CachedStatementCount => _statements.Count;
+
+        /// <summary>Drops the cached statements of a lease the pool does not keep.</summary>
+        internal void Evict() => _statements.Clear();
 
         public void Activate(int schemaVersion)
         {

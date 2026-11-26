@@ -144,6 +144,7 @@ internal static class DataVoValueMapper
         {
             return cell switch
             {
+                DataVo.Core.DataVoDate date => date.ToDateOnly(),
                 DateTime dateTime => DateOnly.FromDateTime(dateTime),
                 string text => DateOnly.Parse(text, CultureInfo.InvariantCulture),
                 _ => (DateOnly)cell,

@@ -58,12 +58,16 @@ public sealed class DataVoVectorStoreCollection<TKey, [DynamicallyAccessedMember
     public override string Name => _engine.Name;
 
     /// <inheritdoc />
-    public override Task<bool> CollectionExistsAsync(CancellationToken cancellationToken = default) =>
-        Task.FromResult(_engine.CollectionExists());
+    public override Task<bool> CollectionExistsAsync(CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return Task.FromResult(_engine.CollectionExists());
+    }
 
     /// <inheritdoc />
     public override Task EnsureCollectionExistsAsync(CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         _engine.EnsureCollectionExists();
         return Task.CompletedTask;
     }
@@ -71,6 +75,7 @@ public sealed class DataVoVectorStoreCollection<TKey, [DynamicallyAccessedMember
     /// <inheritdoc />
     public override Task EnsureCollectionDeletedAsync(CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         _engine.EnsureCollectionDeleted();
         return Task.CompletedTask;
     }
@@ -79,6 +84,7 @@ public sealed class DataVoVectorStoreCollection<TKey, [DynamicallyAccessedMember
     public override async Task<TRecord?> GetAsync(TKey key, RecordRetrievalOptions? options = null, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(key);
+        cancellationToken.ThrowIfCancellationRequested();
         await foreach (TRecord record in _engine.GetAsync([key], options?.IncludeVectors ?? false, cancellationToken).ConfigureAwait(false))
         {
             return record;
@@ -109,6 +115,7 @@ public sealed class DataVoVectorStoreCollection<TKey, [DynamicallyAccessedMember
     public override Task DeleteAsync(TKey key, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(key);
+        cancellationToken.ThrowIfCancellationRequested();
         _engine.Delete([key]);
         return Task.CompletedTask;
     }
@@ -117,6 +124,7 @@ public sealed class DataVoVectorStoreCollection<TKey, [DynamicallyAccessedMember
     public override Task DeleteAsync(IEnumerable<TKey> keys, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(keys);
+        cancellationToken.ThrowIfCancellationRequested();
         _engine.Delete([.. keys.Select(static key => (object)key)]);
         return Task.CompletedTask;
     }
@@ -125,6 +133,7 @@ public sealed class DataVoVectorStoreCollection<TKey, [DynamicallyAccessedMember
     public override Task UpsertAsync(TRecord record, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(record);
+        cancellationToken.ThrowIfCancellationRequested();
         return _engine.UpsertAsync([record], cancellationToken);
     }
 
@@ -132,6 +141,7 @@ public sealed class DataVoVectorStoreCollection<TKey, [DynamicallyAccessedMember
     public override Task UpsertAsync(IEnumerable<TRecord> records, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(records);
+        cancellationToken.ThrowIfCancellationRequested();
         return _engine.UpsertAsync([.. records], cancellationToken);
     }
 
@@ -149,8 +159,9 @@ public sealed class DataVoVectorStoreCollection<TKey, [DynamicallyAccessedMember
         ArgumentNullException.ThrowIfNull(serviceType);
         return serviceKey is not null ? null
             : serviceType == typeof(VectorStoreCollectionMetadata) ? _engine.Metadata
+            : serviceType == typeof(DataVoContext) ? _engine.Context
             : serviceType.IsInstanceOfType(this) ? this
-            : null;
+            : _engine.FindEmbeddingGenerator(serviceType);
     }
 
     /// <summary>Reads and writes record properties through their <see cref="System.Reflection.PropertyInfo"/>.</summary>

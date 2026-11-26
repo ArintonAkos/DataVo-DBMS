@@ -97,12 +97,16 @@ public sealed class DataVoVectorStore : VectorStore
     }
 
     /// <inheritdoc />
-    public override Task<bool> CollectionExistsAsync(string name, CancellationToken cancellationToken = default) =>
-        Task.FromResult(TableExists(Pool, name));
+    public override Task<bool> CollectionExistsAsync(string name, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return Task.FromResult(TableExists(Pool, name));
+    }
 
     /// <inheritdoc />
     public override Task EnsureCollectionDeletedAsync(string name, CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         DropTable(Pool, name);
         return Task.CompletedTask;
     }
@@ -115,6 +119,7 @@ public sealed class DataVoVectorStore : VectorStore
             : serviceType == typeof(VectorStoreMetadata) ? new VectorStoreMetadata { VectorStoreSystemName = SystemName, VectorStoreName = Options.DatabaseName }
             : serviceType == typeof(DataVoContext) ? Context
             : serviceType.IsInstanceOfType(this) ? this
+            : Options.EmbeddingGenerator is { } generator && serviceType.IsInstanceOfType(generator) ? generator
             : null;
     }
 

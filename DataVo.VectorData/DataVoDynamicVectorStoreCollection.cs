@@ -1,4 +1,5 @@
 using System.Linq.Expressions;
+using DataVo.Core;
 using Microsoft.Extensions.VectorData;
 
 namespace DataVo.VectorData;
@@ -28,11 +29,16 @@ public sealed class DataVoDynamicVectorStoreCollection : VectorStoreCollection<o
     public override string Name => _engine.Name;
 
     /// <inheritdoc />
-    public override Task<bool> CollectionExistsAsync(CancellationToken cancellationToken = default) => Task.FromResult(_engine.CollectionExists());
+    public override Task<bool> CollectionExistsAsync(CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return Task.FromResult(_engine.CollectionExists());
+    }
 
     /// <inheritdoc />
     public override Task EnsureCollectionExistsAsync(CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         _engine.EnsureCollectionExists();
         return Task.CompletedTask;
     }
@@ -40,6 +46,7 @@ public sealed class DataVoDynamicVectorStoreCollection : VectorStoreCollection<o
     /// <inheritdoc />
     public override Task EnsureCollectionDeletedAsync(CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         _engine.EnsureCollectionDeleted();
         return Task.CompletedTask;
     }
@@ -48,6 +55,7 @@ public sealed class DataVoDynamicVectorStoreCollection : VectorStoreCollection<o
     public override async Task<Dictionary<string, object?>?> GetAsync(object key, RecordRetrievalOptions? options = null, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(key);
+        cancellationToken.ThrowIfCancellationRequested();
         await foreach (Dictionary<string, object?> record in _engine.GetAsync([key], options?.IncludeVectors ?? false, cancellationToken).ConfigureAwait(false))
         {
             return record;
@@ -78,6 +86,7 @@ public sealed class DataVoDynamicVectorStoreCollection : VectorStoreCollection<o
     public override Task DeleteAsync(object key, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(key);
+        cancellationToken.ThrowIfCancellationRequested();
         _engine.Delete([key]);
         return Task.CompletedTask;
     }
@@ -86,6 +95,7 @@ public sealed class DataVoDynamicVectorStoreCollection : VectorStoreCollection<o
     public override Task DeleteAsync(IEnumerable<object> keys, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(keys);
+        cancellationToken.ThrowIfCancellationRequested();
         _engine.Delete([.. keys]);
         return Task.CompletedTask;
     }
@@ -94,6 +104,7 @@ public sealed class DataVoDynamicVectorStoreCollection : VectorStoreCollection<o
     public override Task UpsertAsync(Dictionary<string, object?> record, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(record);
+        cancellationToken.ThrowIfCancellationRequested();
         return _engine.UpsertAsync([record], cancellationToken);
     }
 
@@ -101,6 +112,7 @@ public sealed class DataVoDynamicVectorStoreCollection : VectorStoreCollection<o
     public override Task UpsertAsync(IEnumerable<Dictionary<string, object?>> records, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(records);
+        cancellationToken.ThrowIfCancellationRequested();
         return _engine.UpsertAsync([.. records], cancellationToken);
     }
 
@@ -118,8 +130,9 @@ public sealed class DataVoDynamicVectorStoreCollection : VectorStoreCollection<o
         ArgumentNullException.ThrowIfNull(serviceType);
         return serviceKey is not null ? null
             : serviceType == typeof(VectorStoreCollectionMetadata) ? _engine.Metadata
+            : serviceType == typeof(DataVoContext) ? _engine.Context
             : serviceType.IsInstanceOfType(this) ? this
-            : null;
+            : _engine.FindEmbeddingGenerator(serviceType);
     }
 
     /// <summary>Reads and writes dictionary entries keyed by property name.</summary>

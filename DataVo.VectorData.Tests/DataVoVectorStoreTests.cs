@@ -184,7 +184,6 @@ public sealed class DataVoVectorStoreTests : IDisposable
         DataVoVectorStoreCollection<int, Doc> docs = await SeedDocs(store);
 
         await Assert.ThrowsAsync<NotSupportedException>(async () => await docs.GetAsync(doc => doc.Category.Length > 3, top: 5).ToListAsync());
-        await Assert.ThrowsAsync<NotSupportedException>(async () => await docs.GetAsync(doc => doc.FilePath.EndsWith("_1.md"), top: 5).ToListAsync());
         await Assert.ThrowsAsync<NotSupportedException>(async () => await docs.GetAsync(doc => doc.Tags.Length > 0, top: 5).ToListAsync());
     }
 

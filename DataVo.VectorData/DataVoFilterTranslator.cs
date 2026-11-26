@@ -1,5 +1,7 @@
 using System.Collections;
+using System.Globalization;
 using System.Linq.Expressions;
+using System.Numerics;
 using System.Reflection;
 using System.Text;
 using DataVo.Core;
@@ -10,10 +12,11 @@ namespace DataVo.VectorData;
 /// Translates a LINQ filter over records (<c>r =&gt; r.Category == "docs" &amp;&amp; r.UpdatedAt &gt; since</c>) into a
 /// DataVo SQL <c>WHERE</c> predicate whose values are bound as parameters. Supported: comparisons of a property with
 /// a value (either side), <c>==</c>/<c>!=</c> <c>null</c>, <c>&amp;&amp;</c>, <c>||</c>, <c>!</c>, a bool property on
-/// its own, <c>string.StartsWith</c>/<c>EndsWith</c>/<c>Contains</c> on a property (as <c>LIKE</c>, which has no escape
-/// character: a <c>StartsWith</c> value holding <c>%</c> or <c>_</c> becomes an ordinal range instead), and <c>Contains</c> of a property
-/// in a collection of values (<c>IN</c>). Values may be constants or captured variables; they are evaluated without
-/// compiling the expression, so translation is Native AOT safe. Anything else throws <see cref="NotSupportedException"/>.
+/// its own, <c>string.StartsWith</c>/<c>EndsWith</c>/<c>Contains</c> on a property (as <c>LIKE</c>, with <c>%</c>, <c>_</c>
+/// and backslash in the value escaped so they match literally), and <c>Contains</c> of a property in a collection of
+/// values (<c>IN</c>). Values may be constants, captured variables, constructors (<c>new DateTime(2026, 1, 1)</c>),
+/// arithmetic (<c>min + 1</c>, <c>-x</c>), conditionals and method calls; they are evaluated without compiling the
+/// expression, so translation is Native AOT safe. Anything else throws <see cref="NotSupportedException"/>.
 /// </summary>
 internal sealed class DataVoFilterTranslator
 {
@@ -115,29 +118,18 @@ internal sealed class DataVoFilterTranslator
 
     private void MethodPredicate(MethodCallExpression call)
     {
-        // string methods on a property: LIKE (or an ordinal range for a StartsWith prefix holding a wildcard).
+        // string methods on a property: LIKE, with the value's wildcards and escape character escaped.
         if (call.Method.DeclaringType == typeof(string) && call.Object is { } target && call.Arguments.Count == 1
             && call.Method.Name is nameof(string.StartsWith) or nameof(string.EndsWith) or nameof(string.Contains)
+            && call.Arguments[0].Type == typeof(string)
             && PropertyOf(StripConvert(target)) is { } textProperty)
         {
-            if (Evaluate(call.Arguments[0]) is not string text)
+            if (ReferencesRecord(call.Arguments[0]) || Evaluate(call.Arguments[0]) is not string value)
             {
                 throw new NotSupportedException($"'{call}' needs a non-null string value.");
             }
 
-            bool wildcards = text.AsSpan().IndexOfAny('%', '_') >= 0;
-            if (call.Method.Name == nameof(string.StartsWith) && wildcards)
-            {
-                StartsWithRange(textProperty, text, call);
-                return;
-            }
-
-            if (wildcards)
-            {
-                throw new NotSupportedException(
-                    $"'{call}': DataVo LIKE has no escape character, so {call.Method.Name} cannot match text containing '%' or '_'.");
-            }
-
+            string text = DataVoLikePattern.Escape(value);
             string pattern = call.Method.Name switch
             {
                 nameof(string.StartsWith) => text + "%",
@@ -279,16 +271,24 @@ internal sealed class DataVoFilterTranslator
                 };
             case UnaryExpression { NodeType: ExpressionType.Convert or ExpressionType.ConvertChecked } convert:
                 object? operand = Evaluate(convert.Operand);
-                if (operand is null || convert.Method is null)
+                if (operand is null)
                 {
-                    return operand;
+                    return null;
                 }
 
-                return convert.Method.Invoke(null, [operand]);
+                return convert.Method is not null ? convert.Method.Invoke(null, [operand]) : ConvertPrimitive(operand, convert.Type);
             case UnaryExpression { NodeType: ExpressionType.ArrayLength } length:
                 return ((Array)Evaluate(length.Operand)!).Length;
+            case UnaryExpression unary:
+                return EvaluateUnary(unary);
             case BinaryExpression { NodeType: ExpressionType.ArrayIndex } index:
                 return ((Array)Evaluate(index.Left)!).GetValue(Convert.ToInt64(Evaluate(index.Right), System.Globalization.CultureInfo.InvariantCulture));
+            case BinaryExpression binary:
+                return EvaluateBinary(binary);
+            case ConditionalExpression conditional:
+                return Evaluate(conditional.Test) is true ? Evaluate(conditional.IfTrue) : Evaluate(conditional.IfFalse);
+            case NewExpression created:
+                return EvaluateNew(created);
             case NewArrayExpression { NodeType: ExpressionType.NewArrayInit } array:
                 var values = new object?[array.Expressions.Count];
                 for (int i = 0; i < values.Length; i++)
@@ -337,19 +337,207 @@ internal sealed class DataVoFilterTranslator
     };
 
     /// <summary>
-    /// <c>StartsWith</c> as the ordinal range <c>[prefix, prefix with its last character incremented)</c>, exact for any
-    /// prefix (DataVo compares text ordinally), used when the prefix holds a LIKE wildcard.
+    /// Evaluates a constructor call such as <c>new DateTime(2026, 1, 1)</c> or <c>new Guid("...")</c> through its
+    /// <see cref="ConstructorInfo"/> (kept by the expression tree), or the default value of a known struct for a
+    /// parameterless <c>new T()</c>.
     /// </summary>
-    private void StartsWithRange(DataVoPropertyModel property, string prefix, Expression node)
+    private static object? EvaluateNew(NewExpression created)
     {
-        if (prefix[^1] == char.MaxValue)
+        if (created.Constructor is null)
         {
-            throw new NotSupportedException($"'{node}': the prefix cannot be turned into a range.");
+            Type type = created.Type;
+            return type == typeof(DateTime) ? default(DateTime)
+                : type == typeof(DateTimeOffset) ? default(DateTimeOffset)
+                : type == typeof(DateOnly) ? default(DateOnly)
+                : type == typeof(TimeOnly) ? default(TimeOnly)
+                : type == typeof(TimeSpan) ? default(TimeSpan)
+                : type == typeof(Guid) ? default(Guid)
+                : type == typeof(decimal) ? default(decimal)
+                : throw Unsupported(created);
         }
 
-        string upper = string.Concat(prefix.AsSpan(0, prefix.Length - 1), ((char)(prefix[^1] + 1)).ToString());
-        _sql.Append('(').Append(property.Column).Append(" >= ").Append(Bind(prefix))
-            .Append(" AND ").Append(property.Column).Append(" < ").Append(Bind(upper)).Append(')');
+        object?[] arguments = [.. created.Arguments.Select(Evaluate)];
+        return created.Constructor.Invoke(arguments);
+    }
+
+    /// <summary>Evaluates negation, logical/bitwise not, unary plus and checked conversions of a value.</summary>
+    private static object? EvaluateUnary(UnaryExpression unary)
+    {
+        object? operand = Evaluate(unary.Operand);
+        if (unary.NodeType is ExpressionType.Quote)
+        {
+            throw Unsupported(unary);
+        }
+
+        if (operand is null)
+        {
+            return null; // lifted operators propagate null
+        }
+
+        if (unary.Method is not null)
+        {
+            return unary.Method.Invoke(null, [operand]);
+        }
+
+        return unary.NodeType switch
+        {
+            ExpressionType.UnaryPlus => operand,
+            ExpressionType.Not when operand is bool flag => !flag,
+            ExpressionType.Not or ExpressionType.OnesComplement => Integer(unary, operand, operand, static (a, _) => ~a),
+            ExpressionType.Negate or ExpressionType.NegateChecked => Negate(unary, operand),
+            ExpressionType.TypeAs => operand,
+            _ => throw Unsupported(unary),
+        };
+    }
+
+    /// <summary>
+    /// Evaluates arithmetic, comparison, logical, bitwise and coalescing operators. Operator methods (such as
+    /// <c>DateTime + TimeSpan</c> or <c>decimal * decimal</c>) are invoked; primitive operands use generic math.
+    /// </summary>
+    private static object? EvaluateBinary(BinaryExpression binary)
+    {
+        switch (binary.NodeType)
+        {
+            case ExpressionType.Coalesce when binary.Conversion is null:
+                return Evaluate(binary.Left) ?? Evaluate(binary.Right);
+            case ExpressionType.AndAlso:
+                return Evaluate(binary.Left) is true && Evaluate(binary.Right) is true;
+            case ExpressionType.OrElse:
+                return Evaluate(binary.Left) is true || Evaluate(binary.Right) is true;
+        }
+
+        object? left = Evaluate(binary.Left);
+        object? right = Evaluate(binary.Right);
+        if (left is null || right is null)
+        {
+            // Lifted operators: comparisons of null are false (== compares both for null), arithmetic is null.
+            return binary.NodeType switch
+            {
+                ExpressionType.Equal => left is null && right is null,
+                ExpressionType.NotEqual => !(left is null && right is null),
+                ExpressionType.LessThan or ExpressionType.LessThanOrEqual or ExpressionType.GreaterThan or ExpressionType.GreaterThanOrEqual => false,
+                _ => null,
+            };
+        }
+
+        if (binary.Method is not null)
+        {
+            return binary.Method.Invoke(null, [left, right]);
+        }
+
+        if (left is bool l && right is bool r)
+        {
+            return binary.NodeType switch
+            {
+                ExpressionType.And => l & r,
+                ExpressionType.Or => l | r,
+                ExpressionType.ExclusiveOr => l ^ r,
+                ExpressionType.Equal => l == r,
+                ExpressionType.NotEqual => l != r,
+                _ => throw Unsupported(binary),
+            };
+        }
+
+        if (binary.NodeType is ExpressionType.Equal or ExpressionType.NotEqual && left.GetType() == right.GetType() && !IsNumber(left))
+        {
+            return Equals(left, right) == (binary.NodeType == ExpressionType.Equal);
+        }
+
+        return left switch
+        {
+            int a => Number(binary, a, (int)right),
+            long a => Number(binary, a, (long)right),
+            uint a => Number(binary, a, (uint)right),
+            ulong a => Number(binary, a, (ulong)right),
+            short a => Number(binary, a, (short)right),
+            ushort a => Number(binary, a, (ushort)right),
+            byte a => Number(binary, a, (byte)right),
+            sbyte a => Number(binary, a, (sbyte)right),
+            float a => Number(binary, a, (float)right),
+            double a => Number(binary, a, (double)right),
+            decimal a => Number(binary, a, (decimal)right),
+            _ => throw Unsupported(binary),
+        };
+    }
+
+    private static bool IsNumber(object value) =>
+        value is int or long or uint or ulong or short or ushort or byte or sbyte or float or double or decimal;
+
+    /// <summary>Applies an arithmetic, comparison or (for integers) bitwise operator to two primitive numbers of one type.</summary>
+    private static object Number<T>(BinaryExpression node, T a, T b)
+        where T : INumber<T>
+    {
+        switch (node.NodeType)
+        {
+            case ExpressionType.Add: return a + b;
+            case ExpressionType.AddChecked: return checked(a + b);
+            case ExpressionType.Subtract: return a - b;
+            case ExpressionType.SubtractChecked: return checked(a - b);
+            case ExpressionType.Multiply: return a * b;
+            case ExpressionType.MultiplyChecked: return checked(a * b);
+            case ExpressionType.Divide: return a / b;
+            case ExpressionType.Modulo: return a % b;
+            case ExpressionType.Equal: return a == b;
+            case ExpressionType.NotEqual: return a != b;
+            case ExpressionType.LessThan: return a < b;
+            case ExpressionType.LessThanOrEqual: return a <= b;
+            case ExpressionType.GreaterThan: return a > b;
+            case ExpressionType.GreaterThanOrEqual: return a >= b;
+        }
+
+        return node.NodeType switch
+        {
+            ExpressionType.And => Integer(node, a, b, static (x, y) => x & y),
+            ExpressionType.Or => Integer(node, a, b, static (x, y) => x | y),
+            ExpressionType.ExclusiveOr => Integer(node, a, b, static (x, y) => x ^ y),
+            ExpressionType.LeftShift => Integer(node, a, b, static (x, y) => x << (int)y),
+            ExpressionType.RightShift => Integer(node, a, b, static (x, y) => x >> (int)y),
+            _ => throw Unsupported(node),
+        };
+    }
+
+    /// <summary>Applies an integer-only operator, widening through <see cref="long"/>/<see cref="ulong"/> and back to the operand type.</summary>
+    private static object Integer(Expression node, object a, object b, Func<long, long, long> op)
+    {
+        Type type = a.GetType();
+        if (type == typeof(ulong))
+        {
+            return (ulong)op(unchecked((long)(ulong)a), unchecked((long)(ulong)b));
+        }
+
+        if (!(a is int or long or uint or short or ushort or byte or sbyte) || b.GetType() != type)
+        {
+            throw Unsupported(node);
+        }
+
+        long result = op(Convert.ToInt64(a, CultureInfo.InvariantCulture), Convert.ToInt64(b, CultureInfo.InvariantCulture));
+        return Convert.ChangeType(unchecked(type == typeof(uint) ? (uint)result : result), type, CultureInfo.InvariantCulture);
+    }
+
+    private static object Negate(UnaryExpression node, object operand) => operand switch
+    {
+        int a => node.NodeType == ExpressionType.NegateChecked ? checked(-a) : -a,
+        long a => node.NodeType == ExpressionType.NegateChecked ? checked(-a) : -a,
+        short a => -a,
+        sbyte a => -a,
+        float a => -a,
+        double a => -a,
+        decimal a => -a,
+        TimeSpan a => -a,
+        _ => throw Unsupported(node),
+    };
+
+    /// <summary>Converts a primitive value to another primitive (numeric) type, as an implicit or explicit C# cast does.</summary>
+    private static object ConvertPrimitive(object operand, Type target)
+    {
+        Type type = Nullable.GetUnderlyingType(target) ?? target;
+        if (type == typeof(object) || type.IsInstanceOfType(operand) || type.IsEnum || operand.GetType().IsEnum
+            || !IsNumber(operand) || !(type.IsPrimitive || type == typeof(decimal)))
+        {
+            return operand;
+        }
+
+        return Convert.ChangeType(operand, type, CultureInfo.InvariantCulture);
     }
 
     private static NotSupportedException Unsupported(Expression node) =>
