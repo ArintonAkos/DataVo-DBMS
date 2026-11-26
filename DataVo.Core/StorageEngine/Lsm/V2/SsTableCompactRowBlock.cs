@@ -3,8 +3,8 @@ using System.Buffers.Binary;
 namespace DataVo.Core.StorageEngine.Lsm.V2;
 
 /// <summary>
-/// Compact encoding of a row-keyed data block (format version 4): entries store differences to the
-/// previous entry instead of fixed 24-byte records, with a full "restart" entry every
+/// Integer-key encoding of a row-keyed data block (used by v6 and v8 files for integer row keys): entries
+/// store differences to the previous entry, with a full "restart" entry every
 /// <see cref="RestartInterval"/> entries so a lookup can still binary search.
 /// </summary>
 /// <remarks>
@@ -13,15 +13,14 @@ namespace DataVo.Core.StorageEngine.Lsm.V2;
 /// restart  := i64 row id | varint tag | varint value length | value
 /// entry    := varint row id delta | varint zigzag(tag delta) | varint value length | value
 /// </code>
-/// Offsets are from the block start. The tag is (sequence &lt;&lt; 8 | type) as in v2; rows of one
-/// commit share a sequence, so the tag delta is usually 0 and a small row needs 3 bytes of header
-/// instead of 24. This is the LevelDB/RocksDB restart-point scheme, applied to integer keys.
+/// Offsets are from the block start. The tag is (sequence &lt;&lt; 8 | type); rows of one commit share
+/// a sequence, so the tag delta is usually 0 and a small row needs 3 bytes of header. This is the LevelDB/RocksDB restart-point scheme, applied to integer keys.
 /// </remarks>
 internal static class SsTableCompactRowBlock
 {
     public const int RestartInterval = 16;
 
-    /// <summary>Block flag (header bytes 8..12) marking this encoding; v2 blocks have flags 0.</summary>
+    /// <summary>Block flag (header bytes 8..12) marking this encoding.</summary>
     public const int CompactFlag = 1;
 
     public static bool IsCompact(ReadOnlySpan<byte> block) =>

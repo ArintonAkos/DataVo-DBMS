@@ -8,14 +8,13 @@ namespace DataVo.Core.StorageEngine.Lsm.V2;
 internal delegate TResult RowVersionFunc<TState, TResult>(LsmValueType type, ulong sequence, ReadOnlySpan<byte> value, TState state);
 
 /// <summary>
-/// Reads a row-keyed SSTable (v2, v4 or v6) through a <see cref="SsTableBlockSource"/>. Opening validates the footer, block
+/// Reads a row-keyed SSTable (v6 or v8) through a <see cref="SsTableBlockSource"/>. Opening validates the footer, block
 /// index, Bloom filter, and properties (O(metadata)); no data block is read until a lookup needs it.
 /// </summary>
 /// <remarks>
 /// A point lookup costs: a key range check, one Bloom probe (one cache line), a binary search over the
-/// block index (L1/L2-resident), and a binary search over the block's restart points (or its dense
-/// 24-byte entries in v2). Each block's CRC32C is verified the first time any reader touches it.
-/// Files of versions 2 and 4 hold integer keys; their keys are exposed as <see cref="RowKey"/>s.
+/// block index (L1/L2-resident), and a binary search over the block's restart points. Each block's
+/// CRC32C is verified the first time any reader touches it.
 /// </remarks>
 internal sealed class SsTableV2Reader : IDisposable, ISsTableBlockVerifier
 {
@@ -24,12 +23,10 @@ internal sealed class SsTableV2Reader : IDisposable, ISsTableBlockVerifier
     private readonly ReadOnlyMemory<byte> _bloomBits;
     private readonly int[] _verifiedBlocks;
     private readonly bool _ownsSource;
-    private readonly int _indexEntrySize;
-    private readonly bool _wide;
 
-    // v6: the last key of every block, decoded once at open (16 B per block; a 1M-row file has ~2K
+    // The last key of every block, decoded once at open (16 B per block; a 1M-row file has ~2K
     // blocks), so the block search compares keys instead of decoding index records on every step.
-    private readonly RowKey[] _blockLastKeys = [];
+    private readonly RowKey[] _blockLastKeys;
 
     private SsTableV2Reader(
         SsTableBlockSource source,
@@ -44,17 +41,13 @@ internal sealed class SsTableV2Reader : IDisposable, ISsTableBlockVerifier
         _source = source;
         Columnar = columnar;
         Version = version;
-        _wide = SsTableV2Format.HasWideKeys(version);
-        _indexEntrySize = SsTableV2Format.IndexEntrySizeOf(version);
-        if (_wide)
+        _blockLastKeys = new RowKey[properties.BlockCount];
+        ReadOnlySpan<byte> records = index.Span;
+        for (int block = 0; block < _blockLastKeys.Length; block++)
         {
-            _blockLastKeys = new RowKey[properties.BlockCount];
-            ReadOnlySpan<byte> records = index.Span;
-            for (int block = 0; block < _blockLastKeys.Length; block++)
-            {
-                _blockLastKeys[block] = SsTableV2Format.ReadKey(records[(SsTableV2Format.IndexHeaderSize + (block * _indexEntrySize) + SsTableWideRowBlock.KeySize)..]);
-            }
+            _blockLastKeys[block] = SsTableV2Format.ReadKey(records[(SsTableV2Format.IndexHeaderSize + (block * SsTableV2Format.IndexEntrySize) + SsTableWideRowBlock.KeySize)..]);
         }
+
         _ownsSource = ownsSource;
         _index = index;
         _bloomBits = bloomBits;
@@ -65,10 +58,10 @@ internal sealed class SsTableV2Reader : IDisposable, ISsTableBlockVerifier
 
     public SsTableV2Properties Properties { get; }
 
-    /// <summary>The file's columnar segment, or null when it has none (every file older than version 8).</summary>
+    /// <summary>The file's columnar segment, or null when it has none (a version 6 file).</summary>
     public SsTableColumnarSegment? Columnar { get; }
 
-    /// <summary>The file's format version (2, 4 or 6).</summary>
+    /// <summary>The file's format version (6 or 8).</summary>
     public ushort Version { get; }
 
     public int Alignment { get; }
@@ -108,7 +101,7 @@ internal sealed class SsTableV2Reader : IDisposable, ISsTableBlockVerifier
             || !SsTableV2Format.IsRowKeyedVersion(version)
             || length < SsTableV2Format.FooterSizeOf(version))
         {
-            throw new InvalidDataException("SSTable footer is not a row-keyed (v2, v4, v6 or v8) footer.");
+            throw new InvalidDataException("SSTable footer is not a row-keyed (v6 or v8) footer.");
         }
 
         int footerSize = SsTableV2Format.FooterSizeOf(version);
@@ -127,15 +120,15 @@ internal sealed class SsTableV2Reader : IDisposable, ISsTableBlockVerifier
         ValidateHandle(indexOffset, indexLength, dataEnd, "index");
         ValidateHandle(bloomOffset, bloomLength, dataEnd, "Bloom filter");
         ValidateHandle(propertiesOffset, propertiesLength, dataEnd, "properties");
-        if (propertiesLength != SsTableV2Format.PropertiesSizeOf(version))
+        if (propertiesLength != SsTableV2Format.PropertiesSize)
         {
             throw new InvalidDataException("SSTable properties block has an unexpected size.");
         }
 
-        SsTableV2Properties properties = SsTableV2Properties.ReadFrom(source.GetRegion(propertiesOffset, propertiesLength).Span, version);
+        SsTableV2Properties properties = SsTableV2Properties.ReadFrom(source.GetRegion(propertiesOffset, propertiesLength).Span);
 
         ReadOnlyMemory<byte> index = source.GetRegion(indexOffset, indexLength);
-        ValidateIndex(index.Span, properties, indexOffset, alignment, version);
+        ValidateIndex(index.Span, properties, indexOffset, alignment);
 
         ReadOnlySpan<byte> bloomHeader = source.GetRegion(bloomOffset, SsTableV2Format.BloomHeaderSize).Span;
         int bloomBlocks = BinaryPrimitives.ReadInt32LittleEndian(bloomHeader[0..]);
@@ -164,18 +157,14 @@ internal sealed class SsTableV2Reader : IDisposable, ISsTableBlockVerifier
 
     /// <summary>Block <paramref name="block"/> of the index.</summary>
     public SsTableV2BlockInfo GetBlockInfo(int block) =>
-        SsTableV2BlockInfo.ReadFrom(_index.Span.Slice(SsTableV2Format.IndexHeaderSize + (block * _indexEntrySize), _indexEntrySize), Version);
+        SsTableV2BlockInfo.ReadFrom(_index.Span.Slice(SsTableV2Format.IndexHeaderSize + (block * SsTableV2Format.IndexEntrySize), SsTableV2Format.IndexEntrySize));
 
     /// <summary>False when <paramref name="key"/> is certainly not in this file.</summary>
-    /// <remarks>
-    /// In a v2 or v4 file both bounds are integer keys (high half zero), so a key inside the range is an
-    /// integer key too and probes the filter by its integer.
-    /// </remarks>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool MayContain(RowKey key) =>
         key >= Properties.SmallestKey
         && key <= Properties.LargestKey
-        && BlockedBloomFilter.MightContain(_bloomBits.Span, _wide ? SsTableV2Format.WideBloomKey(key) : unchecked((long)(key.Low ^ 0x8000_0000_0000_0000UL)));
+        && BlockedBloomFilter.MightContain(_bloomBits.Span, SsTableV2Format.WideBloomKey(key));
 
     /// <summary>
     /// Finds the newest version of <paramref name="key"/> with sequence at most
@@ -254,62 +243,14 @@ internal sealed class SsTableV2Reader : IDisposable, ISsTableBlockVerifier
             return SearchWideBlock(bytes, request);
         }
 
-        // An integer block (any v2/v4 block, or a v6 block of integer keys). Block selection only picks it
-        // for a key at most its last key, which is an integer key, so the target is an integer too.
+        // An integer block. Block selection only picks it for a key at most its last key, which is an
+        // integer key, so the target is an integer too.
         if (!request.Key.IsInt64)
         {
             return BlockLookupResult<TResult>.Absent;
         }
 
-        long rowId = request.Key.AsInt64();
-        if (SsTableCompactRowBlock.IsCompact(bytes))
-        {
-            return SearchCompactBlock(bytes, rowId, request);
-        }
-
-        int count = BinaryPrimitives.ReadInt32LittleEndian(bytes[4..]);
-
-        // Lower bound: first entry whose row id is >= the target.
-        int low = 0;
-        int high = count;
-        while (low < high)
-        {
-            int mid = (int)((uint)(low + high) >> 1);
-            if (EntryRowId(bytes, mid) < rowId)
-            {
-                low = mid + 1;
-            }
-            else
-            {
-                high = mid;
-            }
-        }
-
-        for (int i = low; i < count; i++)
-        {
-            ReadOnlySpan<byte> entry = bytes.Slice(SsTableV2Format.BlockHeaderSize + (i * SsTableV2Format.EntrySize), SsTableV2Format.EntrySize);
-            if (BinaryPrimitives.ReadInt64LittleEndian(entry) != rowId)
-            {
-                return BlockLookupResult<TResult>.Absent;
-            }
-
-            ulong tag = BinaryPrimitives.ReadUInt64LittleEndian(entry[8..]);
-            ulong sequence = SsTableV2Format.SequenceOf(tag);
-            if (sequence > request.SnapshotSequence)
-            {
-                continue; // newer than the reader's snapshot
-            }
-
-            int valueOffset = BinaryPrimitives.ReadInt32LittleEndian(entry[16..]);
-            int valueLength = BinaryPrimitives.ReadInt32LittleEndian(entry[20..]);
-            LsmValueType type = SsTableV2Format.TypeOf(tag);
-            return BlockLookupResult<TResult>.Found(
-                request.OnFound(type, sequence, bytes.Slice(valueOffset, valueLength), request.State));
-        }
-
-        // Ran off the end of the block while still on this row id (every version here was newer than
-        // the snapshot) or before reaching it: older versions can only be in the next block.
-        return BlockLookupResult<TResult>.ContinueNextBlock;
+        return SearchCompactBlock(bytes, request.Key.AsInt64(), request);
     }
 
     private static BlockLookupResult<TResult> SearchCompactBlock<TState, TResult>(ReadOnlySpan<byte> bytes, long rowId, LookupRequest<TState, TResult> request)
@@ -469,24 +410,15 @@ internal sealed class SsTableV2Reader : IDisposable, ISsTableBlockVerifier
         return SsTableCompactRowBlock.ReadVarint(bytes, ref position, limit);
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static long EntryRowId(ReadOnlySpan<byte> block, int entry) =>
-        BinaryPrimitives.ReadInt64LittleEndian(block[(SsTableV2Format.BlockHeaderSize + (entry * SsTableV2Format.EntrySize))..]);
-
     /// <summary>First block whose last key is at or after <paramref name="key"/>.</summary>
     internal int FindFirstBlockEndingAtOrAfter(RowKey key)
     {
-        ReadOnlySpan<byte> index = _index.Span;
         int low = 0;
         int high = BlockCount;
         while (low < high)
         {
             int mid = (int)((uint)(low + high) >> 1);
-            int record = SsTableV2Format.IndexHeaderSize + (mid * _indexEntrySize);
-            bool before = _wide
-                ? _blockLastKeys[mid] < key
-                : (RowKey)BinaryPrimitives.ReadInt64LittleEndian(index[(record + 8)..]) < key;
-            if (before)
+            if (_blockLastKeys[mid] < key)
             {
                 low = mid + 1;
             }
@@ -521,14 +453,9 @@ internal sealed class SsTableV2Reader : IDisposable, ISsTableBlockVerifier
         int count = BinaryPrimitives.ReadInt32LittleEndian(bytes[4..]);
         int payloadLength = BinaryPrimitives.ReadInt32LittleEndian(bytes[12..]);
         bool wide = SsTableWideRowBlock.IsWide(bytes);
-        bool compact = wide || SsTableCompactRowBlock.IsCompact(bytes);
-        if (wide && !_wide)
-        {
-            throw new InvalidDataException($"SSTable block {block} uses the wide encoding, which version {Version} files do not have.");
-        }
-
         if (count <= 0
-            || payloadLength < (compact ? sizeof(int) : (long)count * SsTableV2Format.EntrySize)
+            || (!wide && !SsTableCompactRowBlock.IsCompact(bytes))
+            || payloadLength < sizeof(int)
             || SsTableV2Format.BlockHeaderSize + payloadLength != bytes.Length)
         {
             throw new InvalidDataException($"SSTable block {block} header is corrupt.");
@@ -544,20 +471,9 @@ internal sealed class SsTableV2Reader : IDisposable, ISsTableBlockVerifier
         {
             VerifyWideBlock(block, bytes, count);
         }
-        else if (compact)
+        else
         {
             VerifyCompactBlock(block, bytes, count);
-        }
-
-        for (int i = 0; !compact && i < count; i++)
-        {
-            ReadOnlySpan<byte> entry = bytes.Slice(SsTableV2Format.BlockHeaderSize + (i * SsTableV2Format.EntrySize), SsTableV2Format.EntrySize);
-            int valueOffset = BinaryPrimitives.ReadInt32LittleEndian(entry[16..]);
-            int valueLength = BinaryPrimitives.ReadInt32LittleEndian(entry[20..]);
-            if (valueOffset < SsTableV2Format.BlockHeaderSize || valueLength < 0 || valueOffset > bytes.Length - valueLength)
-            {
-                throw new InvalidDataException($"SSTable block {block} entry {i} points outside the block.");
-            }
         }
 
         int current;
@@ -666,9 +582,9 @@ internal sealed class SsTableV2Reader : IDisposable, ISsTableBlockVerifier
         }
     }
 
-    private static void ValidateIndex(ReadOnlySpan<byte> index, SsTableV2Properties properties, long indexOffset, int alignment, ushort version)
+    private static void ValidateIndex(ReadOnlySpan<byte> index, SsTableV2Properties properties, long indexOffset, int alignment)
     {
-        int entrySize = SsTableV2Format.IndexEntrySizeOf(version);
+        const int entrySize = SsTableV2Format.IndexEntrySize;
         int count = BinaryPrimitives.ReadInt32LittleEndian(index);
         if (count <= 0
             || count != properties.BlockCount
@@ -681,7 +597,7 @@ internal sealed class SsTableV2Reader : IDisposable, ISsTableBlockVerifier
         long previousEnd = 0;
         for (int i = 0; i < count; i++)
         {
-            var info = SsTableV2BlockInfo.ReadFrom(index.Slice(SsTableV2Format.IndexHeaderSize + (i * entrySize)), version);
+            var info = SsTableV2BlockInfo.ReadFrom(index.Slice(SsTableV2Format.IndexHeaderSize + (i * entrySize)));
             if (info.Offset % alignment != 0
                 || info.Offset < previousEnd
                 || info.Length <= SsTableV2Format.BlockHeaderSize
@@ -738,7 +654,6 @@ internal sealed unsafe class SsTableV2Cursor
     private int _blockIndex = -1;
     private int _entry;
     private int _entryCount;
-    private bool _compact;
     private bool _wide;
     private CompactRowBlockReader _compactEntries;
     private WideRowBlockReader _wideEntries;
@@ -756,7 +671,6 @@ internal sealed unsafe class SsTableV2Cursor
         _blockIndex = -1;
         _entry = 0;
         _entryCount = 0;
-        _compact = false;
         _wide = false;
         return this;
     }
@@ -824,12 +738,11 @@ internal sealed unsafe class SsTableV2Cursor
             _entryCount = BinaryPrimitives.ReadInt32LittleEndian(BlockSpan[4..]);
             _entry = 0;
             _wide = SsTableWideRowBlock.IsWide(BlockSpan);
-            _compact = !_wide && SsTableCompactRowBlock.IsCompact(BlockSpan);
             if (_wide)
             {
                 _wideEntries.Seek(BlockSpan, 0);
             }
-            else if (_compact)
+            else
             {
                 _compactEntries.Seek(BlockSpan, 0);
             }
@@ -847,25 +760,12 @@ internal sealed unsafe class SsTableV2Cursor
             return true;
         }
 
-        if (_compact)
-        {
-            _compactEntries.MoveNext(BlockSpan);
-            Key = _compactEntries.RowId;
-            Sequence = SsTableV2Format.SequenceOf(_compactEntries.Tag);
-            Type = SsTableV2Format.TypeOf(_compactEntries.Tag);
-            _valueOffset = _compactEntries.ValueOffset;
-            _valueLength = _compactEntries.ValueLength;
-            _entry++;
-            return true;
-        }
-
-        ReadOnlySpan<byte> entry = BlockSpan.Slice(SsTableV2Format.BlockHeaderSize + (_entry * SsTableV2Format.EntrySize), SsTableV2Format.EntrySize);
-        Key = BinaryPrimitives.ReadInt64LittleEndian(entry);
-        ulong tag = BinaryPrimitives.ReadUInt64LittleEndian(entry[8..]);
-        Sequence = SsTableV2Format.SequenceOf(tag);
-        Type = SsTableV2Format.TypeOf(tag);
-        _valueOffset = BinaryPrimitives.ReadInt32LittleEndian(entry[16..]);
-        _valueLength = BinaryPrimitives.ReadInt32LittleEndian(entry[20..]);
+        _compactEntries.MoveNext(BlockSpan);
+        Key = _compactEntries.RowId;
+        Sequence = SsTableV2Format.SequenceOf(_compactEntries.Tag);
+        Type = SsTableV2Format.TypeOf(_compactEntries.Tag);
+        _valueOffset = _compactEntries.ValueOffset;
+        _valueLength = _compactEntries.ValueLength;
         _entry++;
         return true;
     }

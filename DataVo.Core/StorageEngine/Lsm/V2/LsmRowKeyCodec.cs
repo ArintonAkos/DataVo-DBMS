@@ -5,10 +5,10 @@ namespace DataVo.Core.StorageEngine.Lsm.V2;
 /// <summary>SSTable format a table writes on flush and compaction.</summary>
 internal enum LsmSstableFormat
 {
-    /// <summary>Row-keyed (16-byte row keys since v6; v2 and v4 files hold integer row ids), page-aligned blocks, values.</summary>
+    /// <summary>Row-keyed (v6/v8: 16-byte row keys), page-aligned blocks, values.</summary>
     RowKeyed = 2,
 
-    /// <summary>v3: keyed (variable byte keys), page-aligned blocks; used by index tables.</summary>
+    /// <summary>Keyed (v5: variable byte keys), page-aligned blocks; used by index tables.</summary>
     Keyed = 3,
 }
 
@@ -64,13 +64,10 @@ internal static class LsmRowKeyCodec
         return value;
     }
 
-    /// <summary>
-    /// Decodes a metadata value. The 8-byte form written before live counts were tracked yields
-    /// <see cref="SsTableV2Properties.UnknownLiveRowCount"/>.
-    /// </summary>
+    /// <summary>Decodes a metadata value written by <see cref="EncodeTableMetadata"/>.</summary>
     public static (long NextRowId, long LiveRowCount) DecodeTableMetadata(ReadOnlySpan<byte> value)
     {
-        if (value.Length != sizeof(long) && value.Length != sizeof(long) * 2)
+        if (value.Length != sizeof(long) * 2)
         {
             throw new InvalidDataException("LSM table metadata value is malformed.");
         }
@@ -81,10 +78,7 @@ internal static class LsmRowKeyCodec
             throw new InvalidDataException("LSM next-row-id metadata value must be positive.");
         }
 
-        long liveRowCount = value.Length == sizeof(long) * 2
-            ? BinaryPrimitives.ReadInt64LittleEndian(value[sizeof(long)..])
-            : SsTableV2Properties.UnknownLiveRowCount;
-        return (nextRowId, liveRowCount);
+        return (nextRowId, BinaryPrimitives.ReadInt64LittleEndian(value[sizeof(long)..]));
     }
 
     /// <summary>

@@ -949,8 +949,8 @@ public sealed partial class LsmStorageEngine : IFixedWidthPatchStorageEngine, IL
 
     /// <summary>
     /// Reads the table's next row id, live-row count, and flushed sequence from the SSTable properties
-    /// (O(files), no row is read). A table whose files carry no live count (none of its commits has been
-    /// flushed with the metadata entry) has its rows counted once, and the next commit persists the count.
+    /// (O(files), no row is read). A table whose files carry no metadata entry at all (files written
+    /// without a commit, such as raw SSTables) has its rows counted once, and the next commit persists the count.
     /// </summary>
     private void LoadTableMetadata(TableState state)
     {
@@ -982,7 +982,7 @@ public sealed partial class LsmStorageEngine : IFixedWidthPatchStorageEngine, IL
             version.Release();
         }
 
-        if (version.Files.Length > 0 && (!hasMetadata || liveRowCount < 0))
+        if (version.Files.Length > 0 && !hasMetadata)
         {
             liveRowCount = CollectLiveRowsSorted(state).Count;
         }

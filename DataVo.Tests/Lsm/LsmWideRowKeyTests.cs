@@ -171,69 +171,6 @@ public sealed class LsmWideRowKeyTests : IDisposable
         }
     }
 
-    [Fact]
-    public void FilesWrittenWithEightByteKeys_AreRead_AndMergedWithNewFiles()
-    {
-        // A table as the previous format left it: a v4 file of integer ids, and a manifest recording its
-        // bounds as 8-byte row keys.
-        string tableDirectory = Path.Combine(_root, Db, Table);
-        Directory.CreateDirectory(tableDirectory);
-        var manifest = new LsmManifest(Path.Combine(tableDirectory, "MANIFEST"));
-        long fileNumber = manifest.AllocateFileNumber();
-        string fileName = $"{fileNumber:D6}.sst";
-        long length;
-        using (var stream = new FileStream(Path.Combine(tableDirectory, fileName), FileMode.CreateNew, FileAccess.Write))
-        using (var writer = new SsTableV2Writer(stream, format: SsTableRowFormat.Compact))
-        {
-            for (long rowId = 1; rowId <= 300; rowId++)
-            {
-                writer.Add(rowId, (ulong)rowId, LsmValueType.Put, Value(rowId));
-            }
-
-            writer.SetTableMetadata(301, 300, 300);
-            length = writer.Finish();
-        }
-
-        var edit = new LsmVersionEdit();
-        edit.AddFile(new LsmTableFileMetadata(fileNumber, 0, LegacyInternalKey(1, 1), LegacyInternalKey(300, 300), length, fileName));
-        manifest.ApplyEdit(edit);
-
-        using (var engine = new LsmStorageEngine(_root, Relaxed))
-        {
-            Assert.Equal(Value(150), engine.ReadRow(Db, Table, 150));
-            Assert.Equal(300, engine.EstimateRowCount(Db, Table));
-            Assert.Equal((RowKey)301, engine.InsertRow(Db, Table, Value(301)));
-            Assert.True(engine.TryInsertRowWithKey(Db, Table, Keys[5], Value(Keys[5])));
-            engine.DeleteRow(Db, Table, 7);
-            engine.FlushTableForTesting(Db, Table);
-
-            List<(RowKey NewRowId, byte[] RawRow)> rows = engine.CompactTable(Db, Table);
-            Assert.Equal(301, rows.Count); // 300 old + 301 + the GUID - row 7
-            Assert.Equal(Keys[5], rows[^1].NewRowId);
-        }
-
-        using var reopened = new LsmStorageEngine(_root, Relaxed);
-        Assert.Throws<RowDeletedException>(() => reopened.ReadRow(Db, Table, 7));
-        Assert.Equal(Value(300), reopened.ReadRow(Db, Table, 300));
-        Assert.Equal(Value(Keys[5]), reopened.ReadRow(Db, Table, Keys[5]));
-        Assert.All(
-            Directory.GetFiles(tableDirectory, "*.sst"),
-            file =>
-            {
-                using SsTableV2Reader reader = SsTableV2Reader.Open(file, LsmReadMode.PositionalRead);
-                Assert.Equal(SsTableV2Format.WideVersion, reader.Version);
-            });
-    }
-
-    private static byte[] LegacyInternalKey(long rowId, ulong sequence)
-    {
-        Span<byte> userKey = stackalloc byte[8];
-        InternalKey.EncodeInt64UserKey(userKey, rowId);
-        var key = new byte[8 + InternalKey.TagSize];
-        InternalKey.Write(key, userKey, sequence, LsmValueType.Put);
-        return key;
-    }
-
     private static RowKey RandomKey(Random random) => random.Next(3) switch
     {
         0 => RowKey.FromGuid(Guid.NewGuid()),

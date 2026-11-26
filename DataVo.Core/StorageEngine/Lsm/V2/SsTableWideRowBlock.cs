@@ -7,8 +7,8 @@ namespace DataVo.Core.StorageEngine.Lsm.V2;
 /// <see cref="SsTableCompactRowBlock"/>; a key is stored relative to the previous one.
 /// </summary>
 /// <remarks>
-/// A v6 file uses this encoding only for keys that are not integers (GUIDs): blocks of integer keys keep
-/// the v4 encoding, which is a little smaller and faster to search, and the block flag says which one a
+/// A file uses this encoding only for keys that are not integers (GUIDs): blocks of integer keys use
+/// <see cref="SsTableCompactRowBlock"/>, which is a little smaller and faster to search, and the block flag says which one a
 /// block uses. Keys ascend, so a file's integer blocks all come before its wide blocks.
 /// </remarks>
 /// <remarks>
@@ -20,7 +20,7 @@ namespace DataVo.Core.StorageEngine.Lsm.V2;
 ///           | high-delta &lt;&lt; 2 | 1, u64 low    high half grows by high-delta, low half stored in full
 ///           | 2, u64 high, u64 low              key stored in full (a delta does not fit in 62 bits)
 /// </code>
-/// Integer keys (high half zero) cost what they cost in v4: a step of 1..31 is one byte, and a restart
+/// Integer keys (high half zero) cost what they cost in an integer block: a step of 1..31 is one byte, and a restart
 /// key is 9 bytes (a zero high half is one varint byte). Time-ordered GUIDs share most of their high half
 /// with the previous key, random GUIDs little; neither is worse than storing the 16 bytes (a restart may
 /// take two bytes more). Fixed-width halves are little-endian like every other integer in the file.

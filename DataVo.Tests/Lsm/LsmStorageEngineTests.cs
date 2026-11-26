@@ -354,7 +354,7 @@ public sealed class LsmStorageEngineTests
         byte[] value)
     {
         var stream = new MemoryStream();
-        using (var writer = new SsTableV2Writer(stream, alignment: 0, expectedEntries: 1))
+        using (var writer = new SsTableV2Writer(stream))
         {
             LsmRowKeyCodec.AddInternalEntry(writer, internalKey, value);
             writer.Finish();

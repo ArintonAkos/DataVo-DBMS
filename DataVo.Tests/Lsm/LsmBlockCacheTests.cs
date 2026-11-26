@@ -259,7 +259,7 @@ public sealed class LsmBlockCacheTests(ITestOutputHelper output) : IDisposable
     {
         string path = Path.Combine(_directory, $"{Guid.NewGuid():N}.sst");
         using (var stream = new FileStream(path, FileMode.CreateNew, FileAccess.Write))
-        using (var writer = new SsTableV2Writer(stream, format: SsTableRowFormat.Compact))
+        using (var writer = new SsTableV2Writer(stream))
         {
             for (long rowId = 1; rowId <= count; rowId++)
             {

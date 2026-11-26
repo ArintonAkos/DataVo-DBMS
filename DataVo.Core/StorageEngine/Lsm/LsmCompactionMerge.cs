@@ -26,7 +26,7 @@ internal abstract class LsmMergeSource(int ordinal) : IDisposable
     }
 }
 
-/// <summary>The rows of a row-keyed (v2 and later) SSTable, read through a cursor over its blocks.</summary>
+/// <summary>The rows of a row-keyed (v6 or v8) SSTable, read through a cursor over its blocks.</summary>
 internal sealed class LsmRowFileMergeSource(int ordinal, SsTableV2Reader reader, bool ownsReader) : LsmMergeSource(ordinal)
 {
     private readonly SsTableV2Cursor _cursor = reader.OpenCursor();

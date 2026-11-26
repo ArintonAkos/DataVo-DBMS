@@ -44,7 +44,7 @@ public class LsmReadModeBenchmarks
         _scratch = new ScratchDirectory();
         string file = System.IO.Path.Combine(_scratch.Path, "rows.sst");
         using (var stream = new FileStream(file, FileMode.CreateNew, FileAccess.Write))
-        using (var writer = new SsTableV2Writer(stream, format: SsTableRowFormat.Compact))
+        using (var writer = new SsTableV2Writer(stream))
         {
             for (long rowId = 1; rowId <= RowCount; rowId++)
             {
