@@ -1,7 +1,6 @@
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Runtime.Loader;
-using Microsoft.Win32.SafeHandles;
 using DataVo.Core;
 using DataVo.Core.CompiledQueries;
 using DataVo.Core.Compat;
@@ -12,7 +11,6 @@ using DataVo.Core.Runtime.Reactive;
 using DataVo.Core.Runtime.Security;
 using DataVo.Core.StorageEngine;
 using DataVo.Core.StorageEngine.Config;
-using DataVo.Core.StorageEngine.Disk;
 using DataVo.Core.StorageEngine.Lsm;
 using DataVo.Core.Transactions;
 
@@ -104,8 +102,8 @@ internal static class PortableSmoke
         VerifyPersistence(StorageMode.Lsm, Path.Combine(testRoot, "lsm"));
         VerifyCommittedRowsSurviveProcessCrash(StorageMode.Lsm, Path.Combine(testRoot, "lsm-crash"));
 
-        Console.WriteLine("Portable candidate .NET-host smoke passed.");
         VerifyPreparedStatementsAndNameCase();
+        Console.WriteLine("Portable candidate .NET-host smoke passed.");
         return 0;
     }
 
@@ -517,10 +515,4 @@ internal static class PortableSmoke
     private sealed class PortableDisposedMarker
     {
     }
-
-    private delegate long PortableGetLength(SafeFileHandle handle);
-    private delegate void PortableWrite(SafeFileHandle handle, ReadOnlySpan<byte> bytes, long fileOffset);
-    private delegate int PortableRead(SafeFileHandle handle, Span<byte> buffer, long fileOffset);
-    private delegate void PortableSetLength(SafeFileHandle handle, long length);
-    private delegate void PortableFlushToDisk(SafeFileHandle handle);
 }

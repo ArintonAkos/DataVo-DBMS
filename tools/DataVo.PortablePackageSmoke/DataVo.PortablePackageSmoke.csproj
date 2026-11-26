@@ -12,9 +12,9 @@
       <HintPath>$(DataVoPortableAssembly)</HintPath>
       <Private>false</Private>
     </Reference>
+    <!-- System.Text.Json and System.Threading.Channels come from the net10.0 shared framework; the portable
+         netstandard2.1 DataVo.Core's references to their 8.x packages unify up to those framework versions. -->
     <PackageReference Include="System.ComponentModel.Annotations" Version="5.0.0" />
-    <PackageReference Include="System.Text.Json" Version="10.0.0" />
-    <PackageReference Include="System.Threading.Channels" Version="10.0.0" />
   </ItemGroup>
 
   <Target Name="RequireDataVoPortableAssembly" BeforeTargets="ResolveAssemblyReferences">
