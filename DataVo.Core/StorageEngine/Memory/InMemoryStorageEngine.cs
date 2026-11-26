@@ -754,11 +754,11 @@ public class InMemoryStorageEngine : IRowIdStorageEngine, ITypedRowStorageEngine
     }
 
     /// <summary>
-    /// Compacts a table by removing tombstoned rows and reassigning RowIds.
+    /// Compacts a table by removing tombstoned rows and reassigning RowIds; serialized and typed rows both survive.
     /// </summary>
     /// <param name="databaseName">The owning database name.</param>
     /// <param name="tableName">The table name.</param>
-    /// <returns>The new RowId and payload for each surviving row.</returns>
+    /// <returns>The new RowId and payload for each surviving row; a typed row has an empty payload.</returns>
     public List<(long NewRowId, byte[] RawRow)> CompactTable(string databaseName, string tableName)
     {
         var compacted = new List<(long, byte[])>();
@@ -767,25 +767,8 @@ public class InMemoryStorageEngine : IRowIdStorageEngine, ITypedRowStorageEngine
         store.Lock.EnterWriteLock();
         try
         {
-            TableRows rows = store.Rows;
-            if (rows.HasTypedRows())
-            {
-                throw new InvalidOperationException(
-                    "In-memory compaction is not supported for tables containing typed rows.");
-            }
-
             store.LayoutGeneration++;
-            var survivors = new TableRows();
-            for (int i = 0; i < rows.Count; i++)
-            {
-                if (rows.RawAt(i) is { Length: > 0 } raw)
-                {
-                    long newRowId = survivors.AddRaw(raw) + 1; // 1-based
-                    compacted.Add((newRowId, raw));
-                }
-            }
-
-            store.Rows = survivors;
+            store.Rows = store.Rows.Compact(compacted);
             store.Image = null; // rows were renumbered; the next scan builds it again
             store.Columnar = null; // and so is this, by the next query that wants it
         }

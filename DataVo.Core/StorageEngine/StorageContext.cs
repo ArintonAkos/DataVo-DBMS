@@ -124,7 +124,7 @@ public partial class StorageContext(DataVoConfig config) : IDisposable
                 config.LsmStrictFsync ? LsmWalDurabilityMode.StrictFsync : LsmWalDurabilityMode.RelaxedOsBuffer,
                 config.LsmReadMode,
                 config.LsmBlockCacheSizeBytes),
-            StorageMode.Wasm => new WasmStorageBackend(config.WasmStorageEngine),
+            StorageMode.Wasm => WasmStorageBackend.Create(config.WasmStorageEngine),
             StorageMode.Custom => config.CustomStorageEngine ?? throw new ArgumentNullException(nameof(config.CustomStorageEngine), "Custom Storage Mode requires a CustomStorageEngine instance."),
             _ => throw new ArgumentOutOfRangeException()
         };

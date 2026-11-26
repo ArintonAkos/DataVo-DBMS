@@ -1,23 +1,27 @@
 using DataVo.Core.StorageEngine.Backends.Abstractions;
-using DataVo.Core.StorageEngine.Memory;
 
 namespace DataVo.Core.StorageEngine.Backends;
 
 /// <summary>
-/// WASM backend slot. Intended for OPFS-backed engines in browser runtimes.
+/// WASM backend slot wrapping a supplied OPFS-backed engine in browser runtimes.
 /// </summary>
 /// <remarks>
-/// If no OPFS-capable engine is supplied, this backend falls back to in-memory storage.
-/// This preserves behavior in non-browser hosts while keeping a clean extension point.
+/// Without a supplied engine, <see cref="Create"/> returns an <see cref="InMemoryStorageBackend"/> reporting
+/// <c>"Wasm"</c>, so the fallback keeps every in-memory capability instead of only the base row API.
 /// </remarks>
 internal sealed class WasmStorageBackend : IStorageBackend
 {
     private readonly IStorageEngine _inner;
 
-    public WasmStorageBackend(IStorageEngine? wasmEngine)
+    private WasmStorageBackend(IStorageEngine wasmEngine)
     {
-        _inner = wasmEngine ?? new RowIdStorageEngineAdapter(new InMemoryStorageEngine());
+        _inner = wasmEngine;
     }
+
+    /// <summary>Creates the backend for <see cref="Config.StorageMode.Wasm"/>.</summary>
+    /// <param name="wasmEngine">The OPFS-backed engine, or null to fall back to in-memory storage.</param>
+    public static IStorageEngine Create(IStorageEngine? wasmEngine) =>
+        wasmEngine is null ? new InMemoryStorageBackend(backendKind: "Wasm") : new WasmStorageBackend(wasmEngine);
 
     public string BackendKind => "Wasm";
 

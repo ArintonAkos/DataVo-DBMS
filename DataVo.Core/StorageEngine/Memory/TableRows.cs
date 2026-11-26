@@ -184,9 +184,49 @@ internal sealed class TableRows
     };
 
     /// <summary>Creates the packed store at the table's first typed row; it begins at the current position.</summary>
-    private FlatRowStore StartTypedRows(IReadOnlyList<Column> columns, ReactiveRowSchema schema)
+    /// <summary>
+    /// Copies the live rows, serialized and typed, into a new sequence numbered from 0 in their current order.
+    /// Called by the writer under the table's write lock.
+    /// </summary>
+    /// <param name="survivors">Receives each surviving row's new 1-based id and its serialized bytes; a typed row,
+    /// which has no bytes, gets an empty payload and is read back through the typed accessors.</param>
+    /// <returns>The compacted rows.</returns>
+    public TableRows Compact(List<(long NewRowId, byte[] RawRow)> survivors)
     {
-        var flat = new FlatRowStore(RowLayout.Create(ColumnCellTypes.ForLayout(columns)));
+        var compacted = new TableRows();
+        var reader = new PackedRowReader();
+        try
+        {
+            for (int position = 0; position < _count; position++)
+            {
+                if (RawAt(position) is { Length: > 0 } raw)
+                {
+                    survivors.Add((compacted.AddRaw(raw) + 1, raw));
+                }
+                else if (IsTypedLive(position) && TryReadTypedCells(position, ref reader, out ReadOnlySpan<CellValue> cells))
+                {
+                    FlatRowStore flat = compacted._flat ?? compacted.StartTypedRows(_flat!.Layout, Schema!);
+                    flat.Add(cells);
+                    int newPosition = compacted._count;
+                    compacted._count = newPosition + 1;
+                    survivors.Add((newPosition + 1, []));
+                }
+            }
+        }
+        finally
+        {
+            reader.Dispose();
+        }
+
+        return compacted;
+    }
+
+    private FlatRowStore StartTypedRows(IReadOnlyList<Column> columns, ReactiveRowSchema schema) =>
+        StartTypedRows(RowLayout.Create(ColumnCellTypes.ForLayout(columns)), schema);
+
+    private FlatRowStore StartTypedRows(RowLayout layout, ReactiveRowSchema schema)
+    {
+        var flat = new FlatRowStore(layout);
         Schema = schema;
         _flatBase = _count;
         _flat = flat; // published last: a reader that sees the store also sees where it begins

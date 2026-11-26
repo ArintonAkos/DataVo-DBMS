@@ -306,20 +306,30 @@ public class InMemoryTypedStorageTests
     }
 
     [Fact]
-    public void Engine_Compaction_RenumbersSerializedRows_AndRefusesWhileTypedRowsRemain()
+    public void Engine_Compaction_RenumbersSerializedAndTypedRows()
     {
         var engine = new InMemoryStorageEngine();
         engine.InsertRows(Db, Table, [Raw(1), Raw(2), Raw(3)]);
         TypedEngine(engine).InsertTypedRow(Db, Table, Columns, Schema, Typed(4));
+        TypedEngine(engine).InsertTypedRow(Db, Table, Columns, Schema, Typed(5));
+        TypedEngine(engine).InsertTypedRow(Db, Table, Columns, Schema, Odd(7)); // kept apart: cannot be packed
         engine.DeleteRow(Db, Table, 2);
-
-        Assert.Throws<InvalidOperationException>(() => engine.CompactTable(Db, Table));
-
         engine.DeleteRow(Db, Table, 4);
+
         List<(long NewRowId, byte[] RawRow)> compacted = engine.CompactTable(Db, Table);
-        Assert.Equal([1L, 2L], compacted.Select(row => row.NewRowId));
+
+        // Survivors keep their order: serialized 1 and 3, then typed 5 and 7, numbered 1..4.
+        Assert.Equal([1L, 2L, 3L, 4L], compacted.Select(row => row.NewRowId));
+        Assert.Equal(Raw(1), compacted[0].RawRow);
         Assert.Equal(Raw(3), engine.ReadRow(Db, Table, 2));
-        Assert.Equal(3, TypedEngine(engine).InsertTypedRow(Db, Table, Columns, Schema, Typed(5)));
+        Assert.Empty(compacted[2].RawRow);
+        Assert.True(TypedEngine(engine).HasTypedRow(Db, Table, 3));
         Assert.Equal("n5", NameOf(engine, 3));
+        Assert.Equal("n7", NameOf(engine, 4));
+        Assert.False(TypedEngine(engine).HasTypedRow(Db, Table, 5));
+
+        // The compacted table keeps accepting rows after its last survivor.
+        Assert.Equal(5, TypedEngine(engine).InsertTypedRow(Db, Table, Columns, Schema, Typed(6)));
+        Assert.Equal("n6", NameOf(engine, 5));
     }
 }

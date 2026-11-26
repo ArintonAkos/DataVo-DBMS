@@ -3,7 +3,13 @@ using DataVo.Core.StorageEngine.Memory;
 
 namespace DataVo.Core.StorageEngine.Backends;
 
-internal sealed class InMemoryStorageBackend : IStorageBackend, IPagedRowScan, ITypedRowStorageEngine, DataVo.Core.StorageEngine.Memory.IPackedRowSource, IInMemoryStorageSnapshotProvider, IRowCountEstimator, DataVo.Core.Indexing.Columnar.IColumnarRowStore
+/// <summary>
+/// The in-memory backend with every storage capability (typed rows, paged scans, packed rows, snapshots, row
+/// counts, columnar indexes). It also serves <see cref="Config.StorageMode.Wasm"/> when no OPFS engine is supplied,
+/// reporting <c>"Wasm"</c> as its kind so the browser fallback keeps every in-memory fast path.
+/// </summary>
+/// <param name="backendKind">The kind this backend reports.</param>
+internal sealed class InMemoryStorageBackend(string backendKind = "InMemory") : IStorageBackend, IPagedRowScan, ITypedRowStorageEngine, DataVo.Core.StorageEngine.Memory.IPackedRowSource, IInMemoryStorageSnapshotProvider, IRowCountEstimator, DataVo.Core.Indexing.Columnar.IColumnarRowStore
 {
     private readonly InMemoryStorageEngine _inner = new();
 
@@ -21,7 +27,7 @@ internal sealed class InMemoryStorageBackend : IStorageBackend, IPagedRowScan, I
         out long newRowId) =>
         _inner.TryAppendPatchedFixedWidthRow(databaseName, tableName, rowId, columns, ordinals, values, out newRowId);
 
-    public string BackendKind => "InMemory";
+    public string BackendKind { get; } = backendKind;
 
     public RowKey InsertRow(string databaseName, string tableName, byte[] rowBytes) => _inner.InsertRow(databaseName, tableName, rowBytes);
     public List<RowKey> InsertRows(string databaseName, string tableName, List<byte[]> rowsBytes) => RowKeyConversions.ToRowKeys(_inner.InsertRows(databaseName, tableName, rowsBytes));
