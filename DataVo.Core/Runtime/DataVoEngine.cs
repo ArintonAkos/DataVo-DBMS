@@ -624,7 +624,7 @@ public sealed partial class DataVoEngine : IDisposable
     /// </summary>
     public void CreateRole(string roleName)
     {
-        SessionSecurity.CreateRole(roleName);
+        SessionSecurity.CreateRole(Config, roleName);
     }
 
     /// <summary>
@@ -632,7 +632,7 @@ public sealed partial class DataVoEngine : IDisposable
     /// </summary>
     public void DropRole(string roleName)
     {
-        SessionSecurity.DropRole(roleName);
+        SessionSecurity.DropRole(Config, roleName);
     }
 
     /// <summary>
@@ -640,7 +640,7 @@ public sealed partial class DataVoEngine : IDisposable
     /// </summary>
     public void GrantPermissionsToUser(string username, IEnumerable<DatabasePermission> permissions)
     {
-        SessionSecurity.GrantPermissionsToUser(username, permissions);
+        SessionSecurity.GrantPermissionsToUser(Config, username, permissions);
     }
 
     /// <summary>
@@ -648,7 +648,7 @@ public sealed partial class DataVoEngine : IDisposable
     /// </summary>
     public void RevokePermissionsFromUser(string username, IEnumerable<DatabasePermission> permissions)
     {
-        SessionSecurity.RevokePermissionsFromUser(username, permissions);
+        SessionSecurity.RevokePermissionsFromUser(Config, username, permissions);
     }
 
     /// <summary>
@@ -656,7 +656,7 @@ public sealed partial class DataVoEngine : IDisposable
     /// </summary>
     public void GrantRoleToUser(string roleName, string username)
     {
-        SessionSecurity.GrantRoleToUser(roleName, username);
+        SessionSecurity.GrantRoleToUser(Config, roleName, username);
     }
 
     /// <summary>
@@ -664,7 +664,7 @@ public sealed partial class DataVoEngine : IDisposable
     /// </summary>
     public void RevokeRoleFromUser(string roleName, string username)
     {
-        SessionSecurity.RevokeRoleFromUser(roleName, username);
+        SessionSecurity.RevokeRoleFromUser(Config, roleName, username);
     }
 
     /// <summary>
@@ -672,7 +672,7 @@ public sealed partial class DataVoEngine : IDisposable
     /// </summary>
     public void GrantPermissionsToRole(string roleName, IEnumerable<DatabasePermission> permissions)
     {
-        SessionSecurity.GrantPermissionsToRole(roleName, permissions);
+        SessionSecurity.GrantPermissionsToRole(Config, roleName, permissions);
     }
 
     /// <summary>
@@ -680,7 +680,7 @@ public sealed partial class DataVoEngine : IDisposable
     /// </summary>
     public void RevokePermissionsFromRole(string roleName, IEnumerable<DatabasePermission> permissions)
     {
-        SessionSecurity.RevokePermissionsFromRole(roleName, permissions);
+        SessionSecurity.RevokePermissionsFromRole(Config, roleName, permissions);
     }
 
     /// <summary>
@@ -721,6 +721,18 @@ public sealed partial class DataVoEngine : IDisposable
     public SessionPrincipal? GetSessionPrincipal(Guid session)
     {
         return SessionSecurity.Get(session);
+    }
+
+    /// <summary>
+    /// Enforces <paramref name="permission"/> for a direct (non-SQL) API call; a no-op unless
+    /// <see cref="DataVoConfig.EnableAuthorization"/> is set, so default unauthenticated use is unaffected.
+    /// </summary>
+    internal void AuthorizeDirectAccess(Guid session, DatabasePermission permission)
+    {
+        if (Config.EnableAuthorization)
+        {
+            SessionSecurity.Authorize(session, permission, Config);
+        }
     }
 
     /// <summary>

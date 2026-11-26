@@ -3,6 +3,7 @@ using DataVo.Core.Exceptions;
 using DataVo.Core.MVCC;
 using DataVo.Core.Runtime;
 using DataVo.Core.Runtime.Reactive;
+using DataVo.Core.Runtime.Security;
 using DataVo.Core.StorageEngine;
 using DataVo.Core.StorageEngine.Serialization;
 using DataVo.Core.Transactions;
@@ -66,6 +67,7 @@ public sealed class DataVoPreparedSelectMany<T>
 
     private IReadOnlyList<T> ExecuteIntegerKey(long value)
     {
+        _context.Engine.AuthorizeDirectAccess(_context.SessionId, DatabasePermission.ReadData);
         if (HasActiveTransactionOrSnapshot(out TransactionContext? transactionContext))
         {
             return ExecuteTransactionalKey(DataVoCompiledQuery.BuildScalarComparisonKey(value), transactionContext);
@@ -105,6 +107,7 @@ public sealed class DataVoPreparedSelectMany<T>
 
     private IReadOnlyList<T> ExecuteGuidKey(Guid value)
     {
+        _context.Engine.AuthorizeDirectAccess(_context.SessionId, DatabasePermission.ReadData);
         if (HasActiveTransactionOrSnapshot(out TransactionContext? transactionContext))
         {
             return ExecuteTransactionalKey(DataVoCompiledQuery.BuildScalarComparisonKey(value), transactionContext);
@@ -135,6 +138,7 @@ public sealed class DataVoPreparedSelectMany<T>
 
     private IReadOnlyList<T> ExecuteKey(string expectedKey)
     {
+        _context.Engine.AuthorizeDirectAccess(_context.SessionId, DatabasePermission.ReadData);
         if (HasActiveTransactionOrSnapshot(out TransactionContext? transactionContext))
         {
             return ExecuteTransactionalKey(expectedKey, transactionContext);

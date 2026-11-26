@@ -11,6 +11,7 @@ using DataVo.Core.Parser.DML;
 using DataVo.Core.Runtime;
 using DataVo.Core.Runtime.Changes;
 using DataVo.Core.Runtime.Reactive;
+using DataVo.Core.Runtime.Security;
 using DataVo.Core.StorageEngine;
 using DataVo.Core.StorageEngine.Config;
 using DataVo.Core.StorageEngine.Serialization;
@@ -139,6 +140,7 @@ public static class DataVoCompiledQuery
             throw new InvalidOperationException($"Plan kind '{plan.Kind}' cannot be prepared as SelectSingle.");
         }
 
+        context.Engine.AuthorizeDirectAccess(context.SessionId, DatabasePermission.ReadData);
         string databaseName = ResolveCurrentDatabase(context);
 
         plan = StoredTablePlan(context.Engine, plan, databaseName);
@@ -164,6 +166,7 @@ public static class DataVoCompiledQuery
             throw new InvalidOperationException($"Plan kind '{plan.Kind}' cannot be prepared as SelectMany.");
         }
 
+        context.Engine.AuthorizeDirectAccess(context.SessionId, DatabasePermission.ReadData);
         string databaseName = ResolveCurrentDatabase(context);
 
         plan = StoredTablePlan(context.Engine, plan, databaseName);
@@ -1273,6 +1276,7 @@ public static class DataVoCompiledQuery
         IReadOnlyList<DataVoCompiledQueryParameter> parameters,
         Func<Dictionary<string, object?>, TResult> mapper)
     {
+        context.Engine.AuthorizeDirectAccess(context.SessionId, DatabasePermission.ReadData);
         TransactionManager txManager = context.Engine.TransactionManager;
         TransactionContext? transactionContext = txManager.HasAnyActiveTransaction()
             ? txManager.GetContext(context.SessionId) ?? MvccExecutionScope.CurrentTransaction

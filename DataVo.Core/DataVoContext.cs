@@ -9,6 +9,7 @@ using DataVo.Core.Runtime;
 using DataVo.Core.Runtime.Diagnostics;
 using DataVo.Core.Runtime.Changes;
 using DataVo.Core.Runtime.Reactive;
+using DataVo.Core.Runtime.Security;
 using DataVo.Core.StorageEngine.Config;
 using DataVo.Core.Utils;
 using DataVo.Core.ValueConversion;
@@ -135,6 +136,7 @@ public sealed class DataVoContext : IDisposable
         }
 
         DataVo.Core.Compat.ThrowHelper.ThrowIfNull(entity);
+        Engine.AuthorizeDirectAccess(SessionId, DatabasePermission.WriteData);
         string databaseName = ResolveCurrentDatabase();
         tableName = StoredTableName(tableName);
         int schemaVersion = Engine.Catalog.GetTableSchemaVersion(tableName, databaseName);
@@ -440,6 +442,7 @@ public sealed class DataVoContext : IDisposable
             throw new ArgumentException("A table name is required.", nameof(tableName));
         }
 
+        Engine.AuthorizeDirectAccess(SessionId, DatabasePermission.ReadData);
         return new RowRefStream(Engine, SessionId, tableName);
     }
 
@@ -481,6 +484,7 @@ public sealed class DataVoContext : IDisposable
     /// </summary>
     public DataVoSnapshot CreateSnapshot()
     {
+        Engine.AuthorizeDirectAccess(SessionId, DatabasePermission.ReadData);
         return Engine.CreateSnapshot(SessionId);
     }
 
@@ -489,6 +493,9 @@ public sealed class DataVoContext : IDisposable
     /// </summary>
     public void RestoreSnapshot(DataVoSnapshot snapshot)
     {
+        // A restore replaces every table's schema and contents.
+        Engine.AuthorizeDirectAccess(SessionId, DatabasePermission.ManageSchema);
+        Engine.AuthorizeDirectAccess(SessionId, DatabasePermission.WriteData);
         Engine.RestoreSnapshot(SessionId, snapshot);
     }
 
@@ -500,6 +507,7 @@ public sealed class DataVoContext : IDisposable
         IEnumerable<IReadOnlyDictionary<string, object?>> rows)
     {
         DataVo.Core.Compat.ThrowHelper.ThrowIfNull(rows);
+        Engine.AuthorizeDirectAccess(SessionId, DatabasePermission.WriteData);
         tableName = StoredTableName(tableName);
 
         using SnapshotLockScope runtimeScope = Engine.EnterRuntimeReadScope();
@@ -591,6 +599,7 @@ public sealed class DataVoContext : IDisposable
     public RowKey InsertTyped(string tableName, ReactiveRowSchema columns, ReadOnlySpan<CellValue> row)
     {
         DataVo.Core.Compat.ThrowHelper.ThrowIfNull(columns);
+        Engine.AuthorizeDirectAccess(SessionId, DatabasePermission.WriteData);
         if (columns.ColumnCount != row.Length)
         {
             throw new ArgumentException(
@@ -692,6 +701,7 @@ public sealed class DataVoContext : IDisposable
     {
         DataVo.Core.Compat.ThrowHelper.ThrowIfNull(columns);
         DataVo.Core.Compat.ThrowHelper.ThrowIfNull(rows);
+        Engine.AuthorizeDirectAccess(SessionId, DatabasePermission.WriteData);
         if (rows.Count == 0)
         {
             return [];
@@ -847,6 +857,7 @@ public sealed class DataVoContext : IDisposable
     public DataVoBatchResult ApplyBatch(DataVoWriteBatch batch, Guid sessionId)
     {
         DataVo.Core.Compat.ThrowHelper.ThrowIfNull(batch);
+        Engine.AuthorizeDirectAccess(sessionId, DatabasePermission.WriteData);
 
         if (batch.Count == 0)
         {
@@ -991,6 +1002,7 @@ public sealed class DataVoContext : IDisposable
 
     private List<Dictionary<string, object?>> SearchNearestCore(string tableName, string indexName, ReadOnlySpan<float> queryVector, int topK)
     {
+        Engine.AuthorizeDirectAccess(SessionId, DatabasePermission.ReadData);
         tableName = StoredTableName(tableName);
         using SnapshotLockScope runtimeScope = Engine.EnterRuntimeReadScope();
         RuntimeQueryStatsBuilder? diagnosticsBuilder = null;

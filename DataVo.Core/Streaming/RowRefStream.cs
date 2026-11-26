@@ -2,6 +2,7 @@ using DataVo.Core.Models.Catalog;
 using DataVo.Core.Parser;
 using DataVo.Core.Runtime;
 using DataVo.Core.Runtime.Reactive;
+using DataVo.Core.Runtime.Security;
 using DataVo.Core.StorageEngine;
 using DataVo.Core.MVCC;
 
@@ -116,6 +117,7 @@ public readonly struct RowRefStream
     {
         result = default;
         DataVoEngine engine = _engine ?? throw Uninitialized();
+        engine.AuthorizeDirectAccess(_session, DatabasePermission.ReadData);
         string database = DatabaseOf(engine, _session);
         if (engine.TransactionManager.HasActiveTransaction(_session) || MvccExecutionScope.CurrentSnapshot is not null)
         {
@@ -385,6 +387,7 @@ public readonly struct RowRefStream
     public RowRefEnumerator GetEnumerator()
     {
         DataVoEngine engine = _engine ?? throw Uninitialized();
+        engine.AuthorizeDirectAccess(_session, DatabasePermission.ReadData);
         return new RowRefEnumerator(engine, _session, DatabaseOf(engine, _session), _table!);
     }
 

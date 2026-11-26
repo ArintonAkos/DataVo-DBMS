@@ -548,8 +548,13 @@ public sealed class ReactiveRegistry
         }
     }
 
+    /// <summary>
+    /// Resolves the session's database for a new subscription and enforces read access, since a
+    /// subscription seeds from and then streams table contents.
+    /// </summary>
     private static string ResolveDatabase(DataVoContext ctx)
     {
+        ctx.Engine.AuthorizeDirectAccess(ctx.SessionId, Security.DatabasePermission.ReadData);
         string? databaseName = ctx.Engine.Sessions.Get(ctx.SessionId);
         if (string.IsNullOrWhiteSpace(databaseName))
         {

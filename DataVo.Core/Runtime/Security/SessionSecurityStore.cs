@@ -62,13 +62,9 @@ internal sealed partial class SessionSecurityStore
     {
         EnsureInitialized(config);
 
-        AuthUser? user;
-        HashSet<DatabasePermission> effectivePermissions;
-        HashSet<string> effectiveRoles;
-
         lock (_sync)
         {
-            if (!_users.TryGetValue(username, out user))
+            if (!_users.TryGetValue(username, out AuthUser? user))
             {
                 return false;
             }
@@ -78,15 +74,9 @@ internal sealed partial class SessionSecurityStore
                 return false;
             }
 
-            effectivePermissions = ResolvePermissions(user);
-            effectiveRoles = [.. user.Roles];
+            Set(session, BuildPrincipal(user));
         }
 
-        Set(session, new SessionPrincipal(user.Username, InferPrimaryRole(effectivePermissions), isAuthenticated: true)
-        {
-            EffectivePermissions = effectivePermissions,
-            EffectiveRoles = effectiveRoles
-        });
         return true;
     }
 
@@ -116,7 +106,6 @@ internal sealed partial class SessionSecurityStore
             }
 
             _users[user.Username] = user;
-            UpsertConfigUser(config, user);
         }
     }
 
@@ -131,17 +120,14 @@ internal sealed partial class SessionSecurityStore
                 throw new AuthorizationException($"User '{username}' does not exist.");
             }
 
-            DataVoAuthUser? configUser = config.AuthorizationUsers
-                .FirstOrDefault(candidate => string.Equals(candidate.Username, username, StringComparison.OrdinalIgnoreCase));
-            if (configUser != null)
-            {
-                config.AuthorizationUsers.Remove(configUser);
-            }
+            RefreshSessionsLocked();
         }
     }
 
-    public void CreateRole(string roleName)
+    public void CreateRole(DataVoConfig config, string roleName)
     {
+        EnsureInitialized(config);
+
         lock (_sync)
         {
             if (_roles.ContainsKey(roleName))
@@ -153,8 +139,10 @@ internal sealed partial class SessionSecurityStore
         }
     }
 
-    public void DropRole(string roleName)
+    public void DropRole(DataVoConfig config, string roleName)
     {
+        EnsureInitialized(config);
+
         lock (_sync)
         {
             if (IsBuiltInRole(roleName))
@@ -171,11 +159,15 @@ internal sealed partial class SessionSecurityStore
             {
                 user.Roles.Remove(roleName);
             }
+
+            RefreshSessionsLocked();
         }
     }
 
-    public void GrantPermissionsToUser(string username, IEnumerable<DatabasePermission> permissions)
+    public void GrantPermissionsToUser(DataVoConfig config, string username, IEnumerable<DatabasePermission> permissions)
     {
+        EnsureInitialized(config);
+
         lock (_sync)
         {
             if (!_users.TryGetValue(username, out AuthUser? user))
@@ -187,11 +179,15 @@ internal sealed partial class SessionSecurityStore
             {
                 user.Permissions.Add(permission);
             }
+
+            RefreshSessionsLocked();
         }
     }
 
-    public void RevokePermissionsFromUser(string username, IEnumerable<DatabasePermission> permissions)
+    public void RevokePermissionsFromUser(DataVoConfig config, string username, IEnumerable<DatabasePermission> permissions)
     {
+        EnsureInitialized(config);
+
         lock (_sync)
         {
             if (!_users.TryGetValue(username, out AuthUser? user))
@@ -203,11 +199,15 @@ internal sealed partial class SessionSecurityStore
             {
                 user.Permissions.Remove(permission);
             }
+
+            RefreshSessionsLocked();
         }
     }
 
-    public void GrantRoleToUser(string roleName, string username)
+    public void GrantRoleToUser(DataVoConfig config, string roleName, string username)
     {
+        EnsureInitialized(config);
+
         lock (_sync)
         {
             EnsureRoleExists(roleName);
@@ -218,11 +218,15 @@ internal sealed partial class SessionSecurityStore
             }
 
             user.Roles.Add(roleName);
+
+            RefreshSessionsLocked();
         }
     }
 
-    public void RevokeRoleFromUser(string roleName, string username)
+    public void RevokeRoleFromUser(DataVoConfig config, string roleName, string username)
     {
+        EnsureInitialized(config);
+
         lock (_sync)
         {
             if (!_users.TryGetValue(username, out AuthUser? user))
@@ -231,11 +235,15 @@ internal sealed partial class SessionSecurityStore
             }
 
             user.Roles.Remove(roleName);
+
+            RefreshSessionsLocked();
         }
     }
 
-    public void GrantPermissionsToRole(string roleName, IEnumerable<DatabasePermission> permissions)
+    public void GrantPermissionsToRole(DataVoConfig config, string roleName, IEnumerable<DatabasePermission> permissions)
     {
+        EnsureInitialized(config);
+
         lock (_sync)
         {
             EnsureRoleExists(roleName);
@@ -245,11 +253,15 @@ internal sealed partial class SessionSecurityStore
             {
                 rolePermissions.Add(permission);
             }
+
+            RefreshSessionsLocked();
         }
     }
 
-    public void RevokePermissionsFromRole(string roleName, IEnumerable<DatabasePermission> permissions)
+    public void RevokePermissionsFromRole(DataVoConfig config, string roleName, IEnumerable<DatabasePermission> permissions)
     {
+        EnsureInitialized(config);
+
         lock (_sync)
         {
             EnsureRoleExists(roleName);
@@ -259,6 +271,8 @@ internal sealed partial class SessionSecurityStore
             {
                 rolePermissions.Remove(permission);
             }
+
+            RefreshSessionsLocked();
         }
     }
 
@@ -380,23 +394,14 @@ internal sealed partial class SessionSecurityStore
         };
     }
 
+    /// <summary>
+    /// Checks a permission against the principal's resolved grants only; the inferred primary role is
+    /// informational and never widens what the grants allow.
+    /// </summary>
     private static bool HasPermission(SessionPrincipal principal, DatabasePermission permission)
     {
-        if (principal.EffectivePermissions.Contains(DatabasePermission.Admin)
-            || principal.EffectivePermissions.Contains(permission))
-        {
-            return true;
-        }
-
-        return principal.Role switch
-        {
-            DatabaseRole.Admin => true,
-            DatabaseRole.ReadWrite => permission is DatabasePermission.ReadData
-                or DatabasePermission.WriteData
-                or DatabasePermission.ManageTransactions,
-            DatabaseRole.ReadOnly => permission is DatabasePermission.ReadData,
-            _ => false
-        };
+        return principal.EffectivePermissions.Contains(DatabasePermission.Admin)
+            || principal.EffectivePermissions.Contains(permission);
     }
 
     private void EnsureInitialized(DataVoConfig config)
@@ -501,11 +506,13 @@ internal sealed partial class SessionSecurityStore
         return resolved;
     }
 
+    /// <summary>
+    /// Infers the display role of a grant set: <see cref="DatabaseRole.Admin"/> only for the explicit
+    /// <see cref="DatabasePermission.Admin"/> grant, so schema or security rights alone never imply admin.
+    /// </summary>
     private static DatabaseRole InferPrimaryRole(HashSet<DatabasePermission> permissions)
     {
-        if (permissions.Contains(DatabasePermission.Admin)
-            || permissions.Contains(DatabasePermission.ManageSecurity)
-            || permissions.Contains(DatabasePermission.ManageSchema))
+        if (permissions.Contains(DatabasePermission.Admin))
         {
             return DatabaseRole.Admin;
         }
@@ -518,22 +525,39 @@ internal sealed partial class SessionSecurityStore
         return DatabaseRole.ReadOnly;
     }
 
-    private void UpsertConfigUser(DataVoConfig config, AuthUser user)
+    /// <summary>Builds an authenticated principal from the user's current grants. Caller holds <c>_sync</c>.</summary>
+    private SessionPrincipal BuildPrincipal(AuthUser user)
     {
-        DataVoAuthUser? existing = config.AuthorizationUsers
-            .FirstOrDefault(candidate => string.Equals(candidate.Username, user.Username, StringComparison.OrdinalIgnoreCase));
-
-        if (existing == null)
+        HashSet<DatabasePermission> permissions = ResolvePermissions(user);
+        return new SessionPrincipal(user.Username, InferPrimaryRole(permissions), isAuthenticated: true)
         {
-            existing = new DataVoAuthUser { Username = user.Username };
-            config.AuthorizationUsers.Add(existing);
-        }
+            EffectivePermissions = permissions,
+            EffectiveRoles = [.. user.Roles]
+        };
+    }
 
-        existing.Password = string.Empty;
-        existing.PasswordHash = user.PasswordHash;
-        existing.PasswordSalt = user.PasswordSalt;
-        existing.Role = InferPrimaryRole(ResolvePermissions(user));
-        existing.Roles = [.. user.Roles.OrderBy(value => value, StringComparer.OrdinalIgnoreCase)];
+    /// <summary>
+    /// Re-resolves every authenticated session after a security change so revoked rights stop applying
+    /// immediately, and logs out sessions whose user was dropped. Caller holds <c>_sync</c>.
+    /// </summary>
+    private void RefreshSessionsLocked()
+    {
+        foreach (KeyValuePair<Guid, SessionPrincipal> entry in _sessionPrincipals)
+        {
+            if (!entry.Value.IsAuthenticated)
+            {
+                continue;
+            }
+
+            if (_users.TryGetValue(entry.Value.Username, out AuthUser? user))
+            {
+                _sessionPrincipals[entry.Key] = BuildPrincipal(user);
+            }
+            else
+            {
+                _sessionPrincipals.TryRemove(entry.Key, out _);
+            }
+        }
     }
 
     private sealed class Scope(Action onDispose) : IDisposable

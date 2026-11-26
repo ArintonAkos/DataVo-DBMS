@@ -5,6 +5,7 @@ using DataVo.Core.Models.Catalog;
 using DataVo.Core.MVCC;
 using DataVo.Core.Runtime;
 using DataVo.Core.Runtime.Reactive;
+using DataVo.Core.Runtime.Security;
 using DataVo.Core.StorageEngine;
 using DataVo.Core.StorageEngine.Serialization;
 using DataVo.Core.Transactions;
@@ -77,6 +78,7 @@ public sealed class DataVoPreparedSelectSingle<T>
 
     private T? ExecuteIntegerKey(long value)
     {
+        _context.Engine.AuthorizeDirectAccess(_context.SessionId, DatabasePermission.ReadData);
         if (HasActiveTransactionOrSnapshot(out TransactionContext? transactionContext))
         {
             return ExecuteTransactionalKey(DataVoCompiledQuery.BuildScalarComparisonKey(value), transactionContext);
@@ -124,6 +126,7 @@ public sealed class DataVoPreparedSelectSingle<T>
 
     private T? ExecuteGuidKey(Guid value)
     {
+        _context.Engine.AuthorizeDirectAccess(_context.SessionId, DatabasePermission.ReadData);
         if (HasActiveTransactionOrSnapshot(out TransactionContext? transactionContext))
         {
             return ExecuteTransactionalKey(DataVoCompiledQuery.BuildScalarComparisonKey(value), transactionContext);
@@ -161,6 +164,7 @@ public sealed class DataVoPreparedSelectSingle<T>
 
     private T? ExecuteKey(string expectedKey)
     {
+        _context.Engine.AuthorizeDirectAccess(_context.SessionId, DatabasePermission.ReadData);
         if (HasActiveTransactionOrSnapshot(out TransactionContext? transactionContext))
         {
             return ExecuteTransactionalKey(expectedKey, transactionContext);
