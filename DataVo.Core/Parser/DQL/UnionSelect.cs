@@ -17,9 +17,7 @@ internal class UnionSelect(UnionSelectStatement ast) : BaseDbAction
             QueryResult leftResult = ExecuteSelect(ast.Left, session);
             if (leftResult.IsError)
             {
-                Messages = leftResult.Messages;
-                Data = leftResult.Data;
-                Fields = leftResult.Fields;
+                AddError(leftResult);
                 return;
             }
 
@@ -31,9 +29,9 @@ internal class UnionSelect(UnionSelectStatement ast) : BaseDbAction
                 QueryResult branchResult = ExecuteSelect(branch.Select, session);
                 if (branchResult.IsError)
                 {
-                    Messages = branchResult.Messages;
-                    Data = branchResult.Data;
-                    Fields = branchResult.Fields;
+                    Data.Clear();
+                    Fields.Clear();
+                    AddError(branchResult);
                     return;
                 }
 

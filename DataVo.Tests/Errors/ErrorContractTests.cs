@@ -45,6 +45,8 @@ public sealed class ErrorContractTests
         { "SELECT * FROM T WHERE Id = 'abc'", DataVoErrorCodes.TypeMismatch },
         { "COMMIT", DataVoErrorCodes.NoActiveTransaction },
         { "ROLLBACK", DataVoErrorCodes.NoActiveTransaction },
+        { "SELECT Id FROM NoSuchTable UNION SELECT Id FROM T", DataVoErrorCodes.UnknownTable },
+        { "SELECT Id FROM T UNION ALL SELECT NoCol FROM T", DataVoErrorCodes.UnknownColumn },
     };
 
     [Theory]

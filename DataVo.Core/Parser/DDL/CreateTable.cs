@@ -73,7 +73,7 @@ internal class CreateTable(CreateTableStatement ast) : BaseDbAction
         catch (Exception e)
         {
             Logger.Error(e.Message);
-            Messages.Add($"Error: {e.Message}");
+            AddError(e);
         }
     }
 

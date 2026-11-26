@@ -8,7 +8,7 @@ namespace DataVo.Core.Contracts.Results;
 internal readonly record struct DataVoError(string Code, string Message, int? Line, int? Column);
 
 /// <summary>
-/// Turns exceptions and legacy error messages into the public error contract: a stable code from
+/// Turns exceptions and error messages into the public error contract: a stable code from
 /// <see cref="DataVoErrorCodes"/>, a single human sentence (no exception type names, no stack trace),
 /// and the line/column of syntax errors. An explicit code on a <see cref="DataVoException"/> wins;
 /// otherwise anchored message patterns refine the exception type's default code. The error-contract
@@ -44,7 +44,7 @@ internal static class DataVoErrorClassifier
     private static readonly Regex Position = new(@"at line (\d+), column (\d+)", RegexOptions.CultureInvariant);
 
     private static readonly Regex Prefix = new(
-        @"^(?:Error:\s*|(?:Parser|Lexer|Binding|Evaluation|Catalog) Error:\s*)+",
+        @"^(?:(?:Parser|Lexer|Binding|Evaluation|Catalog) Error:\s*)+",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
     public static DataVoError Classify(Exception exception)
@@ -98,14 +98,14 @@ internal static class DataVoErrorClassifier
         return new DataVoError(code, message, null, null);
     }
 
-    /// <summary>Classifies an error that an action reported as text rather than as an exception.</summary>
+    /// <summary>Classifies an error that is available only as text, such as a rejected-row message.</summary>
     public static DataVoError ClassifyMessage(string rawMessage)
     {
         string message = Clean(rawMessage);
         return new DataVoError(MatchMessage(message) ?? DataVoErrorCodes.General, message, null, null);
     }
 
-    /// <summary>Removes exception type names, "Error:" prefixes, and stack-trace lines.</summary>
+    /// <summary>Removes exception type names, subsystem error prefixes, and stack-trace lines.</summary>
     public static string Clean(string message)
     {
         string firstLine = message.Split('\n')[0].Trim();

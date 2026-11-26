@@ -57,20 +57,32 @@ internal abstract class BaseDbAction : IDbAction
         Sessions.Set(session, databaseName);
     }
 
-    protected void AddError(string message)
-    {
-        HasErrors = true;
-        Messages.Add(message);
-    }
-
+    /// <summary>Records a failure from an exception; the first recorded failure decides the error code.</summary>
+    /// <param name="ex">The exception that failed the statement.</param>
     protected void AddError(Exception ex)
     {
+        DataVoError error = DataVoErrorClassifier.Classify(ex);
         HasErrors = true;
-        _firstError ??= ex;
-        Messages.Add(DataVoErrorClassifier.Classify(ex).Message);
+        _firstError ??= error;
+        Messages.Add(error.Message);
     }
 
-    private Exception? _firstError;
+    /// <summary>
+    /// Records the failure of a nested statement, keeping its messages, error code, and source position.
+    /// </summary>
+    /// <param name="failed">The failed result of the nested statement.</param>
+    protected void AddError(QueryResult failed)
+    {
+        HasErrors = true;
+        _firstError ??= new DataVoError(
+            failed.ErrorCode ?? DataVoErrorCodes.General,
+            failed.Messages.FirstOrDefault() ?? "The statement failed.",
+            failed.ErrorLine,
+            failed.ErrorColumn);
+        Messages.AddRange(failed.Messages);
+    }
+
+    private DataVoError? _firstError;
 
     protected virtual DatabasePermission RequiredPermission => InferRequiredPermission();
 
@@ -124,7 +136,7 @@ internal abstract class BaseDbAction : IDbAction
             Engine.SessionSecurity.Authorize(session, RequiredPermission, Engine.Config);
 
             PerformAction(session);
-            if (HasErrors || Messages.Any(m => m.StartsWith("Error:", StringComparison.OrdinalIgnoreCase)))
+            if (HasErrors)
             {
                 return BuildErrorResult();
             }
@@ -143,28 +155,14 @@ internal abstract class BaseDbAction : IDbAction
     /// </summary>
     public abstract void PerformAction(Guid session);
 
-    // Errors reported as text ("Error: ...") are cleaned in place; the first error decides the code.
+    // The first recorded error decides the code and position; every error message is kept in order.
     private QueryResult BuildErrorResult()
     {
-        DataVoError? first = _firstError is not null ? DataVoErrorClassifier.Classify(_firstError) : null;
-        var messages = new List<string>(Messages.Count);
-        foreach (string message in Messages)
-        {
-            if (message.StartsWith("Error:", StringComparison.OrdinalIgnoreCase))
-            {
-                DataVoError error = DataVoErrorClassifier.ClassifyMessage(message);
-                first ??= error;
-                messages.Add(error.Message);
-                continue;
-            }
-
-            messages.Add(message);
-        }
-
-        DataVoError resolved = first ?? new DataVoError(DataVoErrorCodes.General, messages.FirstOrDefault() ?? "The statement failed.", null, null);
+        DataVoError resolved = _firstError
+            ?? new DataVoError(DataVoErrorCodes.General, Messages.FirstOrDefault() ?? "The statement failed.", null, null);
         return new QueryResult
         {
-            Messages = messages,
+            Messages = Messages,
             IsError = true,
             Data = Data,
             Fields = Fields,
