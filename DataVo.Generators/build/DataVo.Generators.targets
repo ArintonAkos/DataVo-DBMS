@@ -3,4 +3,10 @@
   <PropertyGroup>
     <InterceptorsNamespaces>$(InterceptorsNamespaces);DataVo.Generated</InterceptorsNamespaces>
   </PropertyGroup>
+
+  <!-- DataVoUsePathLocations=true makes the generator emit the path/line/column [InterceptsLocation] form even on
+       compilers that offer the encoded form. -->
+  <ItemGroup>
+    <CompilerVisibleProperty Include="DataVoUsePathLocations" />
+  </ItemGroup>
 </Project>

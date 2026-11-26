@@ -1,6 +1,7 @@
 using DataVo.Core;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.CodeAnalysis.Diagnostics;
 
 namespace DataVo.Generators.Tests;
 
@@ -49,6 +50,14 @@ internal static class LinqGeneratorHarness
                 public double Weight { get; init; }
             }
 
+            [DataVoTable("docs")]
+            public sealed class Doc
+            {
+                [PrimaryKey] public int Id { get; set; }
+                [VectorDimensions(3)] public float[]? Embedding { get; set; }
+                [VectorDimensions(2)] public ReadOnlyMemory<float> Summary { get; set; }
+            }
+
             public sealed record PlayerCard(int Id, string Name);
 
             public sealed class PlayerRow
@@ -95,12 +104,19 @@ internal static class LinqGeneratorHarness
         return (string.Concat(result.GeneratedSources.Select(static source => source.SourceText.ToString())), [.. result.Diagnostics]);
     }
 
-    public static Compilation Compile(string call, LanguageVersion version, out GeneratorRunResult linq, bool interceptors = true, string feature = "InterceptorsNamespaces")
+    public static Compilation Compile(
+        string call,
+        LanguageVersion version,
+        out GeneratorRunResult linq,
+        bool interceptors = true,
+        string feature = "InterceptorsNamespaces",
+        bool usePathLocations = false)
     {
         CSharpParseOptions parse = ParseOptions(version, interceptors ? feature : null);
         GeneratorDriver driver = CSharpGeneratorDriver.Create(
             [new DataVoTableGenerator().AsSourceGenerator(), new DataVoLinqInterceptorGenerator().AsSourceGenerator()],
-            parseOptions: parse);
+            parseOptions: parse,
+            optionsProvider: usePathLocations ? PathLocationsOptions.Instance : null);
         driver = driver.RunGeneratorsAndUpdateCompilation(CreateCompilation(Model.Replace("BODY", call), parse), out Compilation output, out _);
         linq = driver.GetRunResult().Results[1];
         return output;
@@ -127,5 +143,24 @@ internal static class LinqGeneratorHarness
             [CSharpSyntaxTree.ParseText(source, parse, path: "Query.cs")],
             references,
             new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary, nullableContextOptions: NullableContextOptions.Enable));
+    }
+
+    /// <summary>Global analyzer options with <c>build_property.DataVoUsePathLocations = true</c>.</summary>
+    private sealed class PathLocationsOptions : AnalyzerConfigOptionsProvider
+    {
+        public static readonly PathLocationsOptions Instance = new();
+
+        public override AnalyzerConfigOptions GlobalOptions { get; } = new Values(new() { ["build_property.DataVoUsePathLocations"] = "true" });
+
+        public override AnalyzerConfigOptions GetOptions(SyntaxTree tree) => Values.Empty;
+
+        public override AnalyzerConfigOptions GetOptions(AdditionalText textFile) => Values.Empty;
+
+        private sealed class Values(Dictionary<string, string> values) : AnalyzerConfigOptions
+        {
+            public static readonly Values Empty = new([]);
+
+            public override bool TryGetValue(string key, out string value) => values.TryGetValue(key, out value!);
+        }
     }
 }

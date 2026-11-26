@@ -25,9 +25,6 @@ internal static class DataVoLinqAnalyzer
         "GetInterceptableLocation",
         [typeof(SemanticModel), typeof(InvocationExpressionSyntax), typeof(CancellationToken)]);
 
-    /// <summary>Forces the path form of <c>[InterceptsLocation]</c>, as an older compiler would get. For tests.</summary>
-    internal static bool UsePathLocations { get; set; }
-
     public static bool IsCandidate(SyntaxNode node) =>
         node is InvocationExpressionSyntax
         {
@@ -89,7 +86,7 @@ internal static class DataVoLinqAnalyzer
 
         Location at = lambda.GetLocation();
         FileLinePositionSpan lines = at.GetLineSpan();
-        LinqInspection Result(LinqSite? site, DiagnosticInfo? diagnostic) => new(site, diagnostic, lambda.SyntaxTree, at.SourceSpan);
+        LinqInspection Result(LinqSite? site, DiagnosticInfo? diagnostic) => new(site, diagnostic, lambda.SyntaxTree.FilePath, at.SourceSpan);
         LinqInspection Scan(DiagnosticDescriptor descriptor, string argumentText) => Result(null, new DiagnosticInfo(
             descriptor.Id, lines.Path ?? string.Empty, at.SourceSpan, lines.Span, new EquatableArray<string>([argumentText])));
 
@@ -171,7 +168,7 @@ internal static class DataVoLinqAnalyzer
         return new LinqInspection(
             null,
             null,
-            lambda.SyntaxTree,
+            lambda.SyntaxTree.FilePath,
             lambda.GetLocation().SourceSpan,
             new LinqSumSite(
                 location,
@@ -228,7 +225,7 @@ internal static class DataVoLinqAnalyzer
         return new LinqInspection(
             null,
             null,
-            selected.Lambda.SyntaxTree,
+            selected.Lambda.SyntaxTree.FilePath,
             selected.Lambda.GetLocation().SourceSpan,
             Extreme: new LinqExtremeSite(
                 location,
@@ -294,7 +291,7 @@ internal static class DataVoLinqAnalyzer
         int line = span.StartLinePosition.Line + 1;
         int column = span.StartLinePosition.Character + 1;
 
-        if (!UsePathLocations && GetInterceptableLocation is not null)
+        if (GetInterceptableLocation is not null)
         {
             object? encoded;
             try

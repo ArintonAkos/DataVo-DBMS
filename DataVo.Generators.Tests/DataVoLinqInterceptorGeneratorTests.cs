@@ -7,7 +7,6 @@ using static DataVo.Generators.Tests.LinqGeneratorHarness;
 namespace DataVo.Generators.Tests;
 
 /// <summary>What the interceptor generator translates, what it leaves to scan, and what it tells the developer.</summary>
-[Collection(LinqGeneratorCollection.Name)]
 public class DataVoLinqInterceptorGeneratorTests
 {
     [Theory]
@@ -365,22 +364,15 @@ public class DataVoLinqInterceptorGeneratorTests
     [Fact]
     public void OlderCompiler_GetsThePathLineAndColumnForm()
     {
-        DataVoLinqAnalyzer.UsePathLocations = true;
-        try
-        {
-            const string Call = "players.FirstOrDefault(p => p.Id == 1)";
-            string generated = Generate(Call).Generated;
+        const string Call = "players.FirstOrDefault(p => p.Id == 1)";
+        Compile(Call, LanguageVersion.Latest, out GeneratorRunResult result, usePathLocations: true);
+        string generated = result.GeneratedSources[0].SourceText.ToString();
 
-            // The compiler wants the 1-based line and column of the method name, not of the whole call.
-            string[] lines = Model.Replace("BODY", Call).Split('\n');
-            int line = Array.FindIndex(lines, static text => text.Contains("FirstOrDefault"));
-            int column = lines[line].IndexOf("FirstOrDefault", StringComparison.Ordinal);
-            Assert.Contains($"InterceptsLocation(\"Query.cs\", {line + 1}, {column + 1})]", generated);
-        }
-        finally
-        {
-            DataVoLinqAnalyzer.UsePathLocations = false;
-        }
+        // The compiler wants the 1-based line and column of the method name, not of the whole call.
+        string[] lines = Model.Replace("BODY", Call).Split('\n');
+        int line = Array.FindIndex(lines, static text => text.Contains("FirstOrDefault"));
+        int column = lines[line].IndexOf("FirstOrDefault", StringComparison.Ordinal);
+        Assert.Contains($"InterceptsLocation(\"Query.cs\", {line + 1}, {column + 1})]", generated);
     }
 
     [Fact]

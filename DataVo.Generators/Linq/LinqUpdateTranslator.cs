@@ -157,6 +157,12 @@ internal sealed class LinqUpdateTranslator(SemanticModel semantics, TableModel m
             return Bind(name => $"{Support}.Vector3Parameter({name}, ({cast})({text}))");
         }
 
+        if (column.Type.IsVector)
+        {
+            // float[] and ReadOnlyMemory<float> bind as VECTOR(n) values, as the table's own Update does.
+            return Bind(name => $"{Support}.VectorParameter({name}, ({cast})({text}))");
+        }
+
         if (column.Type.UsesObjectParameter)
         {
             return Bind(name => $"{Parameter}.FromObject({name}, ({cast})({text}))");

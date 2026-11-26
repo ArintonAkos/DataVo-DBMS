@@ -23,7 +23,11 @@ internal sealed record LinqKernel(string Expression, string BytesExpression, str
 /// <summary>Where a call is, in both forms the compiler accepts for <c>[InterceptsLocation]</c>.</summary>
 /// <param name="Version">The encoding version, or 0 when only the path form is available.</param>
 /// <param name="Data">The encoded location for <paramref name="Version"/>.</param>
-internal sealed record LinqLocation(int Version, string Data, string Path, int Line, int Column);
+internal sealed record LinqLocation(int Version, string Data, string Path, int Line, int Column)
+{
+    /// <summary>This location in the path, line and column form an older compiler needs.</summary>
+    public LinqLocation AsPathForm() => Version == 0 ? this : this with { Version = 0, Data = string.Empty };
+}
 
 /// <summary>A table query the generator translated, ready to emit as an interceptor.</summary>
 internal sealed record LinqSite(
@@ -101,8 +105,10 @@ internal sealed record LinqProjectionSite(LinqCall Call, string? ResultType, Equ
 internal sealed record LinqUpdateSite(LinqCall Call, string? StateType, string Assignments, EquatableArray<string> Values);
 
 /// <summary>The outcome of inspecting one call: a translated site, or a diagnostic explaining why it runs as a scan.</summary>
-/// <param name="Tree">The file the call is in. Kept so a diagnostic lands in source, where <c>#pragma warning</c> can reach it.</param>
-/// <param name="Span">The lambda's position in <paramref name="Tree"/>.</param>
+/// <param name="FilePath">The path of the file the call is in. The generator maps it back to the file's syntax tree when it
+/// reports a diagnostic (so <c>#pragma warning</c> can reach it); the model itself holds no syntax tree, so cached
+/// models never keep old trees alive.</param>
+/// <param name="Span">The lambda's position in the file.</param>
 /// <param name="Sum">A translated <c>Sum</c> call, when the call is one.</param>
 /// <param name="Extreme">A translated <c>Min</c> or <c>Max</c> call, when the call is one.</param>
 /// <param name="Order">A translated sort key, when the call is one.</param>
@@ -112,7 +118,7 @@ internal sealed record LinqUpdateSite(LinqCall Call, string? StateType, string A
 internal sealed record LinqInspection(
     LinqSite? Site,
     DiagnosticInfo? Diagnostic,
-    SyntaxTree Tree,
+    string FilePath,
     TextSpan Span,
     LinqSumSite? Sum = null,
     LinqExtremeSite? Extreme = null,
@@ -129,7 +135,9 @@ internal sealed record LinqShapes(IReadOnlyList<LinqOrderSite> Orders, IReadOnly
 }
 
 /// <summary>Whether the compilation can take interceptors, and which syntax the output may use.</summary>
-internal sealed record LinqOptions(LinqMode Mode, bool FileLocalTypes);
+/// <param name="UsePathLocations">Emit the path, line and column form of <c>[InterceptsLocation]</c> even when the compiler
+/// offers the encoded form (the <c>DataVoUsePathLocations</c> MSBuild property).</param>
+internal sealed record LinqOptions(LinqMode Mode, bool FileLocalTypes, bool UsePathLocations = false);
 
 internal enum LinqMode
 {

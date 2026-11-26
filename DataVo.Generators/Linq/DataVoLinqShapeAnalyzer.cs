@@ -87,6 +87,11 @@ internal static class DataVoLinqShapeAnalyzer
             return context.Report(DataVoGeneratorDiagnostics.LinqStepInMemory, lambda, step, $"column {key.Column.PropertyName} is a 3D position, which has no order");
         }
 
+        if (key.Column.Type.IsVector)
+        {
+            return context.Report(DataVoGeneratorDiagnostics.LinqStepInMemory, lambda, step, $"column {key.Column.PropertyName} is a vector, which has no order; rank by distance with SearchNearest instead");
+        }
+
         ITypeSymbol keyType = context.Method.TypeArguments[0];
         if (!SymbolEqualityComparer.Default.Equals(keyType, key.Property.Type))
         {
@@ -248,7 +253,7 @@ internal static class DataVoLinqShapeAnalyzer
                 : null;
 
         public LinqInspection Result(SyntaxNode at, LinqOrderSite? order = null, LinqProjectionSite? projection = null, LinqUpdateSite? update = null) =>
-            new(null, null, at.SyntaxTree, at.Span, Order: order, Projection: projection, Update: update, RequiresInterception: update is not null);
+            new(null, null, at.SyntaxTree.FilePath, at.Span, Order: order, Projection: projection, Update: update, RequiresInterception: update is not null);
 
         public LinqInspection Report(DiagnosticDescriptor descriptor, SyntaxNode at, params string[] arguments)
         {
@@ -256,7 +261,7 @@ internal static class DataVoLinqShapeAnalyzer
             return new LinqInspection(
                 null,
                 new DiagnosticInfo(descriptor.Id, lines.Path ?? string.Empty, at.Span, lines.Span, new EquatableArray<string>([.. arguments])),
-                at.SyntaxTree,
+                at.SyntaxTree.FilePath,
                 at.Span,
                 RequiresInterception: descriptor.Id == DataVoGeneratorDiagnostics.LinqUpdateNotCompiled.Id);
         }

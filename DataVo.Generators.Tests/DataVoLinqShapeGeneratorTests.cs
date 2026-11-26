@@ -8,7 +8,6 @@ namespace DataVo.Generators.Tests;
 /// What the interceptor generator does with sort keys, <c>Select</c> projections and <c>ExecuteUpdate</c> setters:
 /// what it compiles, what it leaves to run in memory, and what it refuses.
 /// </summary>
-[Collection(LinqGeneratorCollection.Name)]
 public class DataVoLinqShapeGeneratorTests
 {
     private const string Core = "global::DataVo.Core.";
@@ -142,6 +141,32 @@ public class DataVoLinqShapeGeneratorTests
         Assert.DoesNotContain("SelectColumns", generated);
     }
 
+    [Theory]
+    [InlineData("db.Table<Doc>().OrderBy(d => d.Embedding).ToList()")]
+    [InlineData("db.Table<Doc>().OrderByDescending(d => d.Summary).ToList()")]
+    public void VectorSortKey_IsRejected_AndRunsInMemory(string call)
+    {
+        (string generated, Diagnostic[] diagnostics) = Generate(call);
+
+        Diagnostic diagnostic = Assert.Single(diagnostics);
+        Assert.Equal("DATAVOL004", diagnostic.Id);
+        Assert.Contains("is a vector, which has no order", diagnostic.GetMessage());
+        Assert.DoesNotContain("ORDER BY", generated);
+    }
+
+    [Theory]
+    [InlineData("db.Table<Doc>().ExecuteUpdate(new float[] { 1, 2, 3 }, static (s, v) => s.Set(d => d.Embedding, v))", "VectorParameter(\"u0\", (float[])(state))")]
+    [InlineData("db.Table<Doc>().ExecuteUpdate(new float[] { 1, 2 }, static (s, v) => s.Set(d => d.Summary, v))", "VectorParameter(\"u0\", (global::System.ReadOnlyMemory<float>)(state))")]
+    public void VectorUpdateSetter_BindsAVectorParameter(string call, string binding)
+    {
+        Compilation output = Compile(call, LanguageVersion.Latest, out GeneratorRunResult result);
+        string generated = string.Concat(result.GeneratedSources.Select(static source => source.SourceText.ToString()));
+
+        Assert.Empty(result.Diagnostics);
+        Assert.Contains(binding, generated);
+        Assert.Empty(output.GetDiagnostics().Where(static diagnostic => diagnostic.Severity == DiagnosticSeverity.Error));
+    }
+
     [Fact]
     public void ProjectionBuiltElsewhere_IsLeftAloneSilently()
     {
@@ -212,18 +237,10 @@ public class DataVoLinqShapeGeneratorTests
     [Fact]
     public void EveryShape_CompilesWithThePathLocationForm()
     {
-        Linq.DataVoLinqAnalyzer.UsePathLocations = true;
-        try
-        {
-            Compilation output = Compile(EveryShape, LanguageVersion.CSharp12, out GeneratorRunResult result);
+        Compilation output = Compile(EveryShape, LanguageVersion.CSharp12, out GeneratorRunResult result, usePathLocations: true);
 
-            Assert.Contains("InterceptsLocation(\"Query.cs\", ", result.GeneratedSources[0].SourceText.ToString());
-            Assert.Empty(output.GetDiagnostics().Where(static diagnostic => diagnostic.Severity == DiagnosticSeverity.Error));
-        }
-        finally
-        {
-            Linq.DataVoLinqAnalyzer.UsePathLocations = false;
-        }
+        Assert.Contains("InterceptsLocation(\"Query.cs\", ", result.GeneratedSources[0].SourceText.ToString());
+        Assert.Empty(output.GetDiagnostics().Where(static diagnostic => diagnostic.Severity == DiagnosticSeverity.Error));
     }
 
     [Theory]
