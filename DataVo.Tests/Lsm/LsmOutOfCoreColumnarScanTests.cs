@@ -239,7 +239,7 @@ public sealed partial class LsmOutOfCoreColumnarScanTests : IDisposable
 
     [Theory]
     [MemberData(nameof(Modes))]
-    public void ScansThatRaceCommitsAndFlushes_SeeWholeCommitsOnly(LsmReadMode mode)
+    public async Task ScansThatRaceCommitsAndFlushes_SeeWholeCommitsOnly(LsmReadMode mode)
     {
         const int Accounts = 3_000;
         const long Total = Accounts * 1_000L;
@@ -251,28 +251,44 @@ public sealed partial class LsmOutOfCoreColumnarScanTests : IDisposable
         const int TargetAnswered = 150;
         const int MaxAttempts = 4_000;
         long commits = 0;
+        using var writerStarted = new ManualResetEventSlim(false);
         using var stop = new CancellationTokenSource();
-        Task writer = Task.Run(() =>
+
+        // Run the writer on a dedicated thread and wait for its first commit before scanning, so ThreadPool
+        // saturation during parallel test runs cannot let all scans finish before the writer even starts.
+        Task writer = Task.Factory.StartNew(() =>
         {
-            // Each commit moves gold between two rows, so the table's total never changes.
-            var random = new Random(77);
-            while (!stop.IsCancellationRequested)
+            try
             {
-                int from = random.Next(Accounts);
-                int to = (from + 1 + random.Next(Accounts - 1)) % Accounts;
-                long amount = random.Next(1, 50);
-                using IWriteBatchScope batch = engine.BeginWriteBatch();
-                engine.OverwriteRowForTesting(Db, Table, ids[from], Row(from, balance[from] -= amount));
-                engine.OverwriteRowForTesting(Db, Table, ids[to], Row(to, balance[to] += amount));
-                batch.Complete();
-                Interlocked.Increment(ref commits);
+                // Each commit moves gold between two rows, so the table's total never changes.
+                var random = new Random(77);
+                while (!stop.IsCancellationRequested)
+                {
+                    int from = random.Next(Accounts);
+                    int to = (from + 1 + random.Next(Accounts - 1)) % Accounts;
+                    long amount = random.Next(1, 50);
+                    using IWriteBatchScope batch = engine.BeginWriteBatch();
+                    engine.OverwriteRowForTesting(Db, Table, ids[from], Row(from, balance[from] -= amount));
+                    engine.OverwriteRowForTesting(Db, Table, ids[to], Row(to, balance[to] += amount));
+                    batch.Complete();
+                    if (Interlocked.Increment(ref commits) == 1)
+                    {
+                        writerStarted.Set();
+                    }
+                }
             }
-        });
+            finally
+            {
+                writerStarted.Set();
+            }
+        }, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
 
         int answered = 0;
         int attempts = 0;
         try
         {
+            Assert.True(writerStarted.Wait(TimeSpan.FromSeconds(10)), "Writer thread did not start committing in time.");
+
             // Run until enough consistent columnar scans succeed under live writes and flushes, without depending
             // on a fixed single-call success ratio under CI vCPU contention.
             while (answered < TargetAnswered && attempts < MaxAttempts)
@@ -294,7 +310,7 @@ public sealed partial class LsmOutOfCoreColumnarScanTests : IDisposable
         finally
         {
             stop.Cancel();
-            writer.Wait();
+            await writer;
         }
 
         Assert.True(Volatile.Read(ref commits) > 0, "Expected concurrent commits while scanning.");
