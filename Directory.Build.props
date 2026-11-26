@@ -14,6 +14,14 @@
     <DataVoTestTargets Condition="'$(DataVoTestTargets)' == ''">net10.0</DataVoTestTargets>
   </PropertyGroup>
 
+  <!-- Native AOT durable fence: the single list of IL trim/AOT/single-file diagnostics that the AOT-locked
+       libraries (DataVo.Core, DataVo.Data, DataVo.VectorData) promote to errors. Each project appends
+       $(DataVoAotWarningsAsErrors) to WarningsAsErrors for its AOT-capable targets, so the lists cannot drift.
+       Verified by scripts/check-aot-baseline.sh. -->
+  <PropertyGroup>
+    <DataVoAotWarningsAsErrors>IL2026;IL2046;IL2055;IL2057;IL2060;IL2067;IL2070;IL2072;IL2075;IL2077;IL2080;IL2087;IL2090;IL2091;IL2092;IL2093;IL2095;IL3050;IL3051;IL3052;IL3053;IL3054;IL3055;IL3056</DataVoAotWarningsAsErrors>
+  </PropertyGroup>
+
   <PropertyGroup Condition="'$(MSBuildProjectName)' == 'DataVo.Core' Or '$(MSBuildProjectName)' == 'DataVo.Data'">
     <IsPackable>true</IsPackable>
     <Version>0.5.1</Version>

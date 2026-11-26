@@ -6,9 +6,9 @@
     <Nullable>enable</Nullable>
     <LangVersion>latest</LangVersion>
     <RootNamespace>DataVo.VectorData</RootNamespace>
-    <!-- Native AOT / trimming: the analyzers are on and every IL trim/AOT diagnostic is an error, as in DataVo.Core. -->
+    <!-- Native AOT / trimming: the analyzers are on and every IL trim/AOT diagnostic in $(DataVoAotWarningsAsErrors) (Directory.Build.props) is an error. -->
     <IsAotCompatible>true</IsAotCompatible>
-    <WarningsAsErrors>$(WarningsAsErrors);IL2026;IL2046;IL2055;IL2057;IL2060;IL2067;IL2070;IL2072;IL2075;IL2077;IL2080;IL2087;IL2090;IL2091;IL2092;IL2093;IL2095;IL3050;IL3051;IL3052;IL3053;IL3054;IL3055;IL3056</WarningsAsErrors>
+    <WarningsAsErrors>$(WarningsAsErrors);$(DataVoAotWarningsAsErrors)</WarningsAsErrors>
   </PropertyGroup>
 
   <ItemGroup>
