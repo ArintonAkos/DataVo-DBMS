@@ -22,13 +22,13 @@
     <DataVoAotWarningsAsErrors>IL2026;IL2046;IL2055;IL2057;IL2060;IL2067;IL2070;IL2072;IL2075;IL2077;IL2080;IL2087;IL2090;IL2091;IL2092;IL2093;IL2095;IL2111;IL3050;IL3051;IL3052;IL3053;IL3054;IL3055;IL3056</DataVoAotWarningsAsErrors>
   </PropertyGroup>
 
-  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'DataVo.Core' Or '$(MSBuildProjectName)' == 'DataVo.Data'">
+  <!-- NuGet metadata shared by every published package; each package's own group below adds its id, title,
+       description, tags and release notes. Libraries also ship symbols and XML docs. -->
+  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'DataVo.Core' Or '$(MSBuildProjectName)' == 'DataVo.Data' Or '$(MSBuildProjectName)' == 'DataVo.EntityFrameworkCore' Or '$(MSBuildProjectName)' == 'DataVo.VectorData' Or '$(MSBuildProjectName)' == 'DataVo.Generators'">
     <IsPackable>true</IsPackable>
     <Version>0.5.1</Version>
     <Authors>Arinton Akos</Authors>
     <Company>DataVo</Company>
-    <Description>DataVo is a C#-native database engine focused on predictable SQL execution, in-memory and LSM (log-structured, on-disk) storage, and embeddable .NET workflows.</Description>
-    <PackageTags>database;sql;dbms;dotnet;csharp;storage;embedded</PackageTags>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageProjectUrl>https://github.com/ArintonAkos/DataVo-DBMS</PackageProjectUrl>
     <RepositoryUrl>https://github.com/ArintonAkos/DataVo-DBMS.git</RepositoryUrl>
@@ -37,9 +37,18 @@
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
     <PackageOutputPath>$(MSBuildThisFileDirectory)artifacts/packages</PackageOutputPath>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'DataVo.Core' Or '$(MSBuildProjectName)' == 'DataVo.Data' Or '$(MSBuildProjectName)' == 'DataVo.EntityFrameworkCore' Or '$(MSBuildProjectName)' == 'DataVo.VectorData'">
     <IncludeSymbols>true</IncludeSymbols>
     <SymbolPackageFormat>snupkg</SymbolPackageFormat>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'DataVo.Core' Or '$(MSBuildProjectName)' == 'DataVo.Data'">
+    <IsPackable>true</IsPackable>
+    <Description>DataVo is a C#-native database engine focused on predictable SQL execution, in-memory and LSM (log-structured, on-disk) storage, and embeddable .NET workflows.</Description>
+    <PackageTags>database;sql;dbms;dotnet;csharp;storage;embedded</PackageTags>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(MSBuildProjectName)' == 'DataVo.Core'">
@@ -56,49 +65,27 @@
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(MSBuildProjectName)' == 'DataVo.EntityFrameworkCore'">
-    <IsPackable>true</IsPackable>
-    <Version>0.5.1</Version>
-    <Authors>Arinton Akos</Authors>
-    <Company>DataVo</Company>
     <PackageId>DataVo.EntityFrameworkCore</PackageId>
     <Title>DataVo EntityFrameworkCore</Title>
     <Description>Experimental Entity Framework Core bridge and future provider surface for DataVo.</Description>
     <PackageTags>database;sql;dbms;dotnet;csharp;entityframework;efcore;embedded</PackageTags>
-    <PackageLicenseExpression>MIT</PackageLicenseExpression>
-    <PackageProjectUrl>https://github.com/ArintonAkos/DataVo-DBMS</PackageProjectUrl>
-    <RepositoryUrl>https://github.com/ArintonAkos/DataVo-DBMS.git</RepositoryUrl>
-    <RepositoryType>git</RepositoryType>
-    <PublishRepositoryUrl>true</PublishRepositoryUrl>
-    <PackageReadmeFile>README.md</PackageReadmeFile>
-    <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
-    <PackageOutputPath>$(MSBuildThisFileDirectory)artifacts/packages</PackageOutputPath>
-    <IncludeSymbols>true</IncludeSymbols>
-    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
-    <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <PackageReleaseNotes>EF Core schema bridge for generating DataVo DDL from EF models. 0.5.1 aligns with DataVo.Core 0.5.1; the persistent mode is DataVoStorageMode.Lsm (UseLsmStorage).</PackageReleaseNotes>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(MSBuildProjectName)' == 'DataVo.VectorData'">
-    <IsPackable>true</IsPackable>
-    <Version>0.5.1</Version>
-    <Authors>Arinton Akos</Authors>
-    <Company>DataVo</Company>
     <PackageId>DataVo.VectorData</PackageId>
     <Title>DataVo VectorData</Title>
     <Description>Microsoft.Extensions.VectorData provider for DataVo: an embedded, Native AOT compatible vector store with HNSW and FLAT indexes, LINQ filters translated to SQL, and in-memory or LSM persistence.</Description>
     <PackageTags>database;vector;vectordata;embeddings;rag;ai;hnsw;dotnet;embedded</PackageTags>
-    <PackageLicenseExpression>MIT</PackageLicenseExpression>
-    <PackageProjectUrl>https://github.com/ArintonAkos/DataVo-DBMS</PackageProjectUrl>
-    <RepositoryUrl>https://github.com/ArintonAkos/DataVo-DBMS.git</RepositoryUrl>
-    <RepositoryType>git</RepositoryType>
-    <PublishRepositoryUrl>true</PublishRepositoryUrl>
-    <PackageReadmeFile>README.md</PackageReadmeFile>
-    <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
-    <PackageOutputPath>$(MSBuildThisFileDirectory)artifacts/packages</PackageOutputPath>
-    <IncludeSymbols>true</IncludeSymbols>
-    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
-    <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <PackageReleaseNotes>First release: VectorStore and VectorStoreCollection over DataVo tables (int, long, Guid and string keys), HNSW/FLAT indexes for cosine and Euclidean distance, ReadOnlyMemory&lt;float&gt;, float[] and Embedding&lt;float&gt; vectors, embedding generation, LINQ filters, dynamic collections and dependency injection.</PackageReleaseNotes>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'DataVo.Generators'">
+    <PackageId>DataVo.Generators</PackageId>
+    <Title>DataVo Generators</Title>
+    <Description>Roslyn source generators for DataVo: [DataVoQuery] compiled queries, [DataVoTable] typed tables and compile-time LINQ interceptors.</Description>
+    <PackageTags>database;sql;dbms;dotnet;csharp;source-generator;embedded</PackageTags>
+    <PackageReleaseNotes>0.5.1 aligns with DataVo.Core 0.5.1. [DataVoQuery] uses an incremental attribute pipeline, keeps the method's accessibility, supports nested and overloaded methods, maps constructor arguments by name or position (DATAVOQ004 on mismatch), reports invalid signatures as DATAVOQ003, and resolves manifest primary keys at compile time.</PackageReleaseNotes>
   </PropertyGroup>
 
   <ItemGroup Condition="'$(IsPackable)' == 'true'">

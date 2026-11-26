@@ -38,7 +38,7 @@ internal static class DataVoLinqEmitter
             namespace {{Namespace}}
             {
                 /// <summary>Routes DataVoTable queries to statements prepared from their lambdas at compile time.</summary>
-                [global::System.CodeDom.Compiler.GeneratedCode("DataVo.Generators", "1.0")]
+                [global::System.CodeDom.Compiler.GeneratedCode("DataVo.Generators", "{{GeneratorInfo.Version}}")]
                 internal static class DataVoLinqInterceptors
                 {
             """);

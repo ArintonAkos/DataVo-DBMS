@@ -28,7 +28,7 @@ internal static class DataVoTableEmitter
         }
 
         code.Append("    /// <summary>Generated data access for <see cref=\"").Append(model.FullTypeName).AppendLine("\"/>.</summary>");
-        code.AppendLine("    [global::System.CodeDom.Compiler.GeneratedCode(\"DataVo.Generators\", \"1.0\")]");
+        code.AppendLine("    [global::System.CodeDom.Compiler.GeneratedCode(\"DataVo.Generators\", \"" + GeneratorInfo.Version + "\")]");
         code.Append("    ").Append(access).Append(" static class ").Append(model.ModelName).AppendLine("DataVoExtensions");
         code.AppendLine("    {");
         EmitStatements(code, model, columns, values, key, nameList);
