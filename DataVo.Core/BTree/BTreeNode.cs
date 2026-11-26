@@ -1,5 +1,3 @@
-using System.Text.Json.Serialization;
-
 namespace DataVo.Core.BTree;
 
 /// <summary>
@@ -10,7 +8,6 @@ namespace DataVo.Core.BTree;
 /// <remarks>
 /// <para>
 /// This implementation supports duplicate keys by storing a <see cref="List{T}"/> of values for each key slot.
-/// The same structure is used by the JSON-backed index implementation.
 /// </para>
 /// <para>
 /// For a minimum degree <c>t</c>, each node can contain at most <c>2t - 1</c> keys.
@@ -23,38 +20,32 @@ public class BTreeNode<TKey, TValue> where TKey : IComparable<TKey>
     /// Gets or sets the minimum degree of the B-Tree.
     /// A node can store at most <c>2 * MinDegree - 1</c> keys.
     /// </summary>
-    [JsonPropertyName("t")]
     public int MinDegree { get; set; }
 
     /// <summary>
     /// Gets or sets the ordered keys stored in this node.
     /// </summary>
-    [JsonPropertyName("keys")]
     public List<TKey> Keys { get; set; }
 
     /// <summary>
     /// Gets or sets the values associated with the keys in <see cref="Keys"/>.
     /// Each position corresponds to the key at the same index, and each key can map to multiple values.
     /// </summary>
-    [JsonPropertyName("values")]
     public List<List<TValue>> Values { get; set; }
 
     /// <summary>
     /// Gets or sets the child nodes.
     /// This value is <see langword="null"/> for leaf nodes.
     /// </summary>
-    [JsonPropertyName("children")]
     public List<BTreeNode<TKey, TValue>>? Children { get; set; }
 
     /// <summary>
     /// Gets or sets a value indicating whether this node is a leaf node.
     /// </summary>
-    [JsonPropertyName("isLeaf")]
     public bool IsLeaf { get; set; }
 
     /// <summary>
     /// Initializes a new leaf node using the default minimum degree.
-    /// This constructor exists primarily for JSON deserialization.
     /// </summary>
     public BTreeNode()
     {

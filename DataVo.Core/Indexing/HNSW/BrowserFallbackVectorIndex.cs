@@ -60,22 +60,6 @@ internal sealed class BrowserFallbackVectorIndex : IVectorIndex
         _vectors.Clear();
     }
 
-    internal List<(RowKey RowId, float[] Vector)> ExportEntries()
-    {
-        return _vectors
-            .Select(entry => (RowId: entry.Key, Vector: (float[])[.. entry.Value]))
-            .ToList();
-    }
-
-    internal void ImportEntries(IEnumerable<(RowKey RowId, float[] Vector)> entries)
-    {
-        _vectors.Clear();
-        foreach (var entry in entries)
-        {
-            _vectors[entry.RowId] = [.. entry.Vector];
-        }
-    }
-
     private static double ComputeEuclideanDistance(float[] left, float[] right)
     {
         double sum = 0d;

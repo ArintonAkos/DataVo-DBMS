@@ -51,13 +51,13 @@ public class InMemoryBTreeIndexTests
     }
 
     [Fact]
-    public void Delete_RemovesSpecificValue()
+    public void RemoveValue_RemovesSpecificValue()
     {
         var index = new InMemoryBTreeIndex(3);
         index.Insert("alice", 1L);
         index.Insert("alice", 2L);
 
-        index.Delete("alice", 1L);
+        Assert.True(index.RemoveValue("alice", 1L));
 
         var result = index.Search("alice");
         Assert.Single(result);
@@ -65,12 +65,12 @@ public class InMemoryBTreeIndexTests
     }
 
     [Fact]
-    public void Delete_LastValue_RemovesKey()
+    public void RemoveValue_LastValue_RemovesKey()
     {
         var index = new InMemoryBTreeIndex(3);
         index.Insert("alice", 1L);
 
-        index.Delete("alice", 1L);
+        Assert.True(index.RemoveValue("alice", 1L));
 
         Assert.False(index.ContainsValue(1L));
         Assert.Empty(index.Search("alice"));

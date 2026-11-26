@@ -153,23 +153,6 @@ public class IndexKeyEncoderTypedTests
         Assert.Equal(DictKey(dict, "Id", "Name", "Score"), TypedKey(schema, cells, "Id", "Name", "Score"));
     }
 
-    [Fact]
-    public void EncodedBytes_MatchDictionaryEncoding()
-    {
-        var schema = new ReactiveRowSchema("Id", "Name");
-        CellValue[] cells = [CellValue.From(42), CellValue.From("Bob")];
-        var dict = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
-        {
-            ["Id"] = 42,
-            ["Name"] = "Bob",
-        };
-
-        byte[] dictEncoded = IndexKeyEncoder.Encode(DictKey(dict, "Id", "Name"));
-        byte[] typedEncoded = IndexKeyEncoder.Encode(TypedKey(schema, cells, "Id", "Name"));
-
-        Assert.Equal(dictEncoded, typedEncoded);
-    }
-
     private static long MeasureAllocation(Func<string> action)
     {
         string? sink = null;

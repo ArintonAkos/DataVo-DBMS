@@ -1,4 +1,3 @@
-using System.Reflection;
 using DataVo.Core.Compat;
 
 namespace DataVo.Core.Utils;
@@ -8,14 +7,6 @@ namespace DataVo.Core.Utils;
 /// </summary>
 internal static class AtomicFileOperations
 {
-    /// <summary>
-    /// Optional runtime binding to <see cref="File.Replace(string,string,string?)"/>.
-    /// Null when the API is unavailable on the current platform profile.
-    /// </summary>
-    private static readonly MethodInfo? FileReplaceMethod = typeof(File).GetMethod(
-        nameof(File.Replace),
-        [typeof(string), typeof(string), typeof(string)]);
-
     /// <summary>
     /// Replaces <paramref name="destinationPath"/> with <paramref name="tempPath"/>.
     /// Uses <see cref="File.Replace(string,string,string?)"/> when available and falls back
@@ -47,8 +38,7 @@ internal static class AtomicFileOperations
 
     private static bool IsTransientSharingViolation(Exception exception)
     {
-        Exception ex = exception is TargetInvocationException { InnerException: { } inner } ? inner : exception;
-        if (ex is not IOException io || !System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(System.Runtime.InteropServices.OSPlatform.Windows))
+        if (exception is not IOException io || !System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(System.Runtime.InteropServices.OSPlatform.Windows))
         {
             return false;
         }
@@ -76,21 +66,11 @@ internal static class AtomicFileOperations
             return;
         }
 
-        if (FileReplaceMethod is null)
-        {
-            ReplaceViaDeleteAndMove(tempPath, destinationPath);
-            return;
-        }
-
         try
         {
-            FileReplaceMethod.Invoke(null, [tempPath, destinationPath, null]);
+            File.Replace(tempPath, destinationPath, null);
         }
-        catch (TargetInvocationException ex) when (ex.InnerException is PlatformNotSupportedException || ex.InnerException is MissingMethodException || ex.InnerException is EntryPointNotFoundException)
-        {
-            ReplaceViaDeleteAndMove(tempPath, destinationPath);
-        }
-        catch (ArgumentException)
+        catch (PlatformNotSupportedException)
         {
             ReplaceViaDeleteAndMove(tempPath, destinationPath);
         }

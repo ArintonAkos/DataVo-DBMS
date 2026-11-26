@@ -1,5 +1,3 @@
-using System.Text.Json;
-using System.Text.Json.Serialization;
 using DataVo.Core.BTree.Core;
 using DataVo.Core.Exceptions;
 using DataVo.Core.Serialization;
@@ -18,13 +16,11 @@ public class InMemoryBTreeIndex(int minDegree) : IIndex
     /// <summary>
     /// Gets or sets the root node of the B-Tree.
     /// </summary>
-    [JsonPropertyName("root")]
     public BTreeNode<string, RowKey> Root { get; set; } = new BTreeNode<string, RowKey>(minDegree, isLeaf: true);
 
     /// <summary>
     /// Gets or sets the minimum degree used by the tree.
     /// </summary>
-    [JsonPropertyName("minDegree")]
     public int MinDegree { get; set; } = minDegree;
 
     /// <summary>
@@ -133,54 +129,6 @@ public class InMemoryBTreeIndex(int minDegree) : IIndex
         lock (_treeLock)
         {
             return Root.ContainsValue(rowId);
-        }
-    }
-
-    /// <summary>
-    /// Removes a specific key/value mapping from the index by rebuilding the tree from the remaining entries.
-    /// </summary>
-    /// <param name="key">The key whose mapping should be removed.</param>
-    /// <param name="value">The specific row ID to remove from the key.</param>
-    /// <remarks>
-    /// This helper is not part of <see cref="IIndex"/>, but is available for scenarios that require targeted removal.
-    /// The implementation performs an in-order traversal, filters the matching mapping, and rebuilds the tree.
-    /// </remarks>
-    public void Delete(string key, RowKey value)
-    {
-        lock (_treeLock)
-        {
-            var allEntries = new List<KeyValuePair<string, List<RowKey>>>();
-            Root.CollectAll(allEntries);
-
-            // Remove the specific value from the matching key. Copy-on-write: filter into a fresh list
-            // rather than mutating the collected list in place, which may already be published to a reader.
-            bool modified = false;
-            for (int idx = 0; idx < allEntries.Count; idx++)
-            {
-                if (allEntries[idx].Key == key)
-                {
-                    var filtered = new List<RowKey>(allEntries[idx].Value);
-                    filtered.Remove(value);
-                    allEntries[idx] = new KeyValuePair<string, List<RowKey>>(key, filtered);
-                    modified = true;
-                    break;
-                }
-            }
-
-            if (!modified)
-            {
-                return;
-            }
-
-            // Rebuild the tree from the remaining entries
-            Root = new BTreeNode<string, RowKey>(MinDegree, isLeaf: true);
-            foreach (var entry in allEntries)
-            {
-                foreach (RowKey val in entry.Value)
-                {
-                    InsertCore(entry.Key, val);
-                }
-            }
         }
     }
 

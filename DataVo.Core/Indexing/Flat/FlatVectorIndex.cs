@@ -500,23 +500,6 @@ public sealed class FlatVectorIndex : IVectorIndex, IReservableVectorIndex, ISpa
         _freeOrdinals[_freeCount++] = ordinal;
     }
 
-    internal List<(RowKey RowId, float[] Vector)> ExportEntries()
-    {
-        lock (_stateGate)
-        {
-            var entries = new List<(RowKey RowId, float[] Vector)>(_count);
-            for (int ordinal = 0; ordinal < _nextOrdinal; ordinal++)
-            {
-                if (_isActive[ordinal])
-                {
-                    entries.Add((_rowIdByOrdinal[ordinal], GetVectorReadOnlySpan(ordinal).ToArray()));
-                }
-            }
-
-            return entries;
-        }
-    }
-
     /// <summary>
     /// Removes all vectors from the index.
     /// </summary>
@@ -532,20 +515,6 @@ public sealed class FlatVectorIndex : IVectorIndex, IReservableVectorIndex, ISpa
             _nextOrdinal = 0;
             _freeCount = 0;
             _count = 0;
-        }
-    }
-
-    internal void ImportEntries(IEnumerable<(RowKey RowId, float[] Vector)> entries)
-    {
-        DataVo.Core.Compat.ThrowHelper.ThrowIfNull(entries);
-
-        lock (_stateGate)
-        {
-            Clear();
-            foreach (var entry in entries)
-            {
-                Insert(entry.RowId, entry.Vector);
-            }
         }
     }
 

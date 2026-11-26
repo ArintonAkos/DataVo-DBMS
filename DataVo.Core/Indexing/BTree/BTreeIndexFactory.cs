@@ -27,7 +27,6 @@ public class BTreeIndexFactory : IIndexFactory
         if (@params.TryGetValue("minDegree", out var val) && val is int degree)
             minDegree = degree;
 
-        // Create a InMemoryBTreeIndex (in-memory with JSON serialization support)
         return new InMemoryBTreeIndex(minDegree);
     }
 }
