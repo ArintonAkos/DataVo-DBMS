@@ -83,14 +83,7 @@ core_package="$packages_dir/DataVo.Core.$package_version.nupkg"
   exit 1
 }
 
-entries="$(unzip -Z1 "$core_package")"
-core_dlls="$(printf '%s\n' "$entries" | awk '$0 ~ /(^|\/)DataVo\.Core\.dll$/ { print }' | LC_ALL=C sort)"
-expected_dlls=$'lib/net10.0/DataVo.Core.dll\nlib/netstandard2.1/DataVo.Core.dll'
-if [[ "$core_dlls" != "$expected_dlls" ]]; then
-  echo "Candidate package has the wrong DataVo.Core DLL entries:" >&2
-  printf '%s\n' "${core_dlls:-<none>}" >&2
-  exit 1
-fi
+bash "$root/scripts/assert-core-package-targets.sh" "$core_package"
 
 core_dll="$stage/Runtime/DataVo.Core.dll"
 unzip -p "$core_package" "lib/netstandard2.1/DataVo.Core.dll" > "$core_dll"

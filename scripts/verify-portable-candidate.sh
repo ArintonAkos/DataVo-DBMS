@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd -P)"
 TEMP_ROOT="$(mktemp -d)"
 RUN_ID="$(basename "$TEMP_ROOT" | tr -cd '[:alnum:]' | tr '[:upper:]' '[:lower:]')"
-PACKAGE_VERSION="0.0.0-stage2a.$RUN_ID"
+PACKAGE_VERSION="0.0.0-portable.$RUN_ID"
 
 PACKAGES_DIR="$TEMP_ROOT/packages"
 EXTRACT_DIR="$TEMP_ROOT/extracted"
@@ -41,16 +41,7 @@ NUGET_PACKAGES="$PACK_CACHE" dotnet pack "$ROOT_DIR/DataVo.Core/DataVo.Core.cspr
 CORE_PACKAGE="$PACKAGES_DIR/DataVo.Core.$PACKAGE_VERSION.nupkg"
 [[ -f "$CORE_PACKAGE" ]] || { echo "Missing candidate package: $CORE_PACKAGE" >&2; exit 1; }
 
-entries="$(unzip -Z1 "$CORE_PACKAGE")"
-core_dlls="$(printf '%s\n' "$entries" \
-  | awk '$0 ~ /(^|\/)DataVo\.Core\.dll$/ { print }' \
-  | LC_ALL=C sort)"
-expected_dlls=$'lib/net10.0/DataVo.Core.dll\nlib/netstandard2.1/DataVo.Core.dll'
-if [[ "$core_dlls" != "$expected_dlls" ]]; then
-  echo "Candidate package has the wrong DataVo.Core DLL entries:" >&2
-  printf '%s\n' "${core_dlls:-<none>}" >&2
-  exit 1
-fi
+bash "$ROOT_DIR/scripts/assert-core-package-targets.sh" "$CORE_PACKAGE"
 
 PORTABLE_DLL="$EXTRACT_DIR/DataVo.Core.dll"
 unzip -p "$CORE_PACKAGE" 'lib/netstandard2.1/DataVo.Core.dll' > "$PORTABLE_DLL"
