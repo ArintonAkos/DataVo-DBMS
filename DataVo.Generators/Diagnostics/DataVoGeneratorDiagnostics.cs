@@ -20,6 +20,22 @@ internal static class DataVoGeneratorDiagnostics
         DiagnosticSeverity.Error,
         isEnabledByDefault: true);
 
+    public static readonly DiagnosticDescriptor InvalidQueryMethod = new(
+        "DATAVOQ003",
+        "Invalid DataVo compiled query method",
+        "[DataVoQuery] method '{0}' cannot be implemented: {1}",
+        "DataVo.CompiledQueries",
+        DiagnosticSeverity.Error,
+        isEnabledByDefault: true);
+
+    public static readonly DiagnosticDescriptor RowTypeMismatch = new(
+        "DATAVOQ004",
+        "DataVo compiled query row type does not match the projection",
+        "Row type '{0}' cannot be built from the selected columns: {1}",
+        "DataVo.CompiledQueries",
+        DiagnosticSeverity.Error,
+        isEnabledByDefault: true);
+
     public static readonly DiagnosticDescriptor MissingPrimaryKey = Table(
         "DATAVOT001", "DataVo table has no primary key", "Model '{0}' needs exactly one property marked [PrimaryKey]");
 

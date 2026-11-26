@@ -91,8 +91,10 @@ public class DataVoQueryGeneratorTests
 
         GeneratorDriverRunResult result = RunGenerator(source);
 
+        // The SQL is valid; only the method's return type is not: that is DATAVOQ003, not "unsupported SQL".
         Diagnostic diagnostic = Assert.Single(result.Diagnostics);
-        Assert.Equal("DATAVOQ001", diagnostic.Id);
+        Assert.Equal("DATAVOQ003", diagnostic.Id);
+        Assert.Contains("GetPlayerId", diagnostic.GetMessage(), StringComparison.Ordinal);
         Assert.Empty(result.Results.Single().GeneratedSources);
     }
 
@@ -291,9 +293,10 @@ public class DataVoQueryGeneratorTests
     }
 
     [Fact]
-    public void Generator_NonNameMatchedCtor_FallsBackToDictMapper()
+    public void Generator_NonNameMatchedCtor_MapsColumnsByPosition()
     {
-        // Ctor params (a, b, c) do not match projected columns (Id, Name, Level) by name → not a clean match.
+        // Ctor params (a, b, c) do not match projected columns (Id, Name, Level) by name: they bind by position, typed
+        // by the parameters (the old *Id/Level/Frame name heuristic is gone).
         string source = """
             using System.Collections.Generic;
             using DataVo.Core;
@@ -311,9 +314,217 @@ public class DataVoQueryGeneratorTests
         GeneratorDriverRunResult result = RunGenerator(source);
         string generated = Assert.Single(result.Results.Single().GeneratedSources).SourceText.ToString();
 
-        Assert.DoesNotContain("CompiledRowReader", generated);
-        Assert.DoesNotContain("SelectManyTyped", generated);
-        Assert.Contains("DataVoCompiledQuery.SelectMany<global::Misnamed>", generated);
+        Assert.Contains("DataVoCompiledQuery.SelectManyTyped<global::Misnamed>", generated);
+        Assert.Contains("new global::Misnamed(reader.GetInt32(\"Id\"), reader.GetString(\"Name\")!, reader.GetInt32(\"Level\"))", generated);
+        AssertCompiles(source);
+    }
+
+    [Fact]
+    public void Generator_PositionalCtorWithUnsupportedType_CastsByParameterType()
+    {
+        // A parameter type without a typed getter falls back to the dictionary mapper, cast to the parameter's type
+        // (previously a column named Score was cast to string).
+        string source = """
+            using System.Collections.Generic;
+            using DataVo.Core;
+            using DataVo.Core.CompiledQueries;
+
+            public sealed record Scored(long a, object b, double c);
+
+            public static partial class GameQueries
+            {
+                [DataVoQuery("SELECT PlayerId, Payload, Score FROM Players WHERE Name = @name")]
+                public static partial IReadOnlyList<Scored> ByName(DataVoContext db, string name);
+            }
+            """;
+
+        string generated = Assert.Single(RunGenerator(source).Results.Single().GeneratedSources).SourceText.ToString();
+
+        Assert.Contains("DataVoCompiledQuery.SelectMany<global::Scored>", generated);
+        Assert.Contains("(long)row[\"PlayerId\"]!", generated);
+        Assert.Contains("(object)row[\"Payload\"]!", generated);
+        Assert.Contains("(double)row[\"Score\"]!", generated);
+        Assert.DoesNotContain("(int)row", generated);
+        Assert.DoesNotContain("(string)row", generated);
+    }
+
+    [Fact]
+    public void Generator_CtorArityMismatch_ReportsRowTypeDiagnostic()
+    {
+        string source = """
+            using System.Collections.Generic;
+            using DataVo.Core;
+            using DataVo.Core.CompiledQueries;
+
+            public sealed record TwoColumns(int a, string b);
+
+            public static partial class GameQueries
+            {
+                [DataVoQuery("SELECT Id, Name, Level FROM Players WHERE Name = @name")]
+                public static partial IReadOnlyList<TwoColumns> ByName(DataVoContext db, string name);
+            }
+            """;
+
+        GeneratorDriverRunResult result = RunGenerator(source);
+
+        Diagnostic diagnostic = Assert.Single(result.Diagnostics);
+        Assert.Equal("DATAVOQ004", diagnostic.Id);
+        Assert.Empty(result.Results.Single().GeneratedSources);
+    }
+
+    [Theory]
+    [InlineData("public static partial class Q { [DataVoQuery(\"SELECT Id FROM P WHERE Id = @id\")] public partial Row? Get(DataVoContext db, int id); }", "static partial")]
+    [InlineData("public partial class Q { [DataVoQuery(\"SELECT Id FROM P WHERE Id = @id\")] public static partial Row? Get(DataVoContext db, int id); }", "must be static")]
+    [InlineData("public static class Q { [DataVoQuery(\"SELECT Id FROM P WHERE Id = @id\")] public static partial Row? Get(DataVoContext db, int id); }", "must be partial")]
+    [InlineData("public static partial class Q { [DataVoQuery(\"SELECT Id FROM P WHERE Id = @id\")] public static partial Row? Get(int id, DataVoContext db); }", "DataVoContext")]
+    [InlineData("public static partial class Q { [DataVoQuery(\"UPDATE P SET Name = @name WHERE Id = @id\")] public static partial void Set(DataVoContext db, string name, int id); }", "must return int")]
+    [InlineData("public static partial class Q { [DataVoQuery(\"INSERT INTO P (Id) VALUES (@id)\")] public static partial int Add(DataVoContext db, int id); }", "IReadOnlyList")]
+    public void Generator_InvalidMethodSignature_ReportsDatavoq003(string declaration, string reason)
+    {
+        string source = $"""
+            using DataVo.Core;
+            using DataVo.Core.CompiledQueries;
+
+            public sealed record Row(int Id);
+
+            {declaration}
+            """;
+
+        Diagnostic diagnostic = Assert.Single(RunGenerator(source).Diagnostics, static d => d.Id.StartsWith("DATAVOQ", StringComparison.Ordinal));
+        Assert.Equal("DATAVOQ003", diagnostic.Id);
+        Assert.Contains(reason, diagnostic.GetMessage(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Generator_PreservesAccessibility_NestedTypes_AndOverloads()
+    {
+        string source = """
+            using System.Collections.Generic;
+            using DataVo.Core;
+            using DataVo.Core.CompiledQueries;
+
+            namespace First
+            {
+                public sealed record Row(int Id, string Name);
+
+                public static partial class Outer
+                {
+                    internal static partial class Queries
+                    {
+                        [DataVoQuery("SELECT Id, Name FROM Players WHERE Id = @id")]
+                        internal static partial Row? Get(DataVoContext db, int id);
+
+                        [DataVoQuery("SELECT Id, Name FROM Players WHERE Name = @name")]
+                        internal static partial IReadOnlyList<Row> Get(DataVoContext db, string name);
+                    }
+                }
+            }
+
+            namespace Second
+            {
+                public sealed record Row(int Id, string Name);
+
+                public static partial class Outer
+                {
+                    internal static partial class Queries
+                    {
+                        [DataVoQuery("SELECT Id, Name FROM Players WHERE Id = @id")]
+                        private static partial Row? Get(DataVoContext db, int id);
+
+                        public static Row? Call(DataVoContext db) => Get(db, 1);
+                    }
+                }
+            }
+            """;
+
+        GeneratorDriverRunResult result = RunGenerator(source);
+
+        Assert.Empty(result.Diagnostics);
+        GeneratedSourceResult[] sources = [.. result.Results.Single().GeneratedSources];
+        Assert.Equal(3, sources.Length);
+        Assert.Equal(3, sources.Select(static source => source.HintName).Distinct().Count());
+        string all = string.Concat(sources.Select(static source => source.SourceText.ToString()));
+        Assert.Contains("internal static partial global::First.Row? Get(", all);
+        Assert.Contains("private static partial global::Second.Row? Get(", all);
+        Assert.Contains("public static partial class Outer", all);
+        Assert.Contains("internal static partial class Queries", all);
+        Assert.DoesNotContain("\"1.0\"", all);
+        AssertCompiles(source);
+    }
+
+    [Fact]
+    public void Generator_EmitsTypedGettersForFloatShortByteVector3AndMemory()
+    {
+        string source = """
+            using System;
+            using System.Collections.Generic;
+            using System.Numerics;
+            using DataVo.Core;
+            using DataVo.Core.CompiledQueries;
+
+            public sealed record Sample(int Id, float Ratio, short Small, byte Tiny, Vector3 Position, ReadOnlyMemory<float> Embedding, float? Maybe, Vector3? Spot);
+
+            public static partial class SampleQueries
+            {
+                [DataVoQuery("SELECT Id, Ratio, Small, Tiny, Position, Embedding, Maybe, Spot FROM Samples WHERE Id = @id")]
+                public static partial IReadOnlyList<Sample> Get(DataVoContext db, int id);
+            }
+            """;
+
+        string generated = Assert.Single(RunGenerator(source).Results.Single().GeneratedSources).SourceText.ToString();
+
+        Assert.Contains("SelectManyTyped<global::Sample>", generated);
+        Assert.Contains("reader.GetSingle(\"Ratio\")", generated);
+        Assert.Contains("reader.GetInt16(\"Small\")", generated);
+        Assert.Contains("reader.GetByte(\"Tiny\")", generated);
+        Assert.Contains("reader.GetVector3(\"Position\")", generated);
+        Assert.Contains("reader.GetVectorMemory(\"Embedding\")", generated);
+        Assert.Contains("reader.GetSingleOrNull(\"Maybe\")", generated);
+        Assert.Contains("reader.GetVector3OrNull(\"Spot\")", generated);
+        AssertCompiles(source);
+    }
+
+    [Fact]
+    public void Generator_WithManifestPrimaryKey_EmitsPrimaryKeyAccessPath()
+    {
+        const string source = """
+            using DataVo.Core;
+            using DataVo.Core.CompiledQueries;
+
+            public sealed record OrderItemRow(int OrderItemId, string Sku);
+
+            public static partial class OrderQueries
+            {
+                [DataVoQuery("SELECT OrderItemId, Sku FROM OrderItems WHERE OrderItemId = @id")]
+                public static partial OrderItemRow? Get(DataVoContext db, int id);
+            }
+            """;
+        const string manifest = "CREATE TABLE OrderItems (OrderItemId INT PRIMARY KEY, OrderId INT, Sku VARCHAR(50));";
+
+        string generated = Assert.Single(RunGenerator(source, manifest).Results.Single().GeneratedSources).SourceText.ToString();
+
+        Assert.Contains("accessPath: global::DataVo.Core.CompiledQueries.CompiledAccessPath.PrimaryKey", generated);
+        Assert.DoesNotContain("resolvedIndexName", generated);
+    }
+
+    [Fact]
+    public void Generator_UnrelatedEdit_IsServedFromTheIncrementalCache()
+    {
+        CSharpCompilation compilation = CSharpCompilation.Create(
+            "IncrementalTest",
+            [CSharpSyntaxTree.ParseText(OrderItemsSource)],
+            GetMetadataReferences(),
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+        GeneratorDriver driver = CSharpGeneratorDriver.Create(
+            [new DataVoQueryGenerator().AsSourceGenerator()],
+            driverOptions: new GeneratorDriverOptions(IncrementalGeneratorOutputKind.None, trackIncrementalGeneratorSteps: true));
+
+        driver = driver.RunGenerators(compilation);
+        driver = driver.RunGenerators(compilation.AddSyntaxTrees(CSharpSyntaxTree.ParseText("namespace Other { public class Unrelated { } }")));
+
+        IncrementalGeneratorRunStep[] outputs = [.. driver.GetRunResult().Results[0].TrackedOutputSteps.SelectMany(static step => step.Value)];
+        Assert.NotEmpty(outputs);
+        Assert.All(outputs.SelectMany(static step => step.Outputs), output => Assert.Equal(IncrementalStepRunReason.Cached, output.Reason));
     }
 
     [Fact]
@@ -429,6 +640,18 @@ public class DataVoQueryGeneratorTests
         Assert.Contains("reader.GetDateTimeOffsetOrNull(\"Acknowledged\")", generated);
     }
 
+    /// <summary>Runs the generator and asserts the program, with the generated code, compiles without errors.</summary>
+    private static void AssertCompiles(string source)
+    {
+        CSharpCompilation compilation = CSharpCompilation.Create(
+            "GeneratedCompiles",
+            [CSharpSyntaxTree.ParseText(source)],
+            GetMetadataReferences(),
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary, nullableContextOptions: NullableContextOptions.Enable));
+        CSharpGeneratorDriver.Create(new DataVoQueryGenerator()).RunGeneratorsAndUpdateCompilation(compilation, out Compilation output, out _);
+        Assert.Empty(output.GetDiagnostics().Where(static diagnostic => diagnostic.Severity == DiagnosticSeverity.Error));
+    }
+
     private static GeneratorDriverRunResult RunGenerator(string source, string? manifest = null, bool markAsManifest = true)
     {
         CSharpCompilation compilation = CSharpCompilation.Create(
@@ -503,7 +726,7 @@ public class DataVoQueryGeneratorTests
         string? tpa = AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES") as string;
         Assert.False(string.IsNullOrWhiteSpace(tpa));
 
-        HashSet<string> allowed = ["System.Runtime", "mscorlib", "netstandard", "System.Collections", "System.Linq", "System.Private.CoreLib"];
+        HashSet<string> allowed = ["System.Runtime", "mscorlib", "netstandard", "System.Collections", "System.Linq", "System.Private.CoreLib", "System.Numerics.Vectors", "System.Memory"];
         var references = tpa!
             .Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries)
             .Where(path => allowed.Contains(Path.GetFileNameWithoutExtension(path), StringComparer.OrdinalIgnoreCase))
