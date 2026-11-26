@@ -446,15 +446,19 @@ public sealed class InsertKeyLockTests : IDisposable
         return values;
     }
 
-    private static Task RunThreads(int count, Action<int> body)
+    private static async Task RunThreads(int count, Action<int> body)
     {
         using var start = new Barrier(count);
         Task[] tasks = [.. Enumerable.Range(0, count).Select(index => Task.Factory.StartNew(() =>
         {
-            start.SignalAndWait();
+            if (!start.SignalAndWait(TimeSpan.FromSeconds(30)))
+            {
+                throw new TimeoutException("Timed out waiting for worker threads to reach the start barrier.");
+            }
+
             body(index);
         }, TaskCreationOptions.LongRunning))];
-        return Task.WhenAll(tasks).WaitAsync(TimeSpan.FromMinutes(2));
+        await Task.WhenAll(tasks).WaitAsync(TimeSpan.FromMinutes(2));
     }
 
     private static bool IsKeyViolation(Exception ex) =>

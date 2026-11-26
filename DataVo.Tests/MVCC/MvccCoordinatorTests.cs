@@ -114,4 +114,60 @@ public class MvccCoordinatorTests
             engine.Dispose();
         }
     }
+
+    [Fact]
+    public void StaleVacuumCutoff_DoesNotDropVersionsOrImagesRecordedLater()
+    {
+        var engine = DataVoEngine.Initialize(new DataVoConfig { StorageMode = StorageMode.InMemory });
+        try
+        {
+            // No transactions are open yet, so a prune pass computes its cutoff from the current high-water mark.
+            long staleCutoff = engine.CommitClock.GetVacuumCutoff(engine.TransactionManager.OldestActiveSnapshot);
+
+            // Two new transactions open after that check, and the first supersedes row 1.
+            Guid txA = Guid.NewGuid();
+            Guid txB = Guid.NewGuid();
+            engine.TransactionManager.Begin(txA, engine.CommitClock);
+            engine.TransactionManager.Begin(txB, engine.CommitClock);
+
+            long commitStamp = engine.TransactionIdAllocator.AllocateTransactionId();
+            var oldImage = new Dictionary<string, object?> { ["Id"] = 1, ["Score"] = 10 };
+            engine.VersionStorageManager.RetainImage("db", "tbl", rowId: 1, oldImage, xmin: 0, xmax: commitStamp);
+            engine.VersionStorageManager.MarkVersionObsolete("db", "tbl", rowId: 1, xmax: commitStamp);
+            engine.VersionStorageManager.AllocateVersion("db", "tbl", rowId: 2, xmin: commitStamp);
+
+            // The delayed prune pass runs using its earlier cutoff and must not touch the live versions or images.
+            engine.VersionStorageManager.PruneImages(staleCutoff);
+            engine.VersionStorageManager.VacuumVersions(staleCutoff);
+
+            Assert.True(engine.VersionStorageManager.HasRetainedImages("db", "tbl"));
+            Assert.Equal(commitStamp, engine.VersionStorageManager.GetVersion("db", "tbl", 1)?.Xmax);
+            Assert.Equal(commitStamp, engine.VersionStorageManager.GetVersion("db", "tbl", 2)?.Xmin);
+
+            // Once both transactions end, a fresh prune pass reclaims everything.
+            engine.TransactionManager.Rollback(txA);
+            engine.TransactionManager.Rollback(txB);
+            MvccCoordinator.PruneRetainedImages(engine);
+
+            Assert.False(engine.VersionStorageManager.HasRetainedImages("db", "tbl"));
+            Assert.Equal(0, engine.VersionStorageManager.VersionCount);
+        }
+        finally
+        {
+            engine.Dispose();
+        }
+    }
+
+    [Fact]
+    public void MarkVersionObsolete_BootstrapsMissingLegacyVersionAtomically()
+    {
+        var manager = new VersionStorageManager();
+
+        manager.MarkVersionObsolete("db", "tbl", rowId: 42, xmax: 9);
+
+        RowVersion? version = manager.GetVersion("db", "tbl", 42);
+        Assert.True(version.HasValue);
+        Assert.Equal(0, version.Value.Xmin);
+        Assert.Equal(9, version.Value.Xmax);
+    }
 }

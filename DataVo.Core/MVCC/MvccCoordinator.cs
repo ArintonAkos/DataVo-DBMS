@@ -168,7 +168,6 @@ public static class MvccCoordinator
             return;
         }
 
-        EnsureRowVersionExists(engine, databaseName, tableName, oldRowId);
         engine.VersionStorageManager.MarkVersionObsolete(databaseName, tableName, oldRowId, transactionId);
         engine.VersionStorageManager.AllocateVersion(databaseName, tableName, newRowId, transactionId);
         engine.VersionStorageManager.LinkVersionChain(databaseName, tableName, oldRowId, newRowId);
@@ -194,7 +193,6 @@ public static class MvccCoordinator
         }
 
         RetainImage(engine, databaseName, tableName, rowId, oldImage, transactionId);
-        EnsureRowVersionExists(engine, databaseName, tableName, rowId);
         engine.VersionStorageManager.MarkVersionObsolete(databaseName, tableName, rowId, transactionId);
     }
 
@@ -430,9 +428,11 @@ public static class MvccCoordinator
     /// <param name="engine">The owning engine.</param>
     public static void PruneRetainedImages(DataVoEngine engine)
     {
-        long? oldest = engine.TransactionManager.OldestActiveSnapshot();
-        engine.VersionStorageManager.PruneImages(oldest);
-        engine.VersionStorageManager.VacuumVersions(oldest);
+        // Compute a bounded cutoff under CommitClock so a stalled prune pass can never wipe versions or
+        // images belonging to transactions that opened after the snapshot check.
+        long cutoff = engine.CommitClock.GetVacuumCutoff(engine.TransactionManager.OldestActiveSnapshot);
+        engine.VersionStorageManager.PruneImages(cutoff);
+        engine.VersionStorageManager.VacuumVersions(cutoff);
     }
 
     private static void RetainImage(

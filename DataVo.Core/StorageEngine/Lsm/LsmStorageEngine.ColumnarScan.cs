@@ -227,12 +227,22 @@ public sealed partial class LsmStorageEngine
         }
 
         ShadowByTail(in snapshot, readers, snapshot.Version.Id, scratch);
+        if (snapshot.Tail.Version != snapshot.TailVersion)
+        {
+            // Tail moved while building shadows; let the caller retry with a fresh snapshot instead of scanning chunks.
+            return true;
+        }
 
         totals.Slice(0, folds.Length).Clear();
         Span<ulong> masks = ColumnarScan.Rent().Masks;
         bool full = ScanTail(in snapshot, steps, folds, totals, limit, masks, ref matched);
         for (int file = 0; !full && file < readers.Length; file++)
         {
+            if (snapshot.Tail.Version != snapshot.TailVersion)
+            {
+                return true;
+            }
+
             full = ScanSegment(readers[file].Columnar!, file, fileShadows, steps, folds, totals, limit, masks, scratch, ref matched);
         }
 

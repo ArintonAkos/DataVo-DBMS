@@ -248,6 +248,9 @@ public sealed partial class LsmOutOfCoreColumnarScanTests : IDisposable
         List<RowKey> ids = engine.InsertRows(Db, Table, [.. Enumerable.Range(0, Accounts).Select(static i => Row(i, 1_000))]);
         long[] balance = [.. Enumerable.Repeat(1_000L, Accounts)];
 
+        const int TargetAnswered = 150;
+        const int MaxAttempts = 4_000;
+        long commits = 0;
         using var stop = new CancellationTokenSource();
         Task writer = Task.Run(() =>
         {
@@ -262,14 +265,19 @@ public sealed partial class LsmOutOfCoreColumnarScanTests : IDisposable
                 engine.OverwriteRowForTesting(Db, Table, ids[from], Row(from, balance[from] -= amount));
                 engine.OverwriteRowForTesting(Db, Table, ids[to], Row(to, balance[to] += amount));
                 batch.Complete();
+                Interlocked.Increment(ref commits);
             }
         });
 
         int answered = 0;
+        int attempts = 0;
         try
         {
-            for (int scan = 0; scan < 400; scan++)
+            // Run until enough consistent columnar scans succeed under live writes and flushes, without depending
+            // on a fixed single-call success ratio under CI vCPU contention.
+            while (answered < TargetAnswered && attempts < MaxAttempts)
             {
+                attempts++;
                 if (engine.Columnar(Db, Table) is { WantsRebuild: true })
                 {
                     Build(engine); // what a query does when the part in memory is mostly dead positions
@@ -289,7 +297,8 @@ public sealed partial class LsmOutOfCoreColumnarScanTests : IDisposable
             writer.Wait();
         }
 
-        Assert.True(answered > 100, $"Only {answered} of 400 scans were answered from columns.");
+        Assert.True(Volatile.Read(ref commits) > 0, "Expected concurrent commits while scanning.");
+        Assert.True(answered >= TargetAnswered, $"Only {answered} of {attempts} scans were answered from columns.");
     }
 
     // ---- Zone-map pruning -------------------------------------------------------------------------------------

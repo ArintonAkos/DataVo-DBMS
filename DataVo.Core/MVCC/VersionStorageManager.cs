@@ -117,6 +117,7 @@ public class VersionStorageManager : IDisposable
         {
             _mayHaveVersions = true;
             _versionMetadata[(databaseName, tableName, rowId)] = version;
+            _recorded.Enqueue((databaseName, tableName, rowId, Math.Max(version.Xmin, version.Xmax)));
         }
         finally
         {
@@ -182,9 +183,13 @@ public class VersionStorageManager : IDisposable
     }
 
     /// <summary>
-    /// Updates a version's xmax to mark it as superseded/deleted.
-    /// Creates a new version chain entry pointing to the next version.
+    /// Updates a version's <see cref="RowVersion.Xmax"/> to mark it as superseded or deleted, atomically
+    /// bootstrapping a legacy base version (<c>Xmin = 0</c>) if no metadata entry is currently present.
     /// </summary>
+    /// <param name="databaseName">The owning database name.</param>
+    /// <param name="tableName">The owning table name.</param>
+    /// <param name="rowId">The row identifier being obsoleted.</param>
+    /// <param name="xmax">The transaction stamp that deleted or superseded the row.</param>
     public void MarkVersionObsolete(string databaseName, string tableName, RowKey rowId, long xmax)
     {
         var key = (databaseName, tableName, rowId);
@@ -192,12 +197,13 @@ public class VersionStorageManager : IDisposable
         _versionLock.EnterWriteLock();
         try
         {
-            if (_versionMetadata.TryGetValue(key, out var currentVersion))
-            {
-                currentVersion.Xmax = xmax;
-                _versionMetadata[key] = currentVersion;
-                _recorded.Enqueue((databaseName, tableName, rowId, xmax));
-            }
+            _mayHaveVersions = true;
+            RowVersion currentVersion = _versionMetadata.TryGetValue(key, out RowVersion existing)
+                ? existing
+                : new RowVersion(xmin: 0, xmax: 0, versionChain: 0);
+            currentVersion.Xmax = xmax;
+            _versionMetadata[key] = currentVersion;
+            _recorded.Enqueue((databaseName, tableName, rowId, xmax));
         }
         finally
         {
@@ -368,15 +374,18 @@ public class VersionStorageManager : IDisposable
         return visible;
     }
 
-    /// <summary>Drops images no open snapshot can read.</summary>
-    /// <param name="oldestSnapshot">The oldest open snapshot, or <see langword="null"/> when no transaction is open.</param>
+    /// <summary>
+    /// Drops retained images whose ending timestamp is strictly below <paramref name="oldestSnapshot"/>,
+    /// or all images when <paramref name="oldestSnapshot"/> is <see langword="null"/>.
+    /// </summary>
+    /// <param name="oldestSnapshot">The exclusive timestamp cutoff, or <see langword="null"/> when no transaction is open.</param>
     public void PruneImages(long? oldestSnapshot)
     {
         foreach (KeyValuePair<(string Database, string Table), List<RetainedRowImage>> table in _retainedImages)
         {
             lock (table.Value)
             {
-                table.Value.RemoveAll(image => oldestSnapshot is null || image.Version.Xmax <= oldestSnapshot);
+                table.Value.RemoveAll(image => oldestSnapshot is null || image.Version.Xmax < oldestSnapshot);
             }
         }
     }

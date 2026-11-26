@@ -203,6 +203,36 @@ public sealed class CommitClock
         }
     }
 
+    /// <summary>
+    /// Computes the exclusive timestamp cutoff below which no open transaction, in-flight write unit,
+    /// or future transaction can observe retained images or require version metadata.
+    /// </summary>
+    /// <param name="oldestActiveSnapshot">Returns the oldest currently open transaction snapshot, or <see langword="null"/> when none is open.</param>
+    /// <returns>The exclusive upper bound on version timestamps safe to prune or vacuum.</returns>
+    /// <example>
+    /// <code>
+    /// long cutoff = engine.CommitClock.GetVacuumCutoff(engine.TransactionManager.OldestActiveSnapshot);
+    /// engine.VersionStorageManager.PruneImages(cutoff);
+    /// engine.VersionStorageManager.VacuumVersions(cutoff);
+    /// </code>
+    /// </example>
+    internal long GetVacuumCutoff(Func<long?> oldestActiveSnapshot)
+    {
+        lock (_sync)
+        {
+            long cutoff = oldestActiveSnapshot() ?? (_ids.GetCurrentHighWaterMark() + 1);
+            foreach (long inFlight in _inFlight)
+            {
+                if (inFlight < cutoff)
+                {
+                    cutoff = inFlight;
+                }
+            }
+
+            return cutoff;
+        }
+    }
+
     private bool WaitForRetirement(long[] stamps)
     {
         long deadline = Compat.MonotonicClock.GetMilliseconds() + _waitTimeoutMs;
