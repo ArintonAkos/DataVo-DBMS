@@ -7,6 +7,7 @@ on:
       - "docs/**"
       - "README.md"
       - "scripts/check-unity-support-status.sh"
+      - "scripts/check-doc-api-samples.sh"
       - ".github/workflows/deploy-docs.yml"
   workflow_dispatch:
 
@@ -23,7 +24,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install ripgrep (used by the support-claims check)
         run: sudo apt-get update && sudo apt-get install -y ripgrep
@@ -31,8 +32,11 @@ jobs:
       - name: Verify runtime support claims
         run: bash scripts/check-unity-support-status.sh
 
+      - name: Reject removed public API in README and manual samples
+        run: bash scripts/check-doc-api-samples.sh
+
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: 20
           cache: npm
