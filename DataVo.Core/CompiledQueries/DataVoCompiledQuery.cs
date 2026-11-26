@@ -317,7 +317,7 @@ public static class DataVoCompiledQuery
         DataVoCompiledQueryPlan plan,
         string databaseName)
     {
-        if (plan.AccessPath == CompiledAccessPath.SingleColumnIndex && plan.ResolvedIndexName is not null)
+        if (plan.AccessPath is CompiledAccessPath.SingleColumnIndex or CompiledAccessPath.PrimaryKey && plan.ResolvedIndexName is not null)
         {
             return plan.ResolvedIndexName;
         }
@@ -1362,7 +1362,7 @@ public static class DataVoCompiledQuery
         string expectedKey)
     {
         // Returns FilterUsingIndex's read-only row-id view directly (no List/HashSet copy); the caller only enumerates it once.
-        if (plan.AccessPath == CompiledAccessPath.SingleColumnIndex && plan.ResolvedIndexName is not null)
+        if (plan.AccessPath is CompiledAccessPath.SingleColumnIndex or CompiledAccessPath.PrimaryKey && plan.ResolvedIndexName is not null)
         {
             try
             {
@@ -1424,10 +1424,10 @@ public static class DataVoCompiledQuery
     {
         bool authoritativeSnapshotIndex = MvccExecutionScope.CurrentSnapshot is not null;
 
-        // Compile-time fast path: a generator-resolved single-column index skips the per-call primary-key and
+        // Compile-time fast path: a generator-resolved single-column or primary-key index skips the per-call primary-key and
         // index catalog lookups below. A wrong/missing tag (IndexException) or an empty result falls through to
         // the runtime resolution, so correctness never depends on the compile-time bet being right.
-        if (plan.AccessPath == CompiledAccessPath.SingleColumnIndex && plan.ResolvedIndexName is not null)
+        if (plan.AccessPath is CompiledAccessPath.SingleColumnIndex or CompiledAccessPath.PrimaryKey && plan.ResolvedIndexName is not null)
         {
             try
             {

@@ -31,8 +31,11 @@ public sealed class DataVoCompiledQueryPlan
         InsertParameterNames = insertParameterNames;
         Assignments = assignments;
         AccessPath = accessPath;
-        ResolvedIndexName = resolvedIndexName;
+        ResolvedIndexName = accessPath == CompiledAccessPath.PrimaryKey ? PrimaryKeyIndexName(tableName) : resolvedIndexName;
     }
+
+    /// <summary>The name of the primary-key index the engine keeps for <paramref name="tableName"/>.</summary>
+    internal static string PrimaryKeyIndexName(string tableName) => $"_PK_{tableName}";
 
     /// <summary>
     /// Returns this plan with its table named as the catalog stores it, so a plan declared as
@@ -59,6 +62,11 @@ public sealed class DataVoCompiledQueryPlan
 
         var plan = (DataVoCompiledQueryPlan)MemberwiseClone();
         plan.TableName = storedTableName;
+        if (AccessPath == CompiledAccessPath.PrimaryKey)
+        {
+            plan.ResolvedIndexName = PrimaryKeyIndexName(storedTableName);
+        }
+
         _storedTablePlan = plan;
         return plan;
     }
@@ -92,13 +100,19 @@ public sealed class DataVoCompiledQueryPlan
     /// <summary>Gets the access path pre-resolved at compile time, or <see cref="CompiledAccessPath.RuntimeResolve"/>.</summary>
     public CompiledAccessPath AccessPath { get; }
 
-    /// <summary>Gets the index name resolved at compile time when <see cref="AccessPath"/> is <see cref="CompiledAccessPath.SingleColumnIndex"/>; otherwise null.</summary>
-    public string? ResolvedIndexName { get; }
+    /// <summary>
+    /// Gets the index the compile-time access path routes through: the named secondary index for
+    /// <see cref="CompiledAccessPath.SingleColumnIndex"/>, the table's primary-key index for
+    /// <see cref="CompiledAccessPath.PrimaryKey"/>; otherwise null.
+    /// </summary>
+    public string? ResolvedIndexName { get; private set; }
 
     /// <summary>
     /// Creates a plan that returns the first row matching an equality predicate. When <paramref name="accessPath"/>
     /// is <see cref="CompiledAccessPath.SingleColumnIndex"/>, the runtime routes directly through
-    /// <paramref name="resolvedIndexName"/>, falling back to runtime resolution if that index is missing.
+    /// <paramref name="resolvedIndexName"/>; with <see cref="CompiledAccessPath.PrimaryKey"/> (the predicate column is
+    /// the primary key) it routes through the table's primary-key index without a catalog lookup. Either falls back to
+    /// runtime resolution if the index is missing.
     /// </summary>
     public static DataVoCompiledQueryPlan SelectSingle(
         string tableName,
@@ -131,7 +145,9 @@ public sealed class DataVoCompiledQueryPlan
     /// <summary>
     /// Creates a plan that returns all rows matching an equality predicate. When <paramref name="accessPath"/>
     /// is <see cref="CompiledAccessPath.SingleColumnIndex"/>, the runtime routes directly through
-    /// <paramref name="resolvedIndexName"/>, falling back to runtime resolution if that index is missing.
+    /// <paramref name="resolvedIndexName"/>; with <see cref="CompiledAccessPath.PrimaryKey"/> (the predicate column is
+    /// the primary key) it routes through the table's primary-key index without a catalog lookup. Either falls back to
+    /// runtime resolution if the index is missing.
     /// </summary>
     public static DataVoCompiledQueryPlan SelectMany(
         string tableName,

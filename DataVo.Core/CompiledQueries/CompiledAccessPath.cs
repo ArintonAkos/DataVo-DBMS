@@ -11,7 +11,10 @@ public enum CompiledAccessPath
     /// <summary>Resolve the access path at runtime (primary-key / secondary-index / scan). The default.</summary>
     RuntimeResolve = 0,
 
-    /// <summary>Reserved for a future compile-time primary-key fast path. Not emitted by the current generator.</summary>
+    /// <summary>
+    /// The predicate column is the table's primary key (known from the schema manifest at compile time): look the row
+    /// up in the primary-key index without consulting the catalog.
+    /// </summary>
     PrimaryKey = 1,
 
     /// <summary>Use the single-column secondary index named by <c>ResolvedIndexName</c>, resolved at compile time.</summary>

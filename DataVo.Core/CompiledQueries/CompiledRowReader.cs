@@ -142,4 +142,40 @@ public readonly ref partial struct CompiledRowReader
 
     /// <summary>Reads a nullable <see cref="Guid"/> column by ordinal; SQL NULL returns <c>null</c>.</summary>
     public Guid? GetGuidOrNull(int ordinal) { CellValue c = _view[ordinal]; return c.IsNull ? null : c.AsGuid(); }
+
+    /// <summary>Reads a FLOAT column as a <see cref="float"/> (stored as a double cell).</summary>
+    public float GetSingle(string column) => (float)_view[column].AsDouble();
+
+    /// <summary>Reads a nullable FLOAT column as a <see cref="float"/>; SQL NULL returns <c>null</c>.</summary>
+    public float? GetSingleOrNull(string column) { CellValue c = _view[column]; return c.IsNull ? null : (float)c.AsDouble(); }
+
+    /// <summary>Reads an INT column as a <see cref="short"/>; throws <see cref="OverflowException"/> when it does not fit.</summary>
+    public short GetInt16(string column) => checked((short)_view[column].AsInt32());
+
+    /// <summary>Reads a nullable INT column as a <see cref="short"/>; SQL NULL returns <c>null</c>.</summary>
+    public short? GetInt16OrNull(string column) { CellValue c = _view[column]; return c.IsNull ? null : checked((short)c.AsInt32()); }
+
+    /// <summary>Reads an INT column as a <see cref="byte"/>; throws <see cref="OverflowException"/> when it does not fit.</summary>
+    public byte GetByte(string column) => checked((byte)_view[column].AsInt32());
+
+    /// <summary>Reads a nullable INT column as a <see cref="byte"/>; SQL NULL returns <c>null</c>.</summary>
+    public byte? GetByteOrNull(string column) { CellValue c = _view[column]; return c.IsNull ? null : checked((byte)c.AsInt32()); }
+
+    /// <summary>Reads a VECTOR column as <see cref="ReadOnlyMemory{T}"/> of <see cref="float"/> over a defensive clone.</summary>
+    public ReadOnlyMemory<float> GetVectorMemory(string column) => _view[column].AsVector();
+
+    /// <summary>Reads a nullable VECTOR column as <see cref="ReadOnlyMemory{T}"/>; SQL NULL returns <c>null</c>.</summary>
+    public ReadOnlyMemory<float>? GetVectorMemoryOrNull(string column) { CellValue c = _view[column]; return c.IsNull ? null : c.AsVector(); }
+
+    /// <summary>Reads a VECTOR(3) column as a <see cref="System.Numerics.Vector3"/>.</summary>
+    /// <exception cref="InvalidCastException">The vector does not have three components.</exception>
+    public System.Numerics.Vector3 GetVector3(string column) => ToVector3(_view[column], column);
+
+    /// <summary>Reads a nullable VECTOR(3) column as a <see cref="System.Numerics.Vector3"/>; SQL NULL returns <c>null</c>.</summary>
+    public System.Numerics.Vector3? GetVector3OrNull(string column) { CellValue c = _view[column]; return c.IsNull ? null : ToVector3(c, column); }
+
+    private static System.Numerics.Vector3 ToVector3(CellValue cell, string column) =>
+        cell.VectorLength == 3 && cell.AsVector() is { } xyz
+            ? new System.Numerics.Vector3(xyz[0], xyz[1], xyz[2])
+            : throw new InvalidCastException($"Column '{column}' holds a vector of {cell.VectorLength} components, not 3.");
 }
