@@ -2,9 +2,10 @@ namespace DataVo.Core.Parser.Utils;
 
 /// <summary>
 /// A SQL <c>LIKE</c> pattern: <c>%</c> matches any run of characters (including none), <c>_</c> exactly one
-/// character, and every other character itself, compared ordinally (case-sensitively). There is no escape
-/// character. A compiled pattern recognises the common prefix, suffix and substring shapes and tests them
-/// without scanning the pattern per row.
+/// character, and every other character itself, compared ordinally (case-sensitively). A backslash escapes the
+/// character after it (<c>\%</c>, <c>\_</c> and <c>\\</c> match a literal <c>%</c>, <c>_</c> and backslash), the default
+/// <c>LIKE</c> escape of PostgreSQL and MySQL; a trailing lone backslash matches itself. A compiled pattern
+/// recognises the common prefix, suffix and substring shapes and tests them without scanning the pattern per row.
 /// <para>
 /// A pattern can also be matched against UTF-8 bytes (<see cref="TryIsMatchUtf8"/>), which gives the same
 /// answer without decoding the text: a literal run of the pattern can only match whole characters of valid
@@ -14,6 +15,9 @@ namespace DataVo.Core.Parser.Utils;
 internal sealed class SqlLikePattern
 {
     private enum Shape { Exact, Prefix, Suffix, Contains, General }
+
+    /// <summary>The escape character: the next pattern character is matched literally.</summary>
+    internal const char Escape = '\\';
 
     private readonly string _pattern;
     private readonly string _literal;
@@ -31,6 +35,18 @@ internal sealed class SqlLikePattern
         _patternUtf8 = Utf8Text.TryEncode(pattern);
         _literalUtf8 = _patternUtf8;
         _hasUnderscore = pattern.Contains('_');
+        if (pattern.Contains(Escape))
+        {
+            if (TryGetEscapedShape(pattern, out Shape escapedShape, out string literal))
+            {
+                _shape = escapedShape;
+                _literal = literal;
+                _literalUtf8 = _patternUtf8 is null ? null : Utf8Text.TryEncode(literal);
+            }
+
+            return;
+        }
+
         if (_hasUnderscore)
         {
             return;
@@ -122,6 +138,86 @@ internal sealed class SqlLikePattern
         return true;
     }
 
+    /// <summary>
+    /// Finds the shape of a pattern holding escapes: leading and trailing unescaped <c>%</c> runs around a middle
+    /// with no unescaped wildcard, whose unescaped text becomes the literal.
+    /// </summary>
+    private static bool TryGetEscapedShape(string pattern, out Shape shape, out string literal)
+    {
+        shape = Shape.General;
+        literal = pattern;
+        int leading = 0;
+        while (leading < pattern.Length && pattern[leading] == '%')
+        {
+            leading++;
+        }
+
+        var middle = new System.Text.StringBuilder(pattern.Length);
+        int trailing = 0;
+        for (int i = leading; i < pattern.Length; i++)
+        {
+            char c = pattern[i];
+            if (c == Escape && i + 1 < pattern.Length)
+            {
+                if (trailing > 0)
+                {
+                    return false;
+                }
+
+                middle.Append(pattern[++i]);
+            }
+            else if (c == '%')
+            {
+                trailing++;
+            }
+            else if (c == '_' || trailing > 0)
+            {
+                return false;
+            }
+            else
+            {
+                middle.Append(c);
+            }
+        }
+
+        literal = middle.ToString();
+        shape = (leading > 0, trailing > 0) switch
+        {
+            (false, false) => Shape.Exact,
+            (false, true) => Shape.Prefix,
+            (true, false) => Shape.Suffix,
+            _ => Shape.Contains,
+        };
+        return true;
+    }
+
+    /// <summary>
+    /// Escapes <paramref name="text"/> so a <c>LIKE</c> pattern matches it literally: backslash, <c>%</c> and <c>_</c>
+    /// each get a preceding backslash.
+    /// </summary>
+    /// <param name="text">The literal text.</param>
+    /// <returns>The escaped pattern fragment.</returns>
+    public static string EscapeLiteral(string text)
+    {
+        if (text.AsSpan().IndexOfAny(Escape, '%', '_') < 0)
+        {
+            return text;
+        }
+
+        var escaped = new System.Text.StringBuilder(text.Length + 8);
+        foreach (char c in text)
+        {
+            if (c is Escape or '%' or '_')
+            {
+                escaped.Append(Escape);
+            }
+
+            escaped.Append(c);
+        }
+
+        return escaped.ToString();
+    }
+
     /// <summary>The byte form of <see cref="IsMatch(ReadOnlySpan{char}, ReadOnlySpan{char})"/>: the same greedy match over UTF-8.</summary>
     private static bool IsMatchBytes(ReadOnlySpan<byte> input, ReadOnlySpan<byte> pattern)
     {
@@ -136,9 +232,9 @@ internal sealed class SqlLikePattern
                 star = p++;
                 resume = s;
             }
-            else if (p < pattern.Length && (pattern[p] == (byte)'_' || pattern[p] == input[s]))
+            else if (p < pattern.Length && MatchesOne(pattern, p, input[s], out int width))
             {
-                p++;
+                p += width;
                 s++;
             }
             else if (star >= 0)
@@ -175,9 +271,9 @@ internal sealed class SqlLikePattern
                 star = p++;
                 resume = s;
             }
-            else if (p < pattern.Length && (pattern[p] == '_' || pattern[p] == input[s]))
+            else if (p < pattern.Length && MatchesOne(pattern, p, input[s], out int width))
             {
-                p++;
+                p += width;
                 s++;
             }
             else if (star >= 0)
@@ -197,5 +293,37 @@ internal sealed class SqlLikePattern
         }
 
         return p == pattern.Length;
+    }
+
+    /// <summary>
+    /// Matches one input character against the pattern element at <paramref name="p"/>: an escaped character (two
+    /// pattern characters), <c>_</c>, or a literal.
+    /// </summary>
+    private static bool MatchesOne(ReadOnlySpan<char> pattern, int p, char input, out int width)
+    {
+        char c = pattern[p];
+        if (c == Escape && p + 1 < pattern.Length)
+        {
+            width = 2;
+            return pattern[p + 1] == input;
+        }
+
+        width = 1;
+        return c == '_' || c == input;
+    }
+
+    /// <summary>The UTF-8 form of <see cref="MatchesOne(ReadOnlySpan{char}, int, char, out int)"/>; an escaped multi-byte
+    /// character matches its remaining bytes as literals.</summary>
+    private static bool MatchesOne(ReadOnlySpan<byte> pattern, int p, byte input, out int width)
+    {
+        byte c = pattern[p];
+        if (c == (byte)Escape && p + 1 < pattern.Length)
+        {
+            width = 2;
+            return pattern[p + 1] == input;
+        }
+
+        width = 1;
+        return c == (byte)'_' || c == input;
     }
 }

@@ -47,6 +47,24 @@ public abstract class PredicateTestsBase : SqlExecutionTestsBase
     }
 
     [Fact]
+    public void Select_Like_BackslashEscapesWildcards()
+    {
+        Execute("INSERT INTO Products VALUES (10, '50%_off', 1, 'promo')");
+        Execute("INSERT INTO Products VALUES (11, '50 X off', 1, 'promo')");
+        Execute(@"INSERT INTO Products VALUES (12, 'C:\dir', 1, 'promo')");
+
+        Assert.Equal([10], Ids(@"SELECT * FROM Products WHERE Name LIKE '50\%\_off'"));
+        Assert.Equal([10], Ids(@"SELECT * FROM Products WHERE Name LIKE '%\_off'"));
+        Assert.Equal([10], Ids(@"SELECT * FROM Products WHERE Name LIKE '%\%%'"));
+        Assert.Equal([10, 11], Ids("SELECT * FROM Products WHERE Name LIKE '50%off'"));
+        Assert.Equal([12], Ids(@"SELECT * FROM Products WHERE Name LIKE 'C:\\%'"));
+        Assert.Equal([1, 2, 3, 4, 5, 11, 12], Ids(@"SELECT * FROM Products WHERE Name NOT LIKE '%\%%'"));
+    }
+
+    private List<int> Ids(string sql) =>
+        ExecuteAndReturn(sql).Data.Select(row => (int)row["Id"]!).OrderBy(id => id).ToList();
+
+    [Fact]
     public void Select_Where_LowerUpper_Functions_FilterRows()
     {
         var lowerResult = ExecuteAndReturn("SELECT * FROM Products WHERE LOWER(Name) = 'alpha'");
