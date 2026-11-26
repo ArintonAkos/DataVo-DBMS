@@ -5,6 +5,9 @@ const {
   buildManualScenarioForUnitTest,
 } = require("./wasm-scenarios/manual-scenarios.cjs");
 const {
+  ATTR_IGNORE,
+  ATTR_NEEDS_SPECIFIC,
+  parseReasonFromAttribute,
   isIntentionallyNonBrowserLane,
 } = require("./wasm-scenarios/policy.cjs");
 
@@ -13,9 +16,6 @@ const outDir = path.join(rootDir, "docs", "tests", "browser", "generated");
 const outFile = path.join(outDir, "wasm-scenarios.json");
 const reportFile = path.join(outDir, "wasm-scenarios.report.json");
 const testRootDir = path.join(rootDir, "DataVo.Tests");
-
-const ATTR_IGNORE = "BrowserTranslateIgnore";
-const ATTR_NEEDS_SPECIFIC = "BrowserTranslateNeedsSpecificCode";
 
 function listFilesRecursively(dir) {
   const entries = fs.readdirSync(dir, { withFileTypes: true });
@@ -136,26 +136,6 @@ function findMatchingBrace(content, openingBraceIndex) {
   }
 
   return -1;
-}
-
-function parseReasonFromAttribute(attributeText, attributeName) {
-  const escapedName = attributeName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const attrRegex = new RegExp(
-    `\\[\\s*${escapedName}(?:Attribute)?\\s*(?:\\(([^\\)]*)\\))?\\s*\\]`,
-    "i",
-  );
-  const match = attributeText.match(attrRegex);
-  if (!match) {
-    return null;
-  }
-
-  const args = (match[1] || "").trim();
-  if (!args) {
-    return "";
-  }
-
-  const reasonMatch = args.match(/"((?:[^"\\]|\\.)*)"/);
-  return reasonMatch ? reasonMatch[1] : args;
 }
 
 function normalizePathForReport(filePath) {

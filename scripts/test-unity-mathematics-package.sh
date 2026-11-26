@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-mode="${1:-all}"
+mode="${1:---all}"
 case "$mode" in
   --metadata|--mathematics|--engine-types|--type-binding|--all)
     ;;
