@@ -1,6 +1,4 @@
-using DataVo.Core.Indexing;
 using DataVo.Core.StorageEngine;
-using DataVo.Core.BTree;
 using DataVo.Core.Exceptions;
 using DataVo.Core.Logging;
 using DataVo.Core.Models.Catalog;
@@ -50,7 +48,7 @@ internal class AlterTableAddColumn(AlterTableAddColumnStatement ast) : BaseDbAct
                     row[field.Name] = defaultValue!;
                 }
 
-                RewriteTable(tableName, databaseName, existingRows, indexes);
+                TableRewrite.ReplaceRows(Engine, databaseName, tableName, existingRows, indexes);
             }
             finally
             {
@@ -73,7 +71,7 @@ internal class AlterTableAddColumn(AlterTableAddColumnStatement ast) : BaseDbAct
             throw new CatalogException($"Table {tableName} does not exist in database {databaseName}!");
         }
 
-        if (Catalog.GetTableColumns(tableName, databaseName).Any(column => column.Name == ast.Column.ColumnName.Name))
+        if (Catalog.GetTableColumns(tableName, databaseName).Any(column => TableRewrite.SameColumn(column.Name, ast.Column.ColumnName.Name)))
         {
             throw new CatalogException($"Column {ast.Column.ColumnName.Name} already exists in table {tableName}!");
         }
@@ -81,25 +79,6 @@ internal class AlterTableAddColumn(AlterTableAddColumnStatement ast) : BaseDbAct
         if (ast.Column.IsPrimaryKey || ast.Column.IsUnique || ast.Column.ReferencesTable != null)
         {
             throw new CatalogException("ALTER TABLE ADD COLUMN currently supports only nullable/default columns without PK, UNIQUE, or FOREIGN KEY constraints.");
-        }
-    }
-
-    private void RewriteTable(string tableName, string databaseName, List<Dictionary<string, object?>> rows, List<IndexFile> indexes)
-    {
-        Context.DropTable(tableName, databaseName);
-
-        foreach (var index in indexes)
-        {
-            Indexes.DropIndex(index.IndexFileName, tableName, databaseName);
-        }
-
-        List<RowKey> newRowIds = Context.InsertIntoTable(rows, tableName, databaseName);
-
-        foreach (var index in indexes)
-        {
-            ScalarIndexContents indexData = ScalarIndexContents.From(rows, newRowIds, index.AttributeNames);
-
-            Indexes.CreateIndex(indexData, index.IndexFileName, tableName, databaseName);
         }
     }
 

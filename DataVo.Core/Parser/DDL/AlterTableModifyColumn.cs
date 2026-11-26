@@ -1,7 +1,5 @@
-using DataVo.Core.Indexing;
 using DataVo.Core.StorageEngine;
 using System.Globalization;
-using DataVo.Core.BTree;
 using DataVo.Core.Exceptions;
 using DataVo.Core.Logging;
 using DataVo.Core.Models.Catalog;
@@ -21,6 +19,7 @@ internal class AlterTableModifyColumn(AlterTableModifyColumnStatement ast) : Bas
             string columnName = ast.Column.ColumnName.Name;
 
             ValidateSupportedShape(databaseName, tableName, columnName);
+            columnName = TableRewrite.StoredColumnName(Catalog, databaseName, tableName, columnName);
 
             Locks.AcquireWriteLock(databaseName, tableName);
 
@@ -62,7 +61,7 @@ internal class AlterTableModifyColumn(AlterTableModifyColumnStatement ast) : Bas
                 }
 
                 Catalog.ModifyColumn(tableName, databaseName, field);
-                RewriteTable(tableName, databaseName, existingRows, indexes);
+                TableRewrite.ReplaceRows(Engine, databaseName, tableName, existingRows, indexes);
             }
             finally
             {
@@ -85,7 +84,7 @@ internal class AlterTableModifyColumn(AlterTableModifyColumnStatement ast) : Bas
             throw new CatalogException($"Table {tableName} does not exist in database {databaseName}!");
         }
 
-        if (!Catalog.GetTableColumns(tableName, databaseName).Any(column => column.Name == columnName))
+        if (!Catalog.GetTableColumns(tableName, databaseName).Any(column => TableRewrite.SameColumn(column.Name, columnName)))
         {
             throw new CatalogException($"Column {columnName} does not exist in table {tableName}!");
         }
@@ -95,48 +94,29 @@ internal class AlterTableModifyColumn(AlterTableModifyColumnStatement ast) : Bas
             throw new CatalogException("ALTER TABLE MODIFY COLUMN currently supports only type/length/default changes without PK, UNIQUE, or FOREIGN KEY constraints.");
         }
 
-        if (Catalog.GetTablePrimaryKeys(tableName, databaseName).Contains(columnName))
+        if (TableRewrite.ContainsColumn(Catalog.GetTablePrimaryKeys(tableName, databaseName), columnName))
         {
             throw new CatalogException("ALTER TABLE MODIFY COLUMN cannot modify a PRIMARY KEY column in this version.");
         }
 
-        if (Catalog.GetTableUniqueKeys(tableName, databaseName).Contains(columnName))
+        if (TableRewrite.ContainsColumn(Catalog.GetTableUniqueKeys(tableName, databaseName), columnName))
         {
             throw new CatalogException("ALTER TABLE MODIFY COLUMN cannot modify a UNIQUE column in this version.");
         }
 
-        if (Catalog.GetTableForeignKeys(tableName, databaseName).Any(fk => fk.AttributeName == columnName))
+        if (Catalog.GetTableForeignKeys(tableName, databaseName).Any(fk => TableRewrite.SameColumn(fk.AttributeName, columnName)))
         {
             throw new CatalogException("ALTER TABLE MODIFY COLUMN cannot modify a FOREIGN KEY column in this version.");
         }
 
-        if (Catalog.GetChildForeignKeys(tableName, databaseName).Any(fk => fk.ParentColumn == columnName))
+        if (Catalog.GetChildForeignKeys(tableName, databaseName).Any(fk => TableRewrite.SameColumn(fk.ParentColumn, columnName)))
         {
             throw new CatalogException("ALTER TABLE MODIFY COLUMN cannot modify a referenced column in this version.");
         }
 
-        if (Catalog.GetTableIndexedColumns(tableName, databaseName).ContainsKey(columnName))
+        if (TableRewrite.IsIndexedColumn(Catalog, databaseName, tableName, columnName))
         {
             throw new CatalogException("ALTER TABLE MODIFY COLUMN cannot modify an indexed column in this version.");
-        }
-    }
-
-    private void RewriteTable(string tableName, string databaseName, List<Dictionary<string, object?>> rows, List<IndexFile> indexes)
-    {
-        Context.DropTable(tableName, databaseName);
-
-        foreach (var index in indexes)
-        {
-            Indexes.DropIndex(index.IndexFileName, tableName, databaseName);
-        }
-
-        List<RowKey> newRowIds = Context.InsertIntoTable(rows, tableName, databaseName);
-
-        foreach (var index in indexes)
-        {
-            ScalarIndexContents indexData = ScalarIndexContents.From(rows, newRowIds, index.AttributeNames);
-
-            Indexes.CreateIndex(indexData, index.IndexFileName, tableName, databaseName);
         }
     }
 
@@ -144,7 +124,7 @@ internal class AlterTableModifyColumn(AlterTableModifyColumnStatement ast) : Bas
     {
         return new Field
         {
-            Name = column.ColumnName.Name,
+            Name = existingColumn.Name,
             Type = ColumnDefinitionParser.ParseType(column.DataType),
             Length = ColumnDefinitionParser.ParseLength(column.DataType),
             Table = tableName,

@@ -1,6 +1,4 @@
-using DataVo.Core.Indexing;
 using DataVo.Core.StorageEngine;
-using DataVo.Core.BTree;
 using DataVo.Core.Exceptions;
 using DataVo.Core.Logging;
 using DataVo.Core.Models.Catalog;
@@ -20,6 +18,7 @@ internal class AlterTableDropColumn(AlterTableDropColumnStatement ast) : BaseDbA
             string columnName = ast.ColumnName.Name;
 
             ValidateSupportedShape(databaseName, tableName, columnName);
+            columnName = TableRewrite.StoredColumnName(Catalog, databaseName, tableName, columnName);
 
             Locks.AcquireWriteLock(databaseName, tableName);
 
@@ -39,7 +38,7 @@ internal class AlterTableDropColumn(AlterTableDropColumnStatement ast) : BaseDbA
                     row.Remove(columnName);
                 }
 
-                RewriteTable(tableName, databaseName, existingRows, indexes);
+                TableRewrite.ReplaceRows(Engine, databaseName, tableName, existingRows, indexes);
             }
             finally
             {
@@ -63,7 +62,7 @@ internal class AlterTableDropColumn(AlterTableDropColumnStatement ast) : BaseDbA
         }
 
         var columns = Catalog.GetTableColumns(tableName, databaseName);
-        if (!columns.Any(column => column.Name == columnName))
+        if (!columns.Any(column => TableRewrite.SameColumn(column.Name, columnName)))
         {
             throw new CatalogException($"Column {columnName} does not exist in table {tableName}!");
         }
@@ -73,48 +72,30 @@ internal class AlterTableDropColumn(AlterTableDropColumnStatement ast) : BaseDbA
             throw new CatalogException("ALTER TABLE DROP COLUMN cannot remove the last remaining column.");
         }
 
-        if (Catalog.GetTablePrimaryKeys(tableName, databaseName).Contains(columnName))
+        if (TableRewrite.ContainsColumn(Catalog.GetTablePrimaryKeys(tableName, databaseName), columnName))
         {
             throw new CatalogException("ALTER TABLE DROP COLUMN cannot drop a PRIMARY KEY column in this version.");
         }
 
-        if (Catalog.GetTableUniqueKeys(tableName, databaseName).Contains(columnName))
+        if (TableRewrite.ContainsColumn(Catalog.GetTableUniqueKeys(tableName, databaseName), columnName))
         {
             throw new CatalogException("ALTER TABLE DROP COLUMN cannot drop a UNIQUE column in this version.");
         }
 
-        if (Catalog.GetTableForeignKeys(tableName, databaseName).Any(fk => fk.AttributeName == columnName))
+        if (Catalog.GetTableForeignKeys(tableName, databaseName).Any(fk => TableRewrite.SameColumn(fk.AttributeName, columnName)))
         {
             throw new CatalogException("ALTER TABLE DROP COLUMN cannot drop a FOREIGN KEY column in this version.");
         }
 
-        if (Catalog.GetChildForeignKeys(tableName, databaseName).Any(fk => fk.ParentColumn == columnName))
+        if (Catalog.GetChildForeignKeys(tableName, databaseName).Any(fk => TableRewrite.SameColumn(fk.ParentColumn, columnName)))
         {
             throw new CatalogException("ALTER TABLE DROP COLUMN cannot drop a referenced column in this version.");
         }
 
-        if (Catalog.GetTableIndexedColumns(tableName, databaseName).ContainsKey(columnName))
+        if (TableRewrite.IsIndexedColumn(Catalog, databaseName, tableName, columnName))
         {
             throw new CatalogException("ALTER TABLE DROP COLUMN cannot drop an indexed column in this version.");
         }
     }
 
-    private void RewriteTable(string tableName, string databaseName, List<Dictionary<string, object?>> rows, List<IndexFile> indexes)
-    {
-        Context.DropTable(tableName, databaseName);
-
-        foreach (var index in indexes)
-        {
-            Indexes.DropIndex(index.IndexFileName, tableName, databaseName);
-        }
-
-        List<RowKey> newRowIds = Context.InsertIntoTable(rows, tableName, databaseName);
-
-        foreach (var index in indexes)
-        {
-            ScalarIndexContents indexData = ScalarIndexContents.From(rows, newRowIds, index.AttributeNames);
-
-            Indexes.CreateIndex(indexData, index.IndexFileName, tableName, databaseName);
-        }
-    }
 }

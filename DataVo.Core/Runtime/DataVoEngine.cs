@@ -428,6 +428,16 @@ public sealed partial class DataVoEngine : IDisposable
         indexFiles.RemoveAll(index =>
             IndexManager.SupportsVectorIndexType(index.IndexKind)
             && TryRestoreVectorIndexFromSnapshot(databaseName, tableName, index));
+        RebuildIndexesFromRows(databaseName, tableName, indexFiles);
+    }
+
+    /// <summary>
+    /// Rebuilds the given indexes of a table from its current rows, each as its own kind: vector indexes
+    /// (HNSW, FLAT) with their metric and options, scalar indexes as key indexes. Any existing contents of
+    /// those indexes are replaced.
+    /// </summary>
+    internal void RebuildIndexesFromRows(string databaseName, string tableName, IReadOnlyList<IndexFile> indexFiles)
+    {
         if (indexFiles.Count == 0)
         {
             return;
