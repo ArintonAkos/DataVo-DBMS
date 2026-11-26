@@ -379,10 +379,8 @@ public static class DataVoCompiledQuery
             throw new InvalidOperationException($"Plan kind '{plan.Kind}' cannot be executed as Update.");
         }
 
-        if (context.Engine.TransactionManager.HasActiveTransaction(context.SessionId))
-        {
-            throw new NotSupportedException("Compiled update plans do not support active transactions.");
-        }
+        context.Engine.AuthorizeDirectAccess(context.SessionId, DatabasePermission.WriteData);
+        ThrowIfActiveTransaction(context);
 
         // Zero-allocation byte-patch path for fixed-width, index-resolved single-row updates. Returns false
         // for any shape it cannot handle, falling through to the dictionary path below.
@@ -512,10 +510,8 @@ public static class DataVoCompiledQuery
             throw new InvalidOperationException($"Plan kind '{plan.Kind}' cannot be executed as Update.");
         }
 
-        if (context.Engine.TransactionManager.HasActiveTransaction(context.SessionId))
-        {
-            throw new NotSupportedException("Compiled update plans do not support active transactions.");
-        }
+        context.Engine.AuthorizeDirectAccess(context.SessionId, DatabasePermission.WriteData);
+        ThrowIfActiveTransaction(context);
 
         if (TryUpdateFixedWidthFastPath(context, plan, parameters, out int fastPathAffected))
         {
@@ -554,10 +550,8 @@ public static class DataVoCompiledQuery
             throw new ArgumentException("Assignment values must match the compiled update assignment count.", nameof(assignmentValues));
         }
 
-        if (context.Engine.TransactionManager.HasActiveTransaction(context.SessionId))
-        {
-            throw new NotSupportedException("Compiled update plans do not support active transactions.");
-        }
+        context.Engine.AuthorizeDirectAccess(context.SessionId, DatabasePermission.WriteData);
+        ThrowIfActiveTransaction(context);
 
         if (TryUpdateFixedWidthFastPath(context, plan, primaryKeyValue, assignmentValues, out int fastPathAffected))
         {
@@ -595,6 +589,8 @@ public static class DataVoCompiledQuery
         }
 
         DataVoEngine engine = context.Engine;
+        engine.AuthorizeDirectAccess(context.SessionId, DatabasePermission.WriteData);
+        ThrowIfActiveTransaction(context);
         if (!engine.Config.EnableZeroAllocCompiledUpdate
             || engine.Config.StorageMode != StorageMode.Lsm
             || engine.Changes.Enabled)
@@ -615,33 +611,54 @@ public static class DataVoCompiledQuery
             throw new NotSupportedException("Batched fixed-width primary-key updates require an eligible integer primary-key update plan.");
         }
 
+        // The stamp is taken in the write unit and before the table lock (see CommitClock), as BulkInsert does.
         using CommitClock.UnitScope writeUnit = CommitClock.OpenUnit();
         long statementTxId = MvccCoordinator.ResolveStatementTransactionId(engine, null);
-        var operations = new List<FixedWidthPatchOperation>(updates.Count);
-        for (int i = 0; i < updates.Count; i++)
+
+        // The batch resolves, validates and patches many rows as one unit: an exclusive table lock keeps row
+        // writers (which hold intent locks on the table) and other bulk writers out for its duration.
+        engine.LockManager.AcquireWriteLock(databaseName, plan.TableName);
+        try
         {
-            DataVoFixedWidthUpdateBatchEntry update = updates[i];
-            if (!TryConvertToInt64(update.PrimaryKey, out long primaryKey))
+            var operations = new List<FixedWidthPatchOperation>(updates.Count);
+            for (int i = 0; i < updates.Count; i++)
             {
-                throw new ArgumentException("Primary key values must be convertible to Int64.", nameof(updates));
+                DataVoFixedWidthUpdateBatchEntry update = updates[i];
+                if (!TryConvertToInt64(update.PrimaryKey, out long primaryKey))
+                {
+                    throw new ArgumentException("Primary key values must be convertible to Int64.", nameof(updates));
+                }
+
+                if (!engine.IndexManager.TryLookupIntegerPrimaryKey(primaryKey, schema.PkIndexName, plan.TableName, databaseName, out RowKey rowId))
+                {
+                    continue;
+                }
+
+                MvccCoordinator.ValidateCanModifyRow(engine, databaseName, plan.TableName, rowId, null, "UPDATE");
+                operations.Add(new FixedWidthPatchOperation(rowId, update.Value0, update.Value1));
             }
 
-            if (!engine.IndexManager.TryLookupIntegerPrimaryKey(primaryKey, schema.PkIndexName, plan.TableName, databaseName, out RowKey rowId))
-            {
-                continue;
-            }
-
-            MvccCoordinator.ValidateCanModifyRow(engine, databaseName, plan.TableName, rowId, null, "UPDATE");
-            operations.Add(new FixedWidthPatchOperation(rowId, update.Value0, update.Value1));
+            RetainImagesBeforeBatchPatch(engine, databaseName, plan.TableName, operations, statementTxId);
+            return engine.StorageContext.TryPatchFixedWidthRows(
+                plan.TableName,
+                databaseName,
+                schema.Columns,
+                schema.AssignOrdinals,
+                operations);
         }
+        finally
+        {
+            engine.LockManager.ReleaseWriteLock(databaseName, plan.TableName);
+        }
+    }
 
-        RetainImagesBeforeBatchPatch(engine, databaseName, plan.TableName, operations, statementTxId);
-        return engine.StorageContext.TryPatchFixedWidthRows(
-            plan.TableName,
-            databaseName,
-            schema.Columns,
-            schema.AssignOrdinals,
-            operations);
+    /// <summary>Rejects compiled DML on a session with an explicit transaction, which these paths bypass.</summary>
+    private static void ThrowIfActiveTransaction(DataVoContext context)
+    {
+        if (context.Engine.TransactionManager.HasActiveTransaction(context.SessionId))
+        {
+            throw new NotSupportedException("Compiled update plans do not support active transactions.");
+        }
     }
 
     /// <summary>
