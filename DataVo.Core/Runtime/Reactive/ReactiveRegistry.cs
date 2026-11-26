@@ -20,6 +20,7 @@ public sealed class ReactiveRegistry
     private List<ChangeSet> _incomingBuffer = new(16);
     private List<ChangeSet>? _spareBuffer = new(16);
     private bool _hooked;
+    private bool _enabledCapture;
 
     /// <summary>
     /// Initializes a new registry bound to the supplied engine.
@@ -182,7 +183,7 @@ public sealed class ReactiveRegistry
         string databaseName = ResolveDatabase(ctx);
         Parser.AST.SqlStatement boundStatement = statement.BindSingleReactiveStatement(parameters);
         Parser.Binding.SqlNameResolver.Resolve(boundStatement, _engine, databaseName);
-        IReactiveQuery subscription = CreateQuery(boundStatement, databaseName, statement.Sql);
+        IReactiveQuery subscription = CreateQuery(boundStatement, databaseName);
         return (subscription, databaseName);
     }
 
@@ -426,16 +427,44 @@ public sealed class ReactiveRegistry
             return;
         }
 
+        _enabledCapture = !_engine.Changes.Enabled;
         _engine.Changes.Enabled = true;
         _engine.Changes.Captured += Enqueue;
         _hooked = true;
+    }
+
+    /// <summary>
+    /// Detaches from change capture once the last subscription is gone, so a long-lived engine stops
+    /// buffering change sets nobody will drain. Capture is switched back off only when this registry turned
+    /// it on and no other subscriber still listens. Caller holds <c>_gate</c>.
+    /// </summary>
+    private void UnhookNoLock()
+    {
+        if (!_hooked)
+        {
+            return;
+        }
+
+        _engine.Changes.Captured -= Enqueue;
+        _hooked = false;
+        _incomingBuffer.Clear();
+        if (_enabledCapture && !_engine.Changes.HasInterestedSubscribers(origin: null))
+        {
+            _engine.Changes.Enabled = false;
+        }
+
+        _enabledCapture = false;
     }
 
     private void Enqueue(ChangeSet set)
     {
         lock (_gate)
         {
-            _incomingBuffer.Add(set);
+            // A change set published while the last subscription was being removed has no reader.
+            if (_subscriptions.Count > 0)
+            {
+                _incomingBuffer.Add(set);
+            }
         }
     }
 
@@ -446,6 +475,22 @@ public sealed class ReactiveRegistry
             registration.Disposed = true;
             _subscriptions.Remove(registration);
             _subscriptionsSnapshot = _subscriptions.ToArray();
+            if (_subscriptions.Count == 0)
+            {
+                UnhookNoLock();
+            }
+        }
+    }
+
+    /// <summary>Gets the number of buffered, undrained change sets (test diagnostics).</summary>
+    internal int PendingChangeSetCount
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _incomingBuffer.Count;
+            }
         }
     }
 
@@ -478,7 +523,7 @@ public sealed class ReactiveRegistry
 
         Parser.AST.SqlStatement statement = ReactiveQueryParser.ParseSingleStatement(sql);
         Parser.Binding.SqlNameResolver.Resolve(statement, _engine, databaseName);
-        return CreateQuery(statement, databaseName, sql);
+        return CreateQuery(statement, databaseName);
     }
 
     /// <summary>
@@ -488,8 +533,7 @@ public sealed class ReactiveRegistry
     /// </summary>
     /// <param name="statement">The parsed SELECT-family statement.</param>
     /// <param name="databaseName">The database that owns the query's source tables.</param>
-    /// <param name="sql">The original SQL, threaded through only so the linear fallback can report it; <c>null</c> for recursively-compiled UNION branches.</param>
-    private IReactiveQuery CreateQuery(Parser.AST.SqlStatement statement, string databaseName, string? sql = null)
+    private IReactiveQuery CreateQuery(Parser.AST.SqlStatement statement, string databaseName)
     {
         if (statement is Parser.AST.UnionSelectStatement union)
         {
