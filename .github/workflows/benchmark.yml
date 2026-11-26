@@ -102,7 +102,9 @@ jobs:
 
           SCENARIOS_INPUT="${{ github.event.inputs.scenarios || 'all' }}"
           if [[ "$SCENARIOS_INPUT" == "all" || -z "$SCENARIOS_INPUT" ]]; then
+            # Keep in sync with the scenarios Research.Benchmark.Host/Program.cs accepts.
             scenarios=(
+              "arena-live-views"
               "simple-exposure"
               "complex-vip"
               "flat-crud"
@@ -113,6 +115,9 @@ jobs:
               "thread-scaling"
               "ycsb-mixed"
               "space-and-recovery"
+              "sql-workload"
+              "sql-matrix"
+              "hybrid-vector"
             )
           else
             IFS=',' read -r -a raw_scenarios <<< "$SCENARIOS_INPUT"

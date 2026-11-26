@@ -3,7 +3,8 @@ name: Randomized correctness
 # Long randomized runs: the LSM engine against a dictionary model (with crashes and reopens), and random
 # SQL against SQLite. The default CI run uses a few fixed seeds; these runs use many fresh seeds each
 # night, because the bugs they find hide in rare interleavings (one needed 40 seeds x 1500 steps).
-# A failure message names its seed: rerun it locally with DATAVO_SEED_OFFSET=<seed - 1> and SEEDS=1.
+# A failure message names its seed: rerun it locally with DATAVO_SEED_OFFSET=<seed - 1> and
+# DATAVO_MODEL_SEEDS=1 (LsmModelBasedTests) or DATAVO_DIFF_SEEDS=1 (SqliteDifferentialTests).
 
 on:
   schedule:
