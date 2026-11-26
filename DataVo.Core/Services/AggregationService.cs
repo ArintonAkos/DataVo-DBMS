@@ -7,17 +7,6 @@ namespace DataVo.Core.Services
 {
     internal class AggregationService
     {
-        public static Aggregation CreateInstance(string functionName, Column column)
-        {
-            return CreateInstance(
-                functionName,
-                column,
-                null,
-                row => row[column.TableName][column.ColumnName],
-                null
-            );
-        }
-
         public static Aggregation CreateInstance(string functionName, ExpressionNode? expression, Func<JoinedRow, object?> valueSelector, string headerName, Column? column = null)
         {
             return CreateInstance(functionName, column, expression, valueSelector, headerName);

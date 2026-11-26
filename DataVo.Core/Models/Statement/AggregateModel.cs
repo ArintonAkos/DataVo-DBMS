@@ -19,75 +19,39 @@ namespace DataVo.Core.Models.Statement
 
             foreach (var node in columns)
             {
-                // Prefer structured AST if available
-                if (node.Expression is AggregateExpressionNode aggNode)
+                // Only structured aggregate nodes produce aggregations; the parser always attaches one.
+                if (node.Expression is not AggregateExpressionNode aggNode)
                 {
-                    string functionName = aggNode.FunctionName;
-                    Column? column = ResolveAggregateColumn(databaseName, tableService, aggNode);
+                    continue;
+                }
 
-                    Func<JoinedRow, object?> selector = row =>
+                string functionName = aggNode.FunctionName;
+                Column? column = ResolveAggregateColumn(databaseName, tableService, aggNode);
+
+                Func<JoinedRow, object?> selector = row =>
+                {
+                    if (aggNode.IsStar)
                     {
-                        if (aggNode.IsStar)
-                        {
-                            return 1;
-                        }
+                        return 1;
+                    }
 
-                        if (aggNode.Argument == null)
-                        {
-                            return null;
-                        }
+                    if (aggNode.Argument == null)
+                    {
+                        return null;
+                    }
 
-                        return ExpressionEvaluator.Evaluate(
-                            aggNode.Argument,
-                            row,
-                            (colRef, joinedRow) => ResolveColumnValue(joinedRow, colRef, tableService),
-                            (_, _) => throw new EvaluationException("Nested aggregate expressions are not supported.")
-                        );
-                    };
+                    return ExpressionEvaluator.Evaluate(
+                        aggNode.Argument,
+                        row,
+                        (colRef, joinedRow) => ResolveColumnValue(joinedRow, colRef, tableService),
+                        (_, _) => throw new EvaluationException("Nested aggregate expressions are not supported.")
+                    );
+                };
 
-                    string headerName = AggregateExpressionFormatter.BuildHeader(aggNode);
-                    Aggregation aggregation = AggregationService.CreateInstance(functionName, aggNode.Argument, selector, headerName, column);
-                    aggregation.IsDistinct = aggNode.IsDistinct;
-                    aggregations.Add(aggregation);
-                    continue;
-                }
-
-                // Fallback for legacy raw-expression strings
-                string token = (node.RawExpression ?? string.Empty).Trim();
-                if (token.Contains("OVER", StringComparison.OrdinalIgnoreCase))
-                {
-                    continue;
-                }
-
-                int openParen2 = token.IndexOf('(');
-                int closeParen2 = token.LastIndexOf(')');
-
-                if (openParen2 <= 0 || closeParen2 <= openParen2)
-                {
-                    continue;
-                }
-
-                string functionName2 = token[..openParen2].Trim();
-                if (!IsAggregateFunction(functionName2))
-                {
-                    continue;
-                }
-
-                string rawColumnName2 = token[(openParen2 + 1)..closeParen2].Trim();
-
-                Column column2;
-                if (functionName2.Equals("count", StringComparison.OrdinalIgnoreCase) && rawColumnName2 == "*")
-                {
-                    column2 = new(databaseName, "*", "");
-                }
-                else
-                {
-                    var parseResult = tableService.ParseAndFindTableNameByColumn(rawColumnName2);
-                    column2 = new(databaseName, parseResult.Item1, parseResult.Item2);
-                }
-
-                Aggregation aggregation2 = AggregationService.CreateInstance(functionName2, column2);
-                aggregations.Add(aggregation2);
+                string headerName = AggregateExpressionFormatter.BuildHeader(aggNode);
+                Aggregation aggregation = AggregationService.CreateInstance(functionName, aggNode.Argument, selector, headerName, column);
+                aggregation.IsDistinct = aggNode.IsDistinct;
+                aggregations.Add(aggregation);
             }
 
             return new AggregateModel(aggregations);
@@ -130,15 +94,6 @@ namespace DataVo.Core.Models.Statement
             }
 
             return row[tableName][columnName];
-        }
-
-        private static bool IsAggregateFunction(string functionName)
-        {
-            return functionName.Equals("count", StringComparison.OrdinalIgnoreCase)
-                || functionName.Equals("sum", StringComparison.OrdinalIgnoreCase)
-                || functionName.Equals("avg", StringComparison.OrdinalIgnoreCase)
-                || functionName.Equals("min", StringComparison.OrdinalIgnoreCase)
-                || functionName.Equals("max", StringComparison.OrdinalIgnoreCase);
         }
     }
 }
