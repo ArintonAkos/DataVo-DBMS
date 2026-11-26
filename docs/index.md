@@ -4,7 +4,7 @@ layout: home
 hero:
   name: "DataVo"
   text: "C#-native embedded database"
-  tagline: "In-process SQL, LSM storage, vector search, and live Z-set reactive views for .NET 8, 9 and 10. Documentation for v0.5 (0.5.0)."
+  tagline: "In-process SQL, LSM storage, vector search, and live Z-set reactive views for .NET 8, 9 and 10. Documentation for v0.5 (0.5.1)."
   actions:
     - theme: brand
       text: Quickstart

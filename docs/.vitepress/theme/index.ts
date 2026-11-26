@@ -25,6 +25,12 @@ function resolveLegacyRedirect(raw: string): string | null {
   const query = queryIndex >= 0 ? withoutHash.slice(queryIndex) : '';
   let pathname = queryIndex >= 0 ? withoutHash.slice(0, queryIndex) : withoutHash;
 
+  try {
+    pathname = decodeURIComponent(pathname);
+  } catch {
+    // Keep raw pathname if percent-encoding is malformed.
+  }
+
   if (pathname.startsWith(`${BASE_PREFIX}/`)) {
     pathname = pathname.slice(BASE_PREFIX.length);
   } else if (pathname === BASE_PREFIX) {
@@ -32,12 +38,19 @@ function resolveLegacyRedirect(raw: string): string | null {
   }
 
   pathname = pathname.replace(/\.html$/u, '').replace(/\/+$/u, '');
-  const target = LEGACY_REDIRECTS[pathname];
-  if (!target) {
-    return null;
+  const directTarget = LEGACY_REDIRECTS[pathname];
+  if (directTarget) {
+    return `${withBase(directTarget)}${query}${hash}`;
   }
 
-  return `${withBase(target)}${query}${hash}`;
+  // Strip stray trailing markdown punctuation (e.g. `/manual/getting-started/roadmap))` or `roadmap)):`).
+  const stripped = pathname.replace(/[):]+$/u, '');
+  if (stripped && stripped !== pathname) {
+    const target = LEGACY_REDIRECTS[stripped] ?? stripped;
+    return `${withBase(target)}${query}${hash}`;
+  }
+
+  return null;
 }
 
 declare global {

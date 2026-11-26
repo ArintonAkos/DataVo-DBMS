@@ -78,7 +78,7 @@ Full tables, methodology, cross-platform CI runs, and raw outputs:
 
 ## Install
 
-Current release on [nuget.org](https://www.nuget.org/packages/DataVo.Core/): **0.5.0** (25 November 2026; see the [roadmap](https://arintonakos.github.io/DataVo-DBMS/manual/getting-started/roadmap)):
+Current release on [nuget.org](https://www.nuget.org/packages/DataVo.Core/): **0.5.1** (26 November 2026) — see the [roadmap](https://arintonakos.github.io/DataVo-DBMS/manual/getting-started/roadmap):
 
 ```bash
 dotnet add package DataVo.Core
@@ -199,7 +199,7 @@ The full manual is live at [arintonakos.github.io/DataVo-DBMS](https://arintonak
 
 ## Status
 
-DataVo `0.5.0` is a pre-1.0 release. The documented SQL dialect and C# APIs may still change between minor versions, and the on-disk format does not yet carry a long-term cross-version compatibility guarantee, so keep an export or seed script for important data. Validate your own workload before relying on it in production.
+DataVo `0.5.1` is a pre-1.0 release. The documented SQL dialect and C# APIs may still change between minor versions, and the on-disk format does not yet carry a long-term cross-version compatibility guarantee, so keep an export or seed script for important data. Validate your own workload before relying on it in production.
 
 ## License
 

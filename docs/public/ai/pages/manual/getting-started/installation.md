@@ -3,7 +3,7 @@
 > Source route: /manual/getting-started/installation
 > Source file: manual/getting-started/installation.md
 
-DataVo ships as five NuGet packages on `nuget.org`, with `DataVo.Core` as the foundation. The current release is **0.5.0**.
+DataVo ships as five NuGet packages on `nuget.org`, with `DataVo.Core` as the foundation. The current release is **0.5.1**.
 
 ```bash
 dotnet add package DataVo.Core

@@ -437,3 +437,7 @@ docs/scripts/.matplotlib-cache/
 # macOS local Application Support directory
 /Library/
 
+output/
+
+output/
+supabase_answers.txt

@@ -8,6 +8,8 @@ export const LEGACY_REDIRECTS: Record<string, string> = {
   '/manual/preface/project-status': '/manual/getting-started/roadmap',
   '/manual/preface/alpha-scope': '/manual/getting-started/roadmap',
   '/manual/preface/roadmap': '/manual/getting-started/roadmap',
+  '/manual/getting-started/roadmap)': '/manual/getting-started/roadmap',
+  '/manual/getting-started/roadmap))': '/manual/getting-started/roadmap',
   '/manual/tutorial/quickstart': '/manual/getting-started/quickstart',
   '/manual/tutorial/datavo-context': '/manual/client-interfaces/datavo-context-api',
   '/manual/tutorial/ado-net-and-dapper': '/manual/client-interfaces/dapper',

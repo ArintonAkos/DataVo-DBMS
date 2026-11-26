@@ -1,11 +1,11 @@
 ---
 title: Installation & Packages
-description: Install DataVo v0.5 (0.5.0) NuGet packages for .NET 8, 9 and 10, including Core, Generators, ADO.NET, and EF Core.
+description: Install DataVo v0.5 (0.5.1) NuGet packages for .NET 8, 9 and 10, including Core, Generators, ADO.NET, and EF Core.
 ---
 
 # Installation & Packages
 
-DataVo ships as five NuGet packages on `nuget.org`, with `DataVo.Core` as the foundation. The current release is **0.5.0**.
+DataVo ships as five NuGet packages on `nuget.org`, with `DataVo.Core` as the foundation. The current release is **0.5.1**.
 
 ```bash
 dotnet add package DataVo.Core

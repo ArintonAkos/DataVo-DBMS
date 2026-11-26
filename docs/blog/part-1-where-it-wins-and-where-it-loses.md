@@ -16,7 +16,7 @@ When you build a local-first .NET application today—a desktop tool that has to
 
 I wanted to know what happens if you collapse all of that into a single managed .NET 10 process.
 
-Over the last several months, I have been building two pieces to test that idea. **DataVo-DBMS** is an MIT-licensed embedded relational, columnar, and vector database written from scratch in pure C# (compiling cleanly under Native AOT). **DataVo-Sync** is a separate, proprietary commercial add-on that keeps a local DataVo store synchronized with PostgreSQL in both directions, including writes made while offline.
+Over the last several months, I have been building two pieces to test that idea. **[DataVo-DBMS](https://github.com/ArintonAkos/DataVo-DBMS)** is an MIT-licensed embedded relational, columnar, and vector database written from scratch in pure C# (compiling cleanly under Native AOT). **[DataVo-Sync](https://github.com/ArintonAkos/DataVo-Sync)** is a separate, proprietary commercial add-on that keeps a local DataVo store synchronized with PostgreSQL in both directions, including writes made while offline.
 
 This first post is a map of the whole system: why it is structured the way it is, what kinds of applications it actually fits, and what the numbers look like when measured against SQLite, DuckDB, and ElectricSQL across macOS, Linux, and Windows.
 
@@ -28,6 +28,10 @@ At a glance, the approach pays off in four specific places:
 - **Compact offline-first Postgres sync:** End-to-end PostgreSQL 17 replication transfers **45.5 bytes per row** over the wire (**8.0× smaller** than ElectricSQL `1.8.1`) with **5.1–6.9× lower** client GC allocations, converging automatically after a burst of 500 offline writes.
 
 It also loses in predictable places: unindexed substring scans (**1.35× slower** than SQLite on `LIKE '%042-%'`), whole-table analytical scans without `[Columnar]` (**3–340× slower** than DuckDB), Linux single-row durable `StrictFsync` latency (**0.241 ms** vs **0.108 ms**, **2.2× slower** than SQLite WAL `FULL`), and sync hub cold-start time (**2.4 s** to load 100k rows). Those losses are reported alongside the wins below, because an embedded database is only useful once you know where its boundaries are.
+
+::: tip Try or bookmark DataVo
+Explore or star the MIT-licensed engine at [`ArintonAkos/DataVo-DBMS`](https://github.com/ArintonAkos/DataVo-DBMS), or jump to the self-hosted Postgres sync quickstart at [`ArintonAkos/DataVo-Sync`](https://github.com/ArintonAkos/DataVo-Sync).
+:::
 
 ## Why put all of this in one process?
 
@@ -53,7 +57,7 @@ DataVo exists for four narrower situations where the usual stack starts to show 
 
 *Figure 1: Traditional .NET local-first assembly vs. single-process consolidation in DataVo.*
 
-It is equally important to be clear about what DataVo is **not**. It is not a client/server database: a lock file (`datavo.lock`) gives one process exclusive ownership of a database directory. Transactions provide snapshot isolation rather than serializability <a class="cite-badge" href="#ref-2">2</a>. Its SQL dialect intentionally leaves out features teams expect from full-scale SQL engines: no `CASE`/`CAST`/`COALESCE` or date functions, no window functions beyond `RANK()`, and no `CREATE VIEW`, triggers, or stored procedures. At `0.4.0-rc.1` it is prerelease software whose on-disk format does not yet carry a cross-version compatibility guarantee: standalone local databases require an export and re-import across breaking format changes, whereas `DataVo-Sync` setups treat PostgreSQL as the source of truth and can simply wipe and re-hydrate the local replica (**~0.7 s** for 100k rows).
+It is equally important to be clear about what DataVo is **not**. It is not a client/server database: a lock file (`datavo.lock`) gives one process exclusive ownership of a database directory. Transactions provide snapshot isolation rather than serializability <a class="cite-badge" href="#ref-2">2</a>. Its SQL dialect intentionally leaves out features teams expect from full-scale SQL engines: no `CASE`/`CAST`/`COALESCE` or date functions, no window functions beyond `RANK()`, and no `CREATE VIEW`, triggers, or stored procedures. At `0.5.1` (the current release on NuGet) it is pre-1.0 software whose on-disk format does not yet carry a cross-version compatibility guarantee: standalone local databases require an export and re-import across breaking format changes, whereas `DataVo-Sync` setups treat PostgreSQL as the source of truth and can simply wipe and re-hydrate the local replica (**~0.7 s** for 100k rows).
 
 ## How the engine is put together
 
@@ -265,7 +269,7 @@ The first run of this oracle on 14 November, against the unmodified engine, caug
 
 Each had a distinct bug underneath: a `WHERE` filter on the `NULL`-supplying side of an outer join evaluated before `NULL` padding existed; a parser dropping `DISTINCT` inside an aggregate; a planner comparing a table alias string against a raw table name; row keys emitted in a different order depending on join drive side; and a vector join path applying only the portion of `WHERE` that referenced the vector table.
 
-All five are fixed and covered by regression tests in `0.4.0-rc.1`. I include them here because speed numbers mean little without them: a fast wrong answer is not fast. Rigger and Su's *Pivoted Query Synthesis* <a class="cite-badge" href="#ref-7">7</a> and Slutz's *Massive Stochastic Testing of SQL* <a class="cite-badge" href="#ref-8">8</a> are the intellectual ancestors of this check, though here the oracle is an exact computation from the generator rather than a second database.
+All five were fixed and covered by regression tests in `0.4.0-rc.1` (and carry forward into the current `0.5.1` NuGet release). I include them here because speed numbers mean little without them: a fast wrong answer is not fast. Rigger and Su's *Pivoted Query Synthesis* <a class="cite-badge" href="#ref-7">7</a> and Slutz's *Massive Stochastic Testing of SQL* <a class="cite-badge" href="#ref-8">8</a> are the intellectual ancestors of this check, though here the oracle is an exact computation from the generator rather than a second database.
 
 ## Durability, concurrency, and recovery
 
@@ -381,7 +385,7 @@ Every storage engine is a set of trade-offs. Beyond the SQLite wins on `W6`, `C8
 
 Put those limits together with the wins, and the decision boundary is straightforward:
 
-- **Use SQLite** if you want the default embedded SQL database with the broadest SQL support, the largest ecosystem, and two decades of failure experience. DataVo's dialect is its own and its `0.4.0-rc.1` on-disk format may still change.
+- **Use SQLite** if you want the default embedded SQL database with the broadest SQL support, the largest ecosystem, and two decades of failure experience. DataVo's dialect is its own and its `0.5.1` on-disk format may still change.
 - **Use DuckDB** if your workload is whole-table OLAP analytics over large datasets or Parquet/CSV files. It is one to three orders of magnitude faster than either DataVo or SQLite on those queries.
 - **Use ElectricSQL** if you want read-path sync from PostgreSQL into a browser or app from an established, maintained product. My comparison covers one workload (initial sync and live latency over loopback), not its full feature set. In this setup it served as a read path; DataVo-Sync adds an offline write path, which is a different scope rather than a better implementation of the same one.
 - **Try DataVo** if you are building in .NET and specifically want managed Native AOT packaging with zero native binaries, SQL + `VECTOR(n)` search + Z-set incremental views in one transaction log, or bidirectional offline-first PostgreSQL sync.
@@ -389,8 +393,8 @@ Put those limits together with the wins, and the decision boundary is straightfo
 ## Getting started
 
 ```bash
-dotnet add package DataVo.Core --prerelease
-dotnet add package DataVo.Generators --prerelease   # optional: zero-alloc compiled LINQ
+dotnet add package DataVo.Core
+dotnet add package DataVo.Generators   # optional: zero-alloc compiled LINQ
 ```
 
 ```csharp

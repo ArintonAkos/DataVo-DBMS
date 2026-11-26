@@ -21,6 +21,10 @@ At a glance, five engineering choices drive both the speed and the packaging sto
 
 Each of these optimizations trades runtime cost for additional parity invariants against the general SQL evaluator, memory-ordering constraints, or compiler requirements; the final section examines those trade-offs.
 
+::: tip Source & Benchmarks
+Explore or bookmark the source code, Roslyn generators, Native AOT smoke tests, and reproducible benchmarks at [`ArintonAkos/DataVo-DBMS`](https://github.com/ArintonAkos/DataVo-DBMS).
+:::
+
 ## The invisible tax of crossing the managed–native boundary
 
 When a .NET application reads one row from an in-memory SQLite database via a prepared `SqliteCommand`, the lookup is far more than a B-tree probe in RAM. Even after `Prepare()` compiles the SQL into VDBE bytecode, every row fetch crosses an ABI boundary and navigates a dynamically typed C API <a class="cite-badge" href="#ref-2">2</a> <a class="cite-badge" href="#ref-3">3</a> (Figure 1).

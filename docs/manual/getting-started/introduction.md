@@ -81,7 +81,7 @@ Queries are first offered to **typed execution paths** (single-table scans, inte
 
 ## See Also
 
-- [Installation & Packages](/manual/getting-started/installation): NuGet packages (`0.5.0`) and `.NET 8`/`9`/`10` requirements.
+- [Installation & Packages](/manual/getting-started/installation): NuGet packages (`0.5.1`) and `.NET 8`/`9`/`10` requirements.
 - [Quickstart](/manual/getting-started/quickstart): End-to-end C# walkthrough with `InMemory` and `Lsm`.
 - [DataVo vs SQLite](/manual/performance/datavo-vs-sqlite): Oracle-verified benchmarks across 28 SQL shapes and vector queries.
 - [Status & Roadmap](/manual/getting-started/roadmap): Release guarantees, boundaries, and the milestone history.

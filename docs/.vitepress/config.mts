@@ -11,7 +11,7 @@ const isProdBuild =
 const SITE_URL = "https://arintonakos.github.io/DataVo-DBMS";
 const SITE_TITLE = "DataVo-DBMS";
 const SITE_DESCRIPTION =
-  "C#-native embedded database documentation for DataVo v0.5 (0.5.0).";
+  "C#-native embedded database documentation for DataVo v0.5 (0.5.1).";
 
 const configDir = path.dirname(fileURLToPath(import.meta.url));
 const ogPublicDir = path.resolve(configDir, "../public/og");
@@ -53,6 +53,11 @@ function appendMetaIfMissing(
 const head: HeadConfig[] = [
   ["link", { rel: "icon", type: "image/svg+xml", href: "/DataVo-DBMS/favicon.svg" }],
   ["link", { rel: "icon", type: "image/x-icon", href: "/DataVo-DBMS/favicon.ico" }],
+  [
+    "script",
+    {},
+    `(function(){var p=location.pathname;try{p=decodeURIComponent(p)}catch(e){}if(/[):]+$/.test(p)){var c=p.replace(/[):]+$/,'');if(c&&c!==p){location.replace(c+location.search+location.hash)}}})();`,
+  ],
 ];
 
 if (isProdBuild) {

@@ -1,11 +1,11 @@
 ---
 title: Status & Roadmap
-description: Release guarantees, subsystem stability, explicit boundaries, and the v0.2–v0.5 milestone history for DataVo 0.5.0.
+description: Release guarantees, subsystem stability, explicit boundaries, and the v0.2–v0.5 milestone history for DataVo 0.5.1.
 ---
 
 # Status & Roadmap
 
-The current release on NuGet is **0.5.0 (25 November 2026)**, targeting `.NET 8`, `.NET 9`, `.NET 10` and `netstandard2.1`. This page defines the release contract, subsystem status, architectural boundaries, and the milestone history.
+The current release on NuGet is **0.5.1 (26 November 2026)**, targeting `.NET 8`, `.NET 9`, `.NET 10` and `netstandard2.1`. This page defines the release contract, subsystem status, architectural boundaries, and the milestone history.
 
 ## Release Contract
 
@@ -19,14 +19,14 @@ The current release on NuGet is **0.5.0 (25 November 2026)**, targeting `.NET 8`
 
 | Subsystem | Status | Notes |
 | --- | --- | --- |
-| `DataVoContext` & SQL dialect | Released (0.5.0) | DataVo's own dialect; see [SQL Compatibility](/manual/sql/compatibility) |
-| `InMemory` & `Lsm` storage | Released (0.5.0) | The two storage modes (the paged `Disk` engine was removed in v0.5) |
-| Transactions & MVCC | Released (0.5.0) | Snapshot isolation, savepoints, atomic `COMMIT` |
-| Vector search (`HNSW`, `FLAT`) | Released (0.5.0) | Cosine (`<=>`) and L2 (`<->`), cost-based exact fallback |
-| Columnar indexes & SSTable segments | Released (0.5.0) | In-memory buffers + persisted 4,096-row zone-mapped segments |
-| Live Reactive Views (Z-set IVM) | Released (0.5.0) | Pull-drain subscriptions via `Subscribe` / `SubscribeZeroAlloc` |
-| `DataVo.Generators` & Native AOT | Released (0.5.0) | Trim/AOT analyzers (`IL2026`, `IL3050`) enforced as errors |
-| `DataVo.Data` (ADO.NET & Dapper) | Released (0.5.0) | Standard `System.Data.Common` types; no `DbProviderFactory` |
+| `DataVoContext` & SQL dialect | Released (0.5.1) | DataVo's own dialect; see [SQL Compatibility](/manual/sql/compatibility) |
+| `InMemory` & `Lsm` storage | Released (0.5.1) | The two storage modes (the paged `Disk` engine was removed in v0.5) |
+| Transactions & MVCC | Released (0.5.1) | Snapshot isolation, savepoints, atomic `COMMIT` |
+| Vector search (`HNSW`, `FLAT`) | Released (0.5.1) | Cosine (`<=>`) and L2 (`<->`), cost-based exact fallback |
+| Columnar indexes & SSTable segments | Released (0.5.1) | In-memory buffers + persisted 4,096-row zone-mapped segments |
+| Live Reactive Views (Z-set IVM) | Released (0.5.1) | Pull-drain subscriptions via `Subscribe` / `SubscribeZeroAlloc` |
+| `DataVo.Generators` & Native AOT | Released (0.5.1) | Trim/AOT analyzers (`IL2026`, `IL3050`) enforced as errors |
+| `DataVo.Data` (ADO.NET & Dapper) | Released (0.5.1) | Standard `System.Data.Common` types; no `DbProviderFactory` |
 | `DataVo.EntityFrameworkCore` | Preview bridge | Query/DML bridge only; no migrations, excluded from AOT |
 | `DataVo.Browser` (WebAssembly) | Experimental | Powers the docs playground; not published on npm |
 | `DataVo-Sync` (PostgreSQL sync) | Commercial add-on | Separate proprietary product; see [DataVo-Sync](/manual/fundamentals/datavo-sync) |
@@ -57,7 +57,7 @@ The current release on NuGet is **0.5.0 (25 November 2026)**, targeting `.NET 8`
 - **Typed execution:** `OR`/`LIKE` fast paths, integer-key hash joins, index-driven joins, dense bit-set anti-joins, unboxed `GROUP BY`, UTF-8 byte matching, and in-place top-k.
 - **Vector search:** HNSW diversity heuristic on by default (100% recall@10 on clustered data), cost-based exact scan fallback, SQL `WITH (...)` HNSW parameters, and pre-optimized SIMD kernels.
 
-### v0.5: AI Integration, Client Ergonomics & Native Interop *(released as `0.5.0`)*
+### v0.5: AI Integration, Client Ergonomics & Native Interop *(released as `0.5.0`; current release `0.5.1`)*
 - **Track A (Native Interop):** Native AOT C ABI (`dv_open`, `dv_exec`, `dv_prepare`) for C/Python/Rust/Go, zero-copy Apache Arrow C Data Interface export from columnar buffers/SSTables, and a reference Python binding.
 - **Track B (Client Applications):**
   - *Done:* Build-time compiled `OrderBy`/`ThenBy`, `Skip`/`Take`, `Select` projections, and single-table `ExecuteUpdate`/`ExecuteDelete` in `DataVo.Generators`.
