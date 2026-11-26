@@ -5,16 +5,25 @@ using DataVo.Core.StorageEngine.Lsm.V2;
 
 namespace DataVo.Tests.Lsm;
 
-/// <summary>Version 3 blocks (full keys): files written before prefix compression.</summary>
-public sealed class SsTableKeyedV3Tests : SsTableKeyedTests
+/// <summary>Keyed SSTables (format version 5): prefix-compressed blocks with restart points.</summary>
+public sealed class SsTableKeyedTests : IDisposable
 {
-    protected override bool Compact => false;
-}
+    private readonly string _directory = TestStorageDirectories.Create("sstable_keyed");
 
-/// <summary>Prefix-compressed blocks with restart points (version 5), the default for new files.</summary>
-public sealed class SsTableKeyedV5CompactTests : SsTableKeyedTests
-{
-    protected override bool Compact => true;
+    private string Directory => _directory;
+
+    public static TheoryData<LsmReadMode> Modes => new() { LsmReadMode.MemoryMapped, LsmReadMode.PositionalRead };
+
+    public void Dispose()
+    {
+        try
+        {
+            System.IO.Directory.Delete(_directory, recursive: true);
+        }
+        catch (IOException)
+        {
+        }
+    }
 
     [Fact]
     public void IndexEntries_OfEveryKindOfRowKey_RoundTripInRowKeyOrder()
@@ -42,7 +51,7 @@ public sealed class SsTableKeyedV5CompactTests : SsTableKeyedTests
         var entries = rowKeys.Select(rowKey => (LsmIndexKeyCodec.UserKey(key, rowKey), 1UL, LsmValueType.Put))
             .Append((LsmIndexKeyCodec.UserKey(LsmIndexKeyCodec.EncodeString("sharedX"), 1), 1UL, LsmValueType.Put))
             .ToList();
-        using SsTableKeyedReader reader = SsTableKeyedReader.Open(WriteWith(entries, compact: true), LsmReadMode.PositionalRead);
+        using SsTableKeyedReader reader = SsTableKeyedReader.Open(Write(entries), LsmReadMode.PositionalRead);
         var seen = new List<RowKey>();
         reader.ForEachWithPrefix(LsmIndexKeyCodec.KeyPrefix(key), seen, static (userKey, _, _, _, list) => list.Add(LsmIndexKeyCodec.RowKeyOf(userKey)));
         Assert.Equal(rowKeys, seen);
@@ -75,7 +84,7 @@ public sealed class SsTableKeyedV5CompactTests : SsTableKeyedTests
         var expected = new List<(string Key, ulong Sequence, string Value)>();
         string path = Path.Combine(Directory, $"{Guid.NewGuid():N}.sst");
         using (var stream = new FileStream(path, FileMode.CreateNew, FileAccess.Write))
-        using (var writer = new SsTableKeyedWriter(stream, bloomSuffixLength: 0, compact: true))
+        using (var writer = new SsTableKeyedWriter(stream, bloomSuffixLength: 0))
         {
             for (int i = 0; i < 2_000; i++)
             {
@@ -92,39 +101,6 @@ public sealed class SsTableKeyedV5CompactTests : SsTableKeyedTests
         var actual = new List<(string Key, ulong Sequence, string Value)>();
         reader.ForEach(actual, static (key, sequence, _, value, list) => list.Add((Encoding.UTF8.GetString(key), sequence, Encoding.UTF8.GetString(value))));
         Assert.Equal(expected, actual);
-    }
-
-    [Fact]
-    public void CompactIndexFiles_AreMuchSmaller()
-    {
-        var entries = Enumerable.Range(1, 20_000)
-            .Select(i => (LsmIndexKeyCodec.UserKey(LsmIndexKeyCodec.EncodeInteger(i), i), 5UL, LsmValueType.Put))
-            .ToList();
-        long compact = new FileInfo(WriteWith(entries, compact: true)).Length;
-        long full = new FileInfo(WriteWith(entries, compact: false)).Length;
-        Assert.True(compact < full / 2, $"compact {compact} B vs full {full} B");
-    }
-}
-
-public abstract class SsTableKeyedTests : IDisposable
-{
-    private readonly string _directory = TestStorageDirectories.Create("sstable_keyed");
-
-    protected abstract bool Compact { get; }
-
-    protected string Directory => _directory;
-
-    public static TheoryData<LsmReadMode> Modes => new() { LsmReadMode.MemoryMapped, LsmReadMode.PositionalRead };
-
-    public void Dispose()
-    {
-        try
-        {
-            System.IO.Directory.Delete(_directory, recursive: true);
-        }
-        catch (IOException)
-        {
-        }
     }
 
     [Fact]
@@ -214,10 +190,7 @@ public abstract class SsTableKeyedTests : IDisposable
             writer.Add(LsmIndexKeyCodec.UserKey(LsmIndexKeyCodec.EncodeString("a"), 1), 1, LsmValueType.Put, []));
     }
 
-    private protected string Write(List<(byte[] UserKey, ulong Sequence, LsmValueType Type)> entries) =>
-        WriteWith(entries, Compact);
-
-    private protected string WriteWith(List<(byte[] UserKey, ulong Sequence, LsmValueType Type)> entries, bool compact)
+    private string Write(List<(byte[] UserKey, ulong Sequence, LsmValueType Type)> entries)
     {
         entries.Sort((x, y) =>
         {
@@ -227,7 +200,7 @@ public abstract class SsTableKeyedTests : IDisposable
 
         string path = Path.Combine(_directory, $"{Guid.NewGuid():N}.sst");
         using var stream = new FileStream(path, FileMode.CreateNew, FileAccess.Write);
-        using var writer = new SsTableKeyedWriter(stream, LsmIndexKeyCodec.BloomSuffix, compact: compact);
+        using var writer = new SsTableKeyedWriter(stream, LsmIndexKeyCodec.BloomSuffix);
         foreach ((byte[] userKey, ulong sequence, LsmValueType type) in entries)
         {
             writer.Add(userKey, sequence, type, []);

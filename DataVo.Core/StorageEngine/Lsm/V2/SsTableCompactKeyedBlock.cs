@@ -3,7 +3,7 @@ using System.Buffers.Binary;
 namespace DataVo.Core.StorageEngine.Lsm.V2;
 
 /// <summary>
-/// Compact encoding of a keyed (index) data block, format version 5: each key stores only the bytes it
+/// Encoding of a keyed (index) data block, format version 5: each key stores only the bytes it
 /// does not share with the previous key, with a full key every <see cref="RestartInterval"/> entries
 /// so lookups still binary search (the LevelDB/RocksDB block format).
 /// </summary>
@@ -15,7 +15,7 @@ namespace DataVo.Core.StorageEngine.Lsm.V2;
 /// </code>
 /// Restart entries have shared = 0, so their key bytes are contiguous and can be compared in place.
 /// Index keys of neighbouring entries usually differ only in their last bytes: a 19-byte integer key
-/// plus its 8-byte tag and 4-byte offset (37 bytes in v3) shrink to about 6 bytes.
+/// plus its 8-byte tag shrink to about 6 bytes.
 /// </remarks>
 internal static class SsTableCompactKeyedBlock
 {
