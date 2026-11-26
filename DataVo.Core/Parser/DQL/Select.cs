@@ -446,7 +446,7 @@ internal partial class Select(SelectStatement ast) : BaseDbAction
 
         if (!_model.JoinStatement.ContainsJoin() && hasMissingColumns)
         {
-            throw new BindingException("Invalid columns specified'");
+            throw new BindingException("Invalid columns specified.");
         }
 
         return databaseName;

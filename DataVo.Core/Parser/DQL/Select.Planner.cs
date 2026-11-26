@@ -54,7 +54,7 @@ internal partial class Select
         bool hasMissingColumns = _model.ValidateForPlannerDiagnostics(databaseName);
         if (!_model.JoinStatement.ContainsJoin() && hasMissingColumns)
         {
-            throw new BindingException("Invalid columns specified'");
+            throw new BindingException("Invalid columns specified.");
         }
 
         ExpressionNode? whereExpression = _model.WhereStatement.IsEvaluatable()

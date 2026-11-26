@@ -91,7 +91,7 @@ public sealed class RowChange
 
     /// <summary>Gets the row image after the change, or <c>null</c> for deletes.</summary>
     /// <remarks>
-    /// For typed inserts captured with the <see cref="RowChange(string, long, TypedRow)"/> constructor,
+    /// For typed inserts captured with the <see cref="RowChange(string, RowKey, TypedRow)"/> constructor,
     /// this dictionary is materialized lazily from <see cref="TypedAfter"/> on first access (and cached),
     /// so the borrowed typed lane never allocates it. Vector cells are cloned via
     /// <c>CellValue.ToObject()</c>, preserving the public-boundary safety of the eager path.

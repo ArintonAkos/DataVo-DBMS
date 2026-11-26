@@ -8,9 +8,7 @@ namespace DataVo.Core.Runtime;
 /// Engine-level catalog facade used by the execution pipeline.
 /// </summary>
 /// <remarks>
-/// This currently delegates to the legacy process-wide <see cref="Catalog"/> implementation.
-/// Keeping the dependency behind an engine-owned facade makes the later migration to a truly
-/// instance-scoped catalog substantially smaller.
+/// Each engine owns its own <see cref="CatalogStore"/>, so catalogs of separate engines never share state.
 /// </remarks>
 public sealed class EngineCatalog
 {
@@ -21,10 +19,6 @@ public sealed class EngineCatalog
     // bumps the table's schema version, so a stale entry can never be served.
     private readonly ConcurrentDictionary<string, (int Version, TableValidationMetadata Metadata)> _validationMetadata = new();
 
-    /// <summary>
-    /// Initializes a new engine-scoped catalog facade.
-    /// </summary>
-    /// <param name="config">The engine configuration that determines catalog persistence behavior.</param>
     /// <summary>Finds the spelling a database was created with, or <see langword="null"/> when it does not exist.</summary>
     /// <param name="databaseName">The database name as written by the caller.</param>
     /// <returns>The stored spelling, or <see langword="null"/>.</returns>
@@ -46,6 +40,10 @@ public sealed class EngineCatalog
     /// </example>
     public string? FindTableName(string tableName, string databaseName) => _store.FindTableName(tableName, databaseName);
 
+    /// <summary>
+    /// Initializes a new engine-scoped catalog facade.
+    /// </summary>
+    /// <param name="config">The engine configuration that determines catalog persistence behavior.</param>
     public EngineCatalog(DataVoConfig config)
     {
         _store = new CatalogStore(config);
@@ -127,12 +125,12 @@ public sealed class EngineCatalog
     /// </summary>
     public List<string> GetTables(string databaseName) => _store.GetTables(databaseName);
 
-    /// <summary>
-    /// Returns the primary key columns for a table.
-    /// </summary>
     /// <summary>Whether the table stores its rows under its primary key (see <see cref="Table.Clustered"/>).</summary>
     public bool IsTableClustered(string tableName, string databaseName) => _store.IsTableClustered(tableName, databaseName);
 
+    /// <summary>
+    /// Returns the primary key columns for a table.
+    /// </summary>
     public List<string> GetTablePrimaryKeys(string tableName, string databaseName) =>
         _store.GetTablePrimaryKeys(tableName, databaseName);
 
@@ -226,7 +224,7 @@ public sealed class EngineCatalog
     internal TableValidationMetadata GetTableValidationMetadata(string tableName, string databaseName)
     {
         int version = _store.GetTableSchemaVersion(tableName, databaseName);
-        string key = databaseName + " " + tableName;
+        string key = databaseName + "\0" + tableName;
 
         if (_validationMetadata.TryGetValue(key, out (int Version, TableValidationMetadata Metadata) entry)
             && entry.Version == version)
