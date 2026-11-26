@@ -69,7 +69,7 @@ internal sealed class TransactionIdStateStore
                 stream.Flush(true);
             }
 
-            AtomicFileOperations.ReplaceFromTemp(tmpPath, FilePath);
+            AtomicFileOperations.ReplaceFromTempDurably(tmpPath, FilePath);
         });
     }
 

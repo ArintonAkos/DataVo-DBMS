@@ -225,6 +225,7 @@ internal sealed class WalFileStore
             if (keepStart < 0)
             {
                 DeleteIfExistsCore();
+                AtomicFileOperations.FsyncParentDirectory(FilePath);
                 return;
             }
 
@@ -237,7 +238,7 @@ internal sealed class WalFileStore
                 stream.Flush(true);
             }
 
-            AtomicFileOperations.ReplaceFromTemp(tmpPath, FilePath);
+            AtomicFileOperations.ReplaceFromTempDurably(tmpPath, FilePath);
         });
     }
 

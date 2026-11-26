@@ -33,6 +33,32 @@ internal static class AtomicFileOperations
         }
     }
 
+    /// <summary>
+    /// Replaces <paramref name="destinationPath"/> with <paramref name="tempPath"/> and then fsyncs the parent
+    /// directory on POSIX, so the rename itself survives power loss (the temp file's contents must already be
+    /// flushed). Browser runtimes have no directory handle to sync and skip that step.
+    /// </summary>
+    /// <param name="tempPath">Path of the temporary file containing fully written, flushed content.</param>
+    /// <param name="destinationPath">Path to replace with the temporary file content.</param>
+    public static void ReplaceFromTempDurably(string tempPath, string destinationPath)
+    {
+        ReplaceFromTemp(tempPath, destinationPath);
+        FsyncParentDirectory(destinationPath);
+    }
+
+    /// <summary>
+    /// Fsyncs the directory holding <paramref name="filePath"/> so a rename, create or delete of the entry is
+    /// durable. A no-op on Windows (NTFS journals entries) and in browser runtimes.
+    /// </summary>
+    public static void FsyncParentDirectory(string filePath)
+    {
+        string? directory = Path.GetDirectoryName(Path.GetFullPath(filePath));
+        if (!string.IsNullOrEmpty(directory) && !FileCompat.IsBrowser())
+        {
+            DataVo.Core.StorageEngine.Lsm.LsmDurableFileOperations.FsyncDirectory(directory);
+        }
+    }
+
     private const int SharingViolationRetries = 10;
     private const int SharingViolationRetryDelayMs = 10;
 
