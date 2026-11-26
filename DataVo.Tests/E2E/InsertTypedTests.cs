@@ -461,7 +461,7 @@ public class InsertTypedTests
         using DataVoContext ctx = CreateContext();
         ctx.Execute("CREATE TABLE Players (Id INT PRIMARY KEY, Name VARCHAR(20), Level INT)");
         Guid otherSession = Guid.NewGuid();
-        ctx.Engine.TransactionManager.Begin(otherSession, ctx.Engine.TransactionIdAllocator);
+        ctx.Engine.TransactionManager.Begin(otherSession, ctx.Engine.CommitClock);
 
         try
         {

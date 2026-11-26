@@ -5,7 +5,7 @@ namespace DataVo.Core.Indexing;
 /// </summary>
 /// <remarks>
 /// <para>
-/// All index types (BTree, HNSW, B25, etc.) should implement this interface
+/// All index types (BTree, HNSW, Flat) should implement this interface
 /// to be recognizable by <see cref="IndexManager"/>.
 /// </para>
 /// <para>

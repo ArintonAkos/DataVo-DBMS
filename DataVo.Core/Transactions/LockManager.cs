@@ -532,14 +532,6 @@ public sealed class LockManager
     }
 
     /// <summary>
-    /// Acquires a table-scoped write lock. Kept for callers that hold the key; every table entry is retained now.
-    /// </summary>
-    internal void AcquireRetainedWriteLock(string tableKey)
-    {
-        AcquireWriteLock(tableKey);
-    }
-
-    /// <summary>
     /// Releases a table-scoped read lock acquired through the table-key overloads.
     /// </summary>
     public void ReleaseReadLock(string tableKey)
@@ -553,14 +545,6 @@ public sealed class LockManager
     public void ReleaseWriteLock(string tableKey)
     {
         ReleaseTableLock(FindTableLock(tableKey, "write"), write: true);
-    }
-
-    /// <summary>
-    /// Releases a table-scoped write lock taken by <see cref="AcquireRetainedWriteLock"/>.
-    /// </summary>
-    internal void ReleaseRetainedWriteLock(string tableKey)
-    {
-        ReleaseWriteLock(tableKey);
     }
 
     /// <summary>

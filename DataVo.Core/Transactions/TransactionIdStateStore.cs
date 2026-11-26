@@ -13,10 +13,6 @@ internal sealed class TransactionIdStateStore
 {
     private static readonly ConcurrentDictionary<string, object> FileLocks =
         new(StringComparer.OrdinalIgnoreCase);
-    private const long MinPersistDelta = 128;
-    private static readonly long MinPersistIntervalTicks = TimeSpan.FromMilliseconds(250).Ticks;
-    private long _lastPersistedHighWaterMark = -1;
-    private long _lastPersistTicks;
 
     public TransactionIdStateStore(DataVoConfig config)
     {
@@ -49,6 +45,8 @@ internal sealed class TransactionIdStateStore
         });
     }
 
+    /// <summary>Durably writes the allocator high-water mark (temp file, fsync, atomic replace).</summary>
+    /// <param name="highWaterMark">The non-negative high-water mark to persist.</param>
     public void PersistHighWaterMark(long highWaterMark)
     {
         if (highWaterMark < 0)
@@ -58,20 +56,6 @@ internal sealed class TransactionIdStateStore
 
         ExecuteLocked(() =>
         {
-            long nowTicks = DateTime.UtcNow.Ticks;
-            bool shouldPersistByDelta = highWaterMark - _lastPersistedHighWaterMark >= MinPersistDelta;
-            bool shouldPersistByInterval = nowTicks - _lastPersistTicks >= MinPersistIntervalTicks;
-
-            if (highWaterMark <= _lastPersistedHighWaterMark)
-            {
-                return;
-            }
-
-            if (!shouldPersistByDelta && !shouldPersistByInterval)
-            {
-                return;
-            }
-
             EnsureDirectoryExists();
 
             string tmpPath = FilePath + ".tmp";
@@ -86,38 +70,6 @@ internal sealed class TransactionIdStateStore
             }
 
             AtomicFileOperations.ReplaceFromTemp(tmpPath, FilePath);
-
-            _lastPersistedHighWaterMark = highWaterMark;
-            _lastPersistTicks = nowTicks;
-        });
-    }
-
-    public void ForcePersistHighWaterMark(long highWaterMark)
-    {
-        if (highWaterMark < 0)
-        {
-            throw new ArgumentOutOfRangeException(nameof(highWaterMark), "High-water mark must be non-negative.");
-        }
-
-        ExecuteLocked(() =>
-        {
-            EnsureDirectoryExists();
-
-            string tmpPath = FilePath + ".tmp";
-            string payload = highWaterMark.ToString(CultureInfo.InvariantCulture);
-
-            using (var stream = new FileStream(tmpPath, FileMode.Create, FileAccess.Write, FileShare.None))
-            using (var writer = new StreamWriter(stream, new UTF8Encoding(false)))
-            {
-                writer.Write(payload);
-                writer.Flush();
-                stream.Flush(true);
-            }
-
-            AtomicFileOperations.ReplaceFromTemp(tmpPath, FilePath);
-
-            _lastPersistedHighWaterMark = highWaterMark;
-            _lastPersistTicks = DateTime.UtcNow.Ticks;
         });
     }
 

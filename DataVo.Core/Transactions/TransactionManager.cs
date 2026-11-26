@@ -14,9 +14,11 @@ namespace DataVo.Core.Transactions;
 /// </summary>
 /// <example>
 /// <code>
-/// transactions.Begin(session);
+/// transactions.Begin(session, engine.CommitClock);
 /// // ... buffered DML operations ...
-/// transactions.Commit(session);
+/// TransactionContext context = transactions.BeginCommit(session);
+/// // ... apply context ...
+/// transactions.EndCommit(session);
 /// </code>
 /// </example>
 public sealed class TransactionManager
@@ -34,20 +36,6 @@ public sealed class TransactionManager
     /// </summary>
     /// <remarks>Each engine owns one instance.</remarks>
     public TransactionManager() { }
-
-    /// <summary>
-    /// Opens a new explicit transaction for the given session with MVCC support.
-    /// Allocates a transaction ID and creates a snapshot that defines visibility.
-    /// Throws if the session already has an active transaction.
-    /// </summary>
-    /// <param name="session">The unique session identifier.</param>
-    /// <param name="idAllocator">The transaction ID allocator for assigning globally unique IDs.</param>
-    /// <exception cref="InvalidOperationException">Thrown when a transaction is already active for this session.</exception>
-    public void Begin(Guid session, TransactionIdAllocator idAllocator)
-    {
-        long txId = idAllocator.AllocateTransactionId();
-        Register(session, new TransactionSnapshot(snapshotTimestamp: txId, transactionId: txId));
-    }
 
     /// <summary>
     /// Opens a new explicit transaction whose snapshot is ordered by commit: it sees exactly the commits that
@@ -81,24 +69,6 @@ public sealed class TransactionManager
         }
 
         Logger.Info($"Transaction started with ID {snapshot.TransactionId}.");
-    }
-
-    /// <summary>
-    /// Finalizes the active transaction, returning the buffered context for the caller
-    /// to flush changes to the storage engine. Removes the transaction from the active set.
-    /// </summary>
-    /// <param name="session">The unique session identifier.</param>
-    /// <returns>The <see cref="TransactionContext"/> containing all buffered operations.</returns>
-    /// <exception cref="InvalidOperationException">Thrown when no active transaction exists for this session.</exception>
-    public TransactionContext Commit(Guid session)
-    {
-        if (!TryRemoveActive(session, out TransactionContext? context))
-        {
-            throw new InvalidOperationException("No active transaction to commit.");
-        }
-
-        Logger.Info("Transaction committed.");
-        return context;
     }
 
     /// <summary>

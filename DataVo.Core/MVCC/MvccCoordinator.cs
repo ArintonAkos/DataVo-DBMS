@@ -35,22 +35,6 @@ public static class MvccCoordinator
     public static bool RecordsVersions(DataVoEngine engine) => engine.CommitClock.CurrentUnitRecordsVersions();
 
     /// <summary>
-    /// Ensures a row has version metadata. Legacy rows are bootstrapped as always-visible base versions.
-    /// Writers use this before marking a version obsolete; readers use <see cref="GetVersionOrBase"/>, which
-    /// records nothing.
-    /// </summary>
-    public static RowVersion EnsureRowVersionExists(DataVoEngine engine, string databaseName, string tableName, RowKey rowId)
-    {
-        RowVersion? version = engine.VersionStorageManager.GetVersion(databaseName, tableName, rowId);
-        if (version.HasValue)
-        {
-            return version.Value;
-        }
-
-        return engine.VersionStorageManager.AllocateVersion(databaseName, tableName, rowId, LegacyBootstrapXmin);
-    }
-
-    /// <summary>
     /// Gets a row's version metadata, or the always-visible base version when none is recorded, without
     /// recording anything (absent metadata means the row predates every open snapshot).
     /// </summary>
@@ -106,7 +90,7 @@ public static class MvccCoordinator
     /// <summary>
     /// Registers version metadata for a committed insert batch. When no session holds an open
     /// transaction there is no snapshot the metadata could gate — absent metadata is bootstrapped as an
-    /// always-visible base version (<see cref="EnsureRowVersionExists"/>) — so auto-commit bulk ingest
+    /// always-visible base version (<see cref="GetVersionOrBase"/>) — so auto-commit bulk ingest
     /// skips the per-row entries entirely.
     /// </summary>
     public static void RegisterInsertVersions(

@@ -1,7 +1,7 @@
 namespace DataVo.Core.Indexing;
 
 /// <summary>
-/// Unified metadata for all index types (BTree, HNSW, B25, etc.).
+/// Unified metadata for all index types (BTREE, HNSW, FLAT).
 /// </summary>
 /// <remarks>
 /// <para>
@@ -33,7 +33,7 @@ public class IndexMetadata
     public string ColumnName { get; set; } = "";
 
     /// <summary>
-    /// Gets or sets the index type: "BTREE", "HNSW", "B25", etc.
+    /// Gets or sets the index type: "BTREE", "HNSW", or "FLAT"
     /// </summary>
     public string IndexType { get; set; } = "";
 
@@ -41,34 +41,4 @@ public class IndexMetadata
     /// Gets or sets type-specific parameters (e.g., vector dimension for HNSW, degree for BTree).
     /// </summary>
     public Dictionary<string, object> Parameters { get; set; } = [];
-
-    /// <summary>
-    /// Gets or sets the creation timestamp (UTC).
-    /// </summary>
-    public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
-
-    /// <summary>
-    /// Gets or sets the last modification timestamp (UTC).
-    /// </summary>
-    public DateTime ModifiedAtUtc { get; set; } = DateTime.UtcNow;
-
-    /// <summary>
-    /// Gets or sets the number of entries in the index.
-    /// </summary>
-    public long EntryCount { get; set; }
-
-    /// <summary>
-    /// Gets or sets whether this is a unique constraint index.
-    /// </summary>
-    public bool IsUnique { get; set; }
-
-    /// <summary>
-    /// Gets or sets whether this is a primary key index.
-    /// </summary>
-    public bool IsPrimaryKey { get; set; }
-
-    /// <summary>
-    /// Gets a cache key for this index (format: "database/table_index").
-    /// </summary>
-    public string CacheKey => $"{DatabaseName}/{TableName}_{IndexName}";
 }

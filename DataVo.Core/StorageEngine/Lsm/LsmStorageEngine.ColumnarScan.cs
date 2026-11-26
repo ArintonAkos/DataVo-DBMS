@@ -568,7 +568,7 @@ public sealed partial class LsmStorageEngine
 
         // A key outside every file's range never replaces a file row; the range only grows, so keys skipped
         // here stay outside the files of this version.
-        if (AnyFileWithin(tail, snapshot, readers))
+        if (AnyFileWithin(tail, readers))
         {
             // In key order, so each file's chunks are visited front to back.
             List<RowKey> keys = scratch.Keys;
@@ -605,7 +605,7 @@ public sealed partial class LsmStorageEngine
 
     // Whether any file's key range reaches into the range of keys the tail has touched. The range may have
     // grown since the snapshot was taken, which only makes this say yes more often.
-    private static bool AnyFileWithin(ColumnarIndex tail, in ColumnarSnapshot snapshot, ReadOnlySpan<SsTableV2Reader> readers)
+    private static bool AnyFileWithin(ColumnarIndex tail, ReadOnlySpan<SsTableV2Reader> readers)
     {
         if (!tail.TryGetKeyRange(out RowKey smallest, out RowKey largest))
         {

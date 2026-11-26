@@ -61,13 +61,14 @@ public class TransactionTimestampTests
     }
 
     [Fact]
-    public void TransactionManager_BeginWithAllocator_AssignsTransactionIdAndSnapshot()
+    public void TransactionManager_BeginWithCommitClock_AssignsTransactionIdAndSnapshot()
     {
         var allocator = new TransactionIdAllocator();
         var manager = new TransactionManager();
+        var clock = new CommitClock(allocator, manager.HasAnyOtherActiveTransaction);
         var sessionId = Guid.NewGuid();
 
-        manager.Begin(sessionId, allocator);
+        manager.Begin(sessionId, clock);
 
         var context = manager.GetContext(sessionId);
         Assert.NotNull(context);
@@ -81,11 +82,12 @@ public class TransactionTimestampTests
     {
         var allocator = new TransactionIdAllocator();
         var manager = new TransactionManager();
+        var clock = new CommitClock(allocator, manager.HasAnyOtherActiveTransaction);
         var session1 = Guid.NewGuid();
         var session2 = Guid.NewGuid();
 
-        manager.Begin(session1, allocator);
-        manager.Begin(session2, allocator);
+        manager.Begin(session1, clock);
+        manager.Begin(session2, clock);
 
         var context1 = manager.GetContext(session1);
         var context2 = manager.GetContext(session2);

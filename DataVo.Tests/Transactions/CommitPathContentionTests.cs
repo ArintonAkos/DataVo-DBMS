@@ -14,11 +14,17 @@ namespace DataVo.Tests.Transactions;
 /// </summary>
 public sealed class CommitPathContentionTests
 {
+    private static void Commit(TransactionManager manager, Guid session)
+    {
+        manager.BeginCommit(session);
+        manager.EndCommit(session);
+    }
+
     [Fact]
     public void OpenTransactionCount_FollowsBeginCommitRollbackAndRejectedBegins()
     {
         var manager = new TransactionManager();
-        var ids = new TransactionIdAllocator();
+        var ids = new CommitClock(new TransactionIdAllocator(), manager.HasAnyOtherActiveTransaction);
         Guid first = Guid.NewGuid();
         Guid second = Guid.NewGuid();
 
@@ -36,7 +42,7 @@ public sealed class CommitPathContentionTests
         manager.Begin(second, ids);
         Assert.Equal(firstId, manager.OldestActiveSnapshot());
 
-        manager.Commit(first);
+        Commit(manager, first);
         Assert.True(manager.HasAnyActiveTransaction());
         manager.Rollback(second);
         Assert.False(manager.HasAnyActiveTransaction());
@@ -49,7 +55,7 @@ public sealed class CommitPathContentionTests
     public void OpenTransactionCheck_NeverMissesATransactionThatIsOpen_UnderConcurrentBeginAndEnd()
     {
         var manager = new TransactionManager();
-        var ids = new TransactionIdAllocator();
+        var ids = new CommitClock(new TransactionIdAllocator(), manager.HasAnyOtherActiveTransaction);
         Guid held = Guid.NewGuid();
         manager.Begin(held, ids);
         int stop = 0;
@@ -59,7 +65,7 @@ public sealed class CommitPathContentionTests
             while (Volatile.Read(ref stop) == 0)
             {
                 manager.Begin(session, ids);
-                manager.Commit(session);
+                Commit(manager, session);
             }
         }) { IsBackground = true };
         churn.Start();
@@ -76,7 +82,7 @@ public sealed class CommitPathContentionTests
             churn.Join();
         }
 
-        manager.Commit(held);
+        Commit(manager, held);
         Assert.False(manager.HasAnyActiveTransaction());
     }
 

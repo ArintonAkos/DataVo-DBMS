@@ -73,7 +73,7 @@ public class MvccCoordinatorTests
             MvccCoordinator.ValidateCanModifyRow(engine, "db", "tbl", 7, snapshot: null, "UPDATE");
 
             Guid session = Guid.NewGuid();
-            engine.TransactionManager.Begin(session, engine.TransactionIdAllocator);
+            engine.TransactionManager.Begin(session, engine.CommitClock);
             MvccCoordinator.RegisterDeleteVersion(engine, "db", "tbl", 7, transactionId: 5);
             MvccCoordinator.RegisterInsertVersion(engine, "db", "tbl", 7, transactionId: 6);
             MvccCoordinator.ValidateCanModifyRow(engine, "db", "tbl", 7, snapshot: null, "UPDATE");
@@ -95,7 +95,7 @@ public class MvccCoordinatorTests
         try
         {
             // Version metadata is kept only while some transaction could need it.
-            engine.TransactionManager.Begin(Guid.NewGuid(), engine.TransactionIdAllocator);
+            engine.TransactionManager.Begin(Guid.NewGuid(), engine.CommitClock);
             engine.VersionStorageManager.AllocateVersion("db", "tbl", 10, xmin: 5);
 
             MvccCoordinator.RegisterUpdateVersion(engine, "db", "tbl", oldRowId: 10, newRowId: 11, transactionId: 6);

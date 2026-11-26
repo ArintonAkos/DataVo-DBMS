@@ -240,8 +240,10 @@ public class MVCCIntegrationTests
 
         // Filter visible rows for TX2's snapshot
         var visibleRowIds = new RowKey[] { 1L, 2L, 3L };
-        var filtered = SnapshotVisibilityEvaluator.FilterVisibleRows(
-            visibleRowIds, versionStorage, "db", "tbl", snapshot2);
+        var filtered = visibleRowIds
+            .Where(rowId => versionStorage.GetVersion("db", "tbl", rowId) is { } version
+                && SnapshotVisibilityEvaluator.IsVersionVisible(version, snapshot2))
+            .ToList();
 
         // Row 2 should be filtered out
         Assert.Equal(2, filtered.Count);
@@ -275,6 +277,5 @@ public class MVCCIntegrationTests
         // Should not be able to update a deleted row
         Assert.True(version.HasValue);
         Assert.False(SnapshotVisibilityEvaluator.CanUpdateRow(version.Value, snapshot2));
-        Assert.False(SnapshotVisibilityEvaluator.CanDeleteRow(version.Value, snapshot2));
     }
 }

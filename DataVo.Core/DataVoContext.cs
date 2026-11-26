@@ -1,5 +1,5 @@
 using DataVo.Core.StorageEngine;
-﻿using System.Diagnostics.CodeAnalysis;
+using System.Diagnostics.CodeAnalysis;
 using DataVo.Core.Contracts.Results;
 using DataVo.Core.Models.Catalog;
 using DataVo.Core.MVCC;
@@ -755,7 +755,7 @@ public sealed class DataVoContext : IDisposable
         else
         {
             tableLockKey = GetRetainedWriteLockKey(databaseName, tableName);
-            Engine.LockManager.AcquireRetainedWriteLock(tableLockKey);
+            Engine.LockManager.AcquireWriteLock(tableLockKey);
         }
 
         try
@@ -785,7 +785,7 @@ public sealed class DataVoContext : IDisposable
             }
             else
             {
-                Engine.LockManager.ReleaseRetainedWriteLock(tableLockKey!);
+                Engine.LockManager.ReleaseWriteLock(tableLockKey!);
             }
         }
     }

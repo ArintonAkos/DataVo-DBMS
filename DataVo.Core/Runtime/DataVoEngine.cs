@@ -163,7 +163,7 @@ public sealed partial class DataVoEngine : IDisposable
     private void ReserveTransactionIdBlockNoLock(long from)
     {
         long reserved = from + TransactionIdReservationBlock;
-        _transactionIdStateStore!.ForcePersistHighWaterMark(reserved);
+        _transactionIdStateStore!.PersistHighWaterMark(reserved);
         Volatile.Write(ref _reservedTransactionIdsThrough, reserved);
     }
 
@@ -760,7 +760,7 @@ public sealed partial class DataVoEngine : IDisposable
         if (_transactionIdStateStore != null)
         {
             WaitForTransactionIdRefill();
-            _transactionIdStateStore.ForcePersistHighWaterMark(TransactionIdAllocator.GetCurrentHighWaterMark());
+            _transactionIdStateStore.PersistHighWaterMark(TransactionIdAllocator.GetCurrentHighWaterMark());
         }
 
         // Graphs are captured before the index manager shuts down and written after the storage engine

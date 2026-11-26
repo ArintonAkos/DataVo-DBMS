@@ -443,61 +443,6 @@ public class VersionStorageManager : IDisposable
     public int VersionCount => _versionMetadata.Count;
 
     /// <summary>
-    /// Removes version metadata entries whose backing physical rows no longer exist. A full scan of the
-    /// database's metadata; commits use <see cref="VacuumVersions"/> instead.
-    /// </summary>
-    public int VacuumTable(string databaseName, StorageContext storageContext)
-    {
-        if (storageContext == null)
-        {
-            throw new ArgumentNullException(nameof(storageContext));
-        }
-
-        List<(string DatabaseName, string TableName, RowKey RowId)> candidates;
-        _versionLock.EnterReadLock();
-        try
-        {
-            candidates = _versionMetadata.Keys
-                .Where(k => k.Item1 == databaseName)
-                .Select(k => (k.Item1, k.Item2, k.Item3))
-                .ToList();
-        }
-        finally
-        {
-            _versionLock.ExitReadLock();
-        }
-
-        List<(string DatabaseName, string TableName, RowKey RowId)> missingRows = candidates
-            .Where(k => !storageContext.TableContainsRow(k.RowId, k.TableName, databaseName))
-            .ToList();
-
-        if (missingRows.Count == 0)
-        {
-            return 0;
-        }
-
-        int removed = 0;
-        _versionLock.EnterWriteLock();
-        try
-        {
-            foreach (var key in missingRows)
-            {
-                var metadataKey = (key.DatabaseName, key.TableName, key.RowId);
-                if (_versionMetadata.TryRemove(metadataKey, out _))
-                {
-                    removed++;
-                }
-            }
-        }
-        finally
-        {
-            _versionLock.ExitWriteLock();
-        }
-
-        return removed;
-    }
-
-    /// <summary>
     /// Disposes the version storage manager and releases all resources.
     /// </summary>
     public void Dispose()

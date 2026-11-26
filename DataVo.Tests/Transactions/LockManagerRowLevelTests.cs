@@ -208,13 +208,13 @@ public class LockManagerRowLevelTests
         var locks = new LockManager();
         const string tableKey = "db.users";
 
-        locks.AcquireRetainedWriteLock(tableKey);
-        locks.ReleaseRetainedWriteLock(tableKey);
+        locks.AcquireWriteLock(tableKey);
+        locks.ReleaseWriteLock(tableKey);
 
         Assert.Equal(1, GetPrivateTableLockCount(locks));
 
-        locks.AcquireRetainedWriteLock(tableKey);
-        locks.ReleaseRetainedWriteLock(tableKey);
+        locks.AcquireWriteLock(tableKey);
+        locks.ReleaseWriteLock(tableKey);
 
         Assert.Equal(1, GetPrivateTableLockCount(locks));
     }

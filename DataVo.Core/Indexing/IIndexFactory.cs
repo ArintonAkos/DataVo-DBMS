@@ -5,7 +5,7 @@ namespace DataVo.Core.Indexing;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Each index implementation (BTree, HNSW, B25, etc.) has a corresponding factory
+/// Each index implementation (BTree, HNSW, Flat) has a corresponding factory
 /// responsible for creating new instances with appropriate configuration.
 /// </para>
 /// <para>
@@ -16,7 +16,7 @@ namespace DataVo.Core.Indexing;
 public interface IIndexFactory
 {
     /// <summary>
-    /// Gets the index type identifier (e.g., "BTREE", "HNSW", "B25").
+    /// Gets the index type identifier (e.g., "BTREE", "HNSW", "FLAT").
     /// </summary>
     string IndexType { get; }
 

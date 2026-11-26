@@ -100,8 +100,7 @@ public sealed class LsmCompactor
 
         LsmTableFileMetadata[] targetOverlaps = SelectTargetOverlapsClosed(
             sourceFiles,
-            _manifest.GetLiveFiles(targetLevel),
-            rowKeyed: WritesV2);
+            _manifest.GetLiveFiles(targetLevel));
 
         LsmTableFileMetadata[] selectedFiles = sourceFiles.Concat(targetOverlaps).ToArray();
         LsmSstableHandle[] selectedHandles = _fileRegistry?.AddRefs(selectedFiles) ?? [];
@@ -338,14 +337,13 @@ public sealed class LsmCompactor
     /// <summary>
     /// The user key a file's bounds are compared by.
     /// </summary>
-    private static byte[] BoundUserKey(byte[] internalKey, bool rowKeyed) => InternalKey.UserKey(internalKey).ToArray();
+    private static byte[] BoundUserKey(byte[] internalKey) => InternalKey.UserKey(internalKey).ToArray();
 
     private static LsmTableFileMetadata[] SelectTargetOverlapsClosed(
         IReadOnlyList<LsmTableFileMetadata> sourceFiles,
-        IReadOnlyList<LsmTableFileMetadata> targetFiles,
-        bool rowKeyed)
+        IReadOnlyList<LsmTableFileMetadata> targetFiles)
     {
-        (byte[] smallestUserKey, byte[] largestUserKey) = UserKeyBounds(sourceFiles, rowKeyed);
+        (byte[] smallestUserKey, byte[] largestUserKey) = UserKeyBounds(sourceFiles);
         var selectedTargets = new List<LsmTableFileMetadata>();
         var selectedTargetFileNumbers = new HashSet<long>();
 
@@ -360,8 +358,8 @@ public sealed class LsmCompactor
                     continue;
                 }
 
-                byte[] targetSmallest = BoundUserKey(target.SmallestInternalKey, rowKeyed);
-                byte[] targetLargest = BoundUserKey(target.LargestInternalKey, rowKeyed);
+                byte[] targetSmallest = BoundUserKey(target.SmallestInternalKey);
+                byte[] targetLargest = BoundUserKey(target.LargestInternalKey);
                 if (!UserKeyRangeOverlaps(smallestUserKey, largestUserKey, targetSmallest, targetLargest))
                 {
                     continue;
@@ -388,21 +386,20 @@ public sealed class LsmCompactor
     }
 
     private static (byte[] SmallestUserKey, byte[] LargestUserKey) UserKeyBounds(
-        IReadOnlyList<LsmTableFileMetadata> files,
-        bool rowKeyed)
+        IReadOnlyList<LsmTableFileMetadata> files)
     {
-        byte[] smallestUserKey = BoundUserKey(files[0].SmallestInternalKey, rowKeyed);
-        byte[] largestUserKey = BoundUserKey(files[0].LargestInternalKey, rowKeyed);
+        byte[] smallestUserKey = BoundUserKey(files[0].SmallestInternalKey);
+        byte[] largestUserKey = BoundUserKey(files[0].LargestInternalKey);
 
         for (int i = 1; i < files.Count; i++)
         {
-            byte[] candidateSmallest = BoundUserKey(files[i].SmallestInternalKey, rowKeyed);
+            byte[] candidateSmallest = BoundUserKey(files[i].SmallestInternalKey);
             if (candidateSmallest.AsSpan().SequenceCompareTo(smallestUserKey) < 0)
             {
                 smallestUserKey = candidateSmallest;
             }
 
-            byte[] candidateLargest = BoundUserKey(files[i].LargestInternalKey, rowKeyed);
+            byte[] candidateLargest = BoundUserKey(files[i].LargestInternalKey);
             if (candidateLargest.AsSpan().SequenceCompareTo(largestUserKey) > 0)
             {
                 largestUserKey = candidateLargest;
