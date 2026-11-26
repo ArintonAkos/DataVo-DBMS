@@ -99,7 +99,7 @@ internal static class DataVoDateTime
 
     /// <summary>
     /// Converts a CLR value bound to a DATETIME column (a <see cref="DateTime"/>, <see cref="DateTimeOffset"/>,
-    /// <see cref="DataVoDate"/> at midnight UTC, or ISO 8601 text) to UTC ticks.
+    /// <see cref="DataVoDate"/> or <c>DateOnly</c> at midnight UTC, or ISO 8601 text) to UTC ticks.
     /// </summary>
     public static bool TryConvert(object? value, out long utcTicks)
     {
@@ -116,6 +116,10 @@ internal static class DataVoDateTime
                 return true;
             case string text:
                 return TryParse(text, out utcTicks);
+            case not null when Compat.DateObjectAdapter.TryConvert(value, out DataVoDate adapted):
+                // DateOnly (.NET 8+) binds as midnight UTC, like DataVoDate.
+                utcTicks = (long)adapted.DayNumber * TimeSpan.TicksPerDay;
+                return true;
             default:
                 utcTicks = 0;
                 return false;

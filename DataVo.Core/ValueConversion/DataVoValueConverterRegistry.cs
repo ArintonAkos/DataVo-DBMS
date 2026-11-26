@@ -66,7 +66,8 @@ internal sealed class DataVoValueConverterRegistry
             return direct;
         }
 
-        if (!_converters.TryGetValue(typeof(T), out IDataVoValueConverter? converter))
+        // A non-NULL value read into T? uses the converter registered for T.
+        if (!_converters.TryGetValue(Nullable.GetUnderlyingType(typeof(T)) ?? typeof(T), out IDataVoValueConverter? converter))
         {
             throw new NotSupportedException($"No DataVo value converter is registered for '{typeof(T).FullName}'.");
         }
@@ -105,7 +106,8 @@ internal sealed class DataVoValueConverterRegistry
             return value;
         }
 
-        if (!_converters.TryGetValue(targetType, out IDataVoValueConverter? converter))
+        // A non-NULL value read into T? uses the converter registered for T; a boxed T is a valid T?.
+        if (!_converters.TryGetValue(Nullable.GetUnderlyingType(targetType) ?? targetType, out IDataVoValueConverter? converter))
         {
             throw new NotSupportedException($"No DataVo value converter is registered for '{targetType.FullName}'.");
         }
