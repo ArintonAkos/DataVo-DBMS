@@ -15,7 +15,7 @@ ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 
 echo "== AOT fence (locked library projects) =="
 
-for project in DataVo.Data DataVo.Core src/DataVo.VectorData; do
+for project in DataVo.Data DataVo.Core DataVo.VectorData; do
   name="$(basename "$project")"
   echo "-- $name (locked: IL trim/AOT warnings are errors) --"
   if ! dotnet build "$ROOT_DIR/$project/$name.csproj" -c Release -t:Rebuild >/dev/null 2>&1; then

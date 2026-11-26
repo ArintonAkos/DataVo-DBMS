@@ -26,7 +26,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\src\DataVo.VectorData\DataVo.VectorData.csproj" />
+    <ProjectReference Include="..\DataVo.VectorData\DataVo.VectorData.csproj" />
   </ItemGroup>
 
 </Project>

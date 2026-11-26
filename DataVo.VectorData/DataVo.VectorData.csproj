@@ -12,7 +12,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\DataVo.Core\DataVo.Core.csproj" />
+    <ProjectReference Include="..\DataVo.Core\DataVo.Core.csproj" />
   </ItemGroup>
 
   <ItemGroup>

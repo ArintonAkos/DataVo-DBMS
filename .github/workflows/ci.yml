@@ -78,7 +78,7 @@ jobs:
 
       - name: Vector data (Microsoft.Extensions.VectorData) tests
         run: >-
-          dotnet test tests/DataVo.VectorData.Tests/DataVo.VectorData.Tests.csproj -c Release -f ${{ matrix.framework }}
+          dotnet test DataVo.VectorData.Tests/DataVo.VectorData.Tests.csproj -c Release -f ${{ matrix.framework }}
           --logger "trx;LogFileName=vectordata-${{ matrix.framework }}.trx" --results-directory artifacts/test-results
 
       # The benchmark harness (and its documentation checks) targets net10.0 only.
@@ -138,7 +138,7 @@ jobs:
         run: |
           dotnet build DataVo.Core/DataVo.Core.csproj -c Release
           dotnet build DataVo.Data/DataVo.Data.csproj -c Release
-          dotnet build src/DataVo.VectorData/DataVo.VectorData.csproj -c Release
+          dotnet build DataVo.VectorData/DataVo.VectorData.csproj -c Release
           dotnet build tests/DataVo.GeneratedCodeTargets/DataVo.GeneratedCodeTargets.csproj -c Release
 
       - name: Install ripgrep (used by the support-claims check)

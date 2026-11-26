@@ -49,7 +49,7 @@ jobs:
                     DataVo.Data/DataVo.Data.csproj \
                     DataVo.EntityFrameworkCore/DataVo.EntityFrameworkCore.csproj \
                     DataVo.Generators/DataVo.Generators.csproj \
-                    src/DataVo.VectorData/DataVo.VectorData.csproj"
+                    DataVo.VectorData/DataVo.VectorData.csproj"
           for proj in $PROJECTS; do
             if [ -n "$VERSION" ]; then
               dotnet pack "$proj" -c Release -p:Version="$VERSION" -o artifacts/packages
