@@ -336,13 +336,22 @@ public sealed class LsmCompactorTests
 
         public LsmTableFileMetadata AddSstable(int level, IReadOnlyList<(byte[] InternalKey, byte[] Value)> entries)
         {
-            var writer = new TestSsTableWriter(entries.Count);
-            foreach ((byte[] internalKey, byte[] value) in entries)
+            byte[] bytes;
+            using (var stream = new MemoryStream())
             {
-                writer.Add(internalKey, value);
+                using (var writer = new SsTableKeyedWriter(stream, bloomSuffixLength: 0))
+                {
+                    foreach ((byte[] internalKey, byte[] value) in entries)
+                    {
+                        writer.Add(InternalKey.UserKey(internalKey), InternalKey.Sequence(internalKey), InternalKey.ValueType(internalKey), value);
+                    }
+
+                    writer.Finish();
+                }
+
+                bytes = stream.ToArray();
             }
 
-            byte[] bytes = writer.Finish();
             long fileNumber = Manifest.AllocateFileNumber();
             string fileName = $"{fileNumber:D6}.sst";
             File.WriteAllBytes(Path.Combine(TableDirectory, fileName), bytes);

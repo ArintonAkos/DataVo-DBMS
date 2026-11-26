@@ -61,28 +61,3 @@ internal sealed class TestSsTable
         return false;
     }
 }
-
-/// <summary>Builds a keyed SSTable image from internal-key entries added in internal-key order (test fixtures).</summary>
-internal sealed class TestSsTableWriter(int expectedEntries = 0)
-{
-    private readonly List<(byte[] InternalKey, byte[] Value)> _entries = new(expectedEntries);
-
-    public void Add(ReadOnlySpan<byte> internalKey, ReadOnlySpan<byte> value) => _entries.Add((internalKey.ToArray(), value.ToArray()));
-
-    /// <summary>The finished file image.</summary>
-    public byte[] Finish()
-    {
-        using var stream = new MemoryStream();
-        using (var writer = new SsTableKeyedWriter(stream, bloomSuffixLength: 0))
-        {
-            foreach ((byte[] internalKey, byte[] value) in _entries)
-            {
-                writer.Add(InternalKey.UserKey(internalKey), InternalKey.Sequence(internalKey), InternalKey.ValueType(internalKey), value);
-            }
-
-            writer.Finish();
-        }
-
-        return stream.ToArray();
-    }
-}

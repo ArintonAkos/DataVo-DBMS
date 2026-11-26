@@ -25,7 +25,7 @@ internal static class ReferenceCompaction
         var stream = new MemoryStream();
         if (writesV2)
         {
-            using var writer = new SsTableV2Writer(stream, alignment: 0, merged.Count, columnar: columnar);
+            using var writer = new SsTableV2Writer(stream, alignment: 0, columnar: columnar);
             foreach ((byte[] key, byte[] value) in merged)
             {
                 LsmRowKeyCodec.AddInternalEntry(writer, key, value);
@@ -45,13 +45,7 @@ internal static class ReferenceCompaction
         }
         else
         {
-            var writer = new TestSsTableWriter(merged.Count);
-            foreach ((byte[] key, byte[] value) in merged)
-            {
-                writer.Add(key, value);
-            }
-
-            return writer.Finish();
+            throw new ArgumentOutOfRangeException(nameof(format));
         }
 
         return stream.ToArray();

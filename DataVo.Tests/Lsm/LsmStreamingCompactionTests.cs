@@ -13,7 +13,7 @@ namespace DataVo.Tests.Lsm;
 /// <summary>
 /// The streaming compactor writes, byte for byte, the file the earlier compactor wrote after merging every entry
 /// in memory (kept here as <see cref="ReferenceCompaction"/>), for row-keyed files with and without a columnar
-/// segment, legacy v1 row files, keyed (v3) files and legacy outputs.
+/// segment, and keyed (v5) files.
 /// </summary>
 [Collection(AllocationSensitiveCollection.Name)]
 public sealed class LsmStreamingCompactionTests : IDisposable
