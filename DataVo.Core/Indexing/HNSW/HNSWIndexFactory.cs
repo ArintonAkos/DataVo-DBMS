@@ -32,12 +32,6 @@ public class HNSWIndexFactory : IVectorIndexFactory
                 fallbackWithMetric.Metric = normalizedMetric;
         }
 
-        // Extract vector dimension for validation (future use)
-        if (@params.TryGetValue("dimension", out var dimVal) && dimVal is int dimension)
-        {
-            // Could validate or store dimension when inserting vectors
-        }
-
         if (index is HNSWIndex hnsw && TryReadInt(@params, "m", out int m) && m > 0)
             hnsw.M = m;
 
@@ -92,12 +86,24 @@ public class HNSWIndexFactory : IVectorIndexFactory
         if (index is HNSWIndex hnswAdaptiveSearchMultiplier && TryReadDouble(@params, "adaptiveEfSearchMultiplier", out double adaptiveEfSearchMultiplier) && adaptiveEfSearchMultiplier > 0d)
             hnswAdaptiveSearchMultiplier.AdaptiveEfSearchMultiplier = adaptiveEfSearchMultiplier;
 
+        // Same contract as the flat factory: a known size and dimension pre-sizes the graph and pins the
+        // dimension, so a vector of another dimension is rejected on insert. Done last: the layout depends on M.
+        if (index is HNSWIndex hnswReserve
+            && TryReadInt(@params, "expectedCount", out int expectedCount)
+            && TryReadInt(@params, "dimension", out int dimension)
+            && expectedCount > 0
+            && dimension > 0)
+        {
+            hnswReserve.Reserve(expectedCount, dimension);
+        }
+
         return index;
     }
 
+    /// <summary>Whether to use the browser fallback index: in a browser, or when a test forces it.</summary>
     private static bool IsBrowserRuntime()
     {
-        return BrowserRuntimeFlags.ForceVectorFallback;
+        return BrowserRuntimeFlags.ForceVectorFallback || Compat.FileCompat.IsBrowser();
     }
 
     private static string NormalizeMetric(string metric)
