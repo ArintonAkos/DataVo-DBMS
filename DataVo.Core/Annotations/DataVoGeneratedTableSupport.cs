@@ -115,7 +115,7 @@ public static class DataVoGeneratedTableSupport
     /// <param name="result">The UPDATE's result.</param>
     /// <returns><see langword="true"/> when a row was changed.</returns>
     public static bool ChangedAnyRow(QueryResult result) =>
-        !result.Messages.Exists(message => message.Equals("Rows affected: 0", StringComparison.Ordinal));
+        result.RowsAffected != 0;
 
     /// <summary>Reads a required INT column.</summary>
     public static int ReadInt32(object? value, string column) => value switch

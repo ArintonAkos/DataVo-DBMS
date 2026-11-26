@@ -73,7 +73,7 @@ internal class InsertInto(InsertIntoStatement ast) : BaseDbAction
                 recorder?.Publish();
             }
 
-            Messages.Add($"Rows affected: {rowsAffected}");
+            ReportRowsAffected(rowsAffected);
         }
         catch (Exception e)
         {

@@ -26,8 +26,8 @@ public sealed partial class DataVoPreparedStatement
     private static readonly List<string> RowsSelected0Messages = ["Rows selected: 0"];
     private static readonly List<string> RowsSelected1Messages = ["Rows selected: 1"];
     private static readonly List<Dictionary<string, object?>> EmptyDataRows = [];
-    private static readonly QueryResult Affected0Result = new() { Messages = ["Rows affected: 0"] };
-    private static readonly QueryResult Affected1Result = new() { Messages = ["Rows affected: 1"] };
+    private static readonly QueryResult Affected0Result = new() { Messages = ["Rows affected: 0"], RowsAffected = 0 };
+    private static readonly QueryResult Affected1Result = new() { Messages = ["Rows affected: 1"], RowsAffected = 1 };
     private static readonly object BoxedTrue = true;
     private static readonly object BoxedFalse = false;
 

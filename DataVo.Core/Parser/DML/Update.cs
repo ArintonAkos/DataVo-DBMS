@@ -80,7 +80,7 @@ internal class Update(UpdateStatement ast) : BaseDbAction
             long statementTxId = MvccCoordinator.ResolveStatementTransactionId(Engine, txContext?.TransactionId);
             if (txContext != null)
             {
-                Messages.Add($"Rows affected: {UpdateInTransaction(txContext, databaseName)}");
+                ReportRowsAffected(UpdateInTransaction(txContext, databaseName));
                 return;
             }
 
@@ -94,7 +94,7 @@ internal class Update(UpdateStatement ast) : BaseDbAction
 
             if (lockScope.TargetRowIds.Count == 0)
             {
-                Messages.Add("Rows affected: 0");
+                ReportRowsAffected(0);
                 return;
             }
 
@@ -136,7 +136,7 @@ internal class Update(UpdateStatement ast) : BaseDbAction
                 }
             }
 
-            Messages.Add($"Rows affected: {rowsAffected}");
+            ReportRowsAffected(rowsAffected);
         }
         catch (Exception ex)
         {

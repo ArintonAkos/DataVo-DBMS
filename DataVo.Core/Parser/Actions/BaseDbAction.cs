@@ -24,6 +24,9 @@ internal abstract class BaseDbAction : IDbAction
     protected List<string> Messages = [];
     protected bool HasErrors;
 
+    /// <summary>The structured row count of a DML statement; <c>-1</c> until <see cref="ReportRowsAffected"/> runs.</summary>
+    private int _rowsAffected = -1;
+
     public BaseDbAction()
     {
         Engine = DataVoEngine.Current();
@@ -84,6 +87,17 @@ internal abstract class BaseDbAction : IDbAction
 
     private DataVoError? _firstError;
 
+    /// <summary>
+    /// Records how many rows the statement changed, as the structured <see cref="QueryResult.RowsAffected"/> and as
+    /// the human-readable <c>Rows affected: N</c> message.
+    /// </summary>
+    /// <param name="count">The number of rows the statement changed.</param>
+    protected void ReportRowsAffected(int count)
+    {
+        _rowsAffected = _rowsAffected < 0 ? count : _rowsAffected + count;
+        Messages.Add($"Rows affected: {count}");
+    }
+
     protected virtual DatabasePermission RequiredPermission => InferRequiredPermission();
 
     private DatabasePermission InferRequiredPermission()
@@ -131,6 +145,7 @@ internal abstract class BaseDbAction : IDbAction
             Messages.Clear();
             HasErrors = false;
             _firstError = null;
+            _rowsAffected = -1;
 
             using IDisposable _ = Engine.SessionSecurity.PushAmbientPrincipalForSession(session);
             Engine.SessionSecurity.Authorize(session, RequiredPermission, Engine.Config);
@@ -141,7 +156,9 @@ internal abstract class BaseDbAction : IDbAction
                 return BuildErrorResult();
             }
 
-            return QueryResult.Success(Messages, Data, Fields);
+            QueryResult result = QueryResult.Success(Messages, Data, Fields);
+            result.RowsAffected = _rowsAffected;
+            return result;
         }
         catch (Exception ex)
         {

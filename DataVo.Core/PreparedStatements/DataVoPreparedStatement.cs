@@ -405,6 +405,7 @@ public sealed partial class DataVoPreparedStatement
             ExecutionTime = result.ExecutionTime,
             IsError = result.IsError,
             ErrorCode = result.ErrorCode,
+            RowsAffected = result.RowsAffected,
             Data = result.Data,
         };
 
@@ -555,14 +556,13 @@ public sealed partial class DataVoPreparedStatement
             builder.AddRowsReturned(result.Data.Count);
         }
 
+        if (result.RowsAffected > 0)
+        {
+            builder.AddRowsAffected(result.RowsAffected);
+        }
+
         foreach (string message in result.Messages)
         {
-            if (TryReadMessageCount(message, "Rows affected:", out int affected))
-            {
-                builder.AddRowsAffected(affected);
-                continue;
-            }
-
             if (result.Data.Count == 0 && TryReadMessageCount(message, "Rows selected:", out int selected))
             {
                 builder.AddRowsReturned(selected);

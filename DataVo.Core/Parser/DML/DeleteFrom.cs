@@ -29,7 +29,7 @@ internal class DeleteFrom(DeleteFromStatement ast) : BaseDbAction
             long statementTxId = MvccCoordinator.ResolveStatementTransactionId(Engine, txContext?.TransactionId);
             if (txContext != null)
             {
-                Messages.Add($"Rows affected: {DeleteInTransaction(txContext, databaseName)}");
+                ReportRowsAffected(DeleteInTransaction(txContext, databaseName));
             }
             else
             {
@@ -42,7 +42,7 @@ internal class DeleteFrom(DeleteFromStatement ast) : BaseDbAction
 
                 if (lockScope.TargetRowIds.Count == 0)
                 {
-                    Messages.Add("Rows affected: 0");
+                    ReportRowsAffected(0);
                     return;
                 }
 
@@ -56,7 +56,7 @@ internal class DeleteFrom(DeleteFromStatement ast) : BaseDbAction
 
                     RowDeleter.Delete(Engine, lockScope.TargetRowIds, _model.TableName, databaseName, statementTxId, recorder);
 
-                    Messages.Add($"Rows affected: {lockScope.TargetRowIds.Count}");
+                    ReportRowsAffected(lockScope.TargetRowIds.Count);
                 }
                 finally
                 {

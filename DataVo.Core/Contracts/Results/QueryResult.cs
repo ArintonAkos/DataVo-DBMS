@@ -39,6 +39,12 @@ public class QueryResult
     public bool IsError { get; set; }
 
     /// <summary>
+    /// Gets or sets the number of rows an INSERT, UPDATE, or DELETE changed; <c>-1</c> for statements that do not
+    /// change rows (queries, DDL, transaction control).
+    /// </summary>
+    public int RowsAffected { get; set; } = -1;
+
+    /// <summary>
     /// Creates an error result containing a single message.
     /// </summary>
     /// <param name="message">The error message to expose to the caller.</param>

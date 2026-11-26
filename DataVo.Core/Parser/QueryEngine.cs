@@ -190,14 +190,13 @@ public class QueryEngine(string query, Guid session, DataVoEngine? engine = null
             builder.AddRowsReturned(result.Data.Count);
         }
 
+        if (result.RowsAffected > 0)
+        {
+            builder.AddRowsAffected(result.RowsAffected);
+        }
+
         foreach (string message in result.Messages)
         {
-            if (TryReadMessageCount(message, "Rows affected:", out int affected))
-            {
-                builder.AddRowsAffected(affected);
-                continue;
-            }
-
             if (result.Data.Count == 0 && TryReadMessageCount(message, "Rows selected:", out int selected))
             {
                 builder.AddRowsReturned(selected);

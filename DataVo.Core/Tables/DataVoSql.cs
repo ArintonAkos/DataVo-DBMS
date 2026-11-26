@@ -1,4 +1,3 @@
-using System.Globalization;
 using System.Text;
 using DataVo.Core.Contracts.Results;
 
@@ -19,8 +18,6 @@ internal static class DataVoSql
 
     /// <summary>The parameter that holds a primary-key value, for statements that change one row.</summary>
     public const string KeyParameter = "key";
-
-    private const string RowsAffected = "Rows affected:";
 
     /// <summary>Writes a SELECT over one table.</summary>
     /// <param name="columns">The SELECT list.</param>
@@ -116,23 +113,10 @@ internal static class DataVoSql
         return all;
     }
 
-    /// <summary>Reads the number of rows a DELETE or UPDATE changed from its <c>Rows affected: N</c> message.</summary>
+    /// <summary>Reads the number of rows a DELETE or UPDATE changed from <see cref="QueryResult.RowsAffected"/>.</summary>
     /// <param name="result">The statement's result.</param>
     /// <returns>The number of rows changed; 0 when the result reports none.</returns>
-    public static int AffectedRows(QueryResult result)
-    {
-        int affected = 0;
-        foreach (string message in result.Messages)
-        {
-            if (message.StartsWith(RowsAffected, StringComparison.OrdinalIgnoreCase)
-                && int.TryParse(message.Substring(RowsAffected.Length).Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out int count))
-            {
-                affected += count;
-            }
-        }
-
-        return affected;
-    }
+    public static int AffectedRows(QueryResult result) => Math.Max(result.RowsAffected, 0);
 
     private static StringBuilder AppendWhere(StringBuilder sql, string? where) =>
         string.IsNullOrEmpty(where) ? sql : sql.Append(" WHERE ").Append(where);
