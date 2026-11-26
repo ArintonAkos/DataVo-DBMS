@@ -97,9 +97,12 @@ public sealed class LsmLatestRowStoreTests
         var store = new LsmLatestRowStore();
         RowKey[] keys = [.. Enumerable.Range(0, 512).Select(i => RowKey.FromGuid(new Guid(i, 0, 0, new byte[8])))];
         using var stop = new CancellationTokenSource();
+        const int ReaderCount = 3;
+        using var readersStarted = new CountdownEvent(ReaderCount);
         long reads = 0;
-        Task[] readers = [.. Enumerable.Range(0, 3).Select(_ => Task.Run(() =>
+        Task[] readers = [.. Enumerable.Range(0, ReaderCount).Select(_ => Task.Run(() =>
         {
+            readersStarted.Signal();
             while (!stop.IsCancellationRequested)
             {
                 foreach (RowKey key in keys)
@@ -113,6 +116,10 @@ public sealed class LsmLatestRowStoreTests
                 }
             }
         }))];
+
+        // Publish only once every reader is running, so the reads genuinely overlap the writes even when
+        // the thread pool is slow to start them (the writer alone finishes in a few milliseconds).
+        Assert.True(readersStarted.Wait(TimeSpan.FromSeconds(30)), "the reader tasks never started");
 
         for (ulong round = 1; round <= 50; round++)
         {
