@@ -5,8 +5,8 @@ namespace Research.Benchmark.Tests;
 
 /// <summary>
 /// Correctness contract for the Scenario C (Vector Search) engines: querying with an exact copy of an
-/// inserted vector must return that vector's id among the Top-K nearest. SQLite is skipped when the native
-/// sqlite-vec extension is not available in the environment.
+/// inserted vector must return that vector's id among the Top-K nearest. The SQLite test is reported as
+/// skipped unless <c>SQLITE_VEC_PATH</c> points at the native sqlite-vec extension.
 /// </summary>
 public sealed class VectorSearchEngineTests
 {
@@ -65,18 +65,11 @@ public sealed class VectorSearchEngineTests
         }
     }
 
-    [Fact]
+    [SqliteVecFact]
     public void SqliteVec_ExactMatchQuery_ReturnsPlantedVector_WhenExtensionAvailable()
     {
         using var engine = new SqliteVectorSearchEngine();
-        try
-        {
-            engine.Initialize(Dimensions);
-        }
-        catch (InvalidOperationException)
-        {
-            return; // sqlite-vec extension not available in this environment — skip.
-        }
+        engine.Initialize(Dimensions);
 
         float[][] vectors = SeedVectors(engine);
         IReadOnlyList<long> top = engine.Search(vectors[41], k: 5);
@@ -116,5 +109,22 @@ public sealed class VectorSearchEngineTests
         }
 
         return vector;
+    }
+}
+
+/// <summary>
+/// A <see cref="FactAttribute"/> that runs only when <c>SQLITE_VEC_PATH</c> names an existing sqlite-vec
+/// loadable library; otherwise the runner reports the test as skipped rather than as passed.
+/// </summary>
+public sealed class SqliteVecFactAttribute : FactAttribute
+{
+    /// <summary>Initializes the attribute and skips the test when the extension path is missing.</summary>
+    public SqliteVecFactAttribute()
+    {
+        string? path = Environment.GetEnvironmentVariable("SQLITE_VEC_PATH");
+        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+        {
+            Skip = "sqlite-vec is not available: set SQLITE_VEC_PATH to a vec0 loadable library to run this test.";
+        }
     }
 }

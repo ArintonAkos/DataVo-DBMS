@@ -66,7 +66,7 @@ public sealed class LinqProjectionMemoryTests : IDisposable
             Enumerable.Range(1, Rows).OrderByDescending(static id => id % 7).ThenBy(static id => id).Take(10),
             documents.OrderByDescending(static d => d.Kind).ThenBy(static d => d.Id).Take(10).Select(static d => d.Id).ToList());
         Assert.True(models - ids > bodies * 9 / 10, $"the sorted projection allocated {ids:N0} B against {models:N0} B for models: the text column was decoded");
-        // The legacy Disk engine copies each stored row's bytes while it scans, so its top-N saves less.
+        // The top-N keeps only ten projected rows, so it must allocate a small fraction of the full materialization.
         long budget = models / 20;
         Assert.True(top < budget, $"the top-10 projection allocated {top:N0} B against {models:N0} B for models");
     }

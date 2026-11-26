@@ -315,8 +315,8 @@ public sealed class BigIntAndDoubleColumnTests : IDisposable
     }
 
     /// <summary>
-    /// Index keys are written in the invariant culture. Under a culture whose decimal separator is a comma, the
-    /// legacy Disk path formatted the literal as "0,1" and its index lookup found nothing.
+    /// Index keys are written in the invariant culture, so a culture whose decimal separator is a comma cannot
+    /// format the literal as "0,1" and miss the index entry.
     /// </summary>
     [Theory]
     [MemberData(nameof(Modes))]

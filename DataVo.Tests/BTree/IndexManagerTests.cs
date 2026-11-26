@@ -21,8 +21,6 @@ public class IndexManagerTests : IDisposable
 
     public void Dispose()
     {
-        // Clean up the IndexManager cache (use reflection to clear singleton state)
-        // Since IndexManager is a singleton, tests can interfere. We'll test via public API.
         if (Directory.Exists(_testDir))
             Directory.Delete(_testDir, recursive: true);
     }

@@ -165,7 +165,7 @@ public sealed class RowRefStreamTests : IDisposable
     {
         using DataVoContext db = Open(mode);
         db.EnsureRefUnitTable();
-        // More than two blocks of the in-place scan; the legacy disk engine writes one row per file open, so it gets fewer.
+        // More than two blocks of the in-place scan.
         int Count = 9_500;
         var units = new List<RefUnit>();
         Run(db, "BEGIN"); // one commit for the load: a commit per row costs milliseconds on LSM

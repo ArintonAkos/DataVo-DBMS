@@ -353,14 +353,9 @@ public class HNSWIndexTests : IDisposable
         Assert.Equal(3, nearestRight[0]);
     }
 
-    [Fact]
+    [HnswPerformanceFact]
     public void Benchmark_RecallAt10_AgainstExactBaseline_IsReasonable()
     {
-        if (!ShouldRunHnswPerformanceBenchmarks())
-        {
-            return;
-        }
-
         var index = new HNSWIndex
         {
             EnableExactScanCostRouting = false,
@@ -418,14 +413,9 @@ public class HNSWIndexTests : IDisposable
         Assert.True(avgRecall >= 0.60d, $"Expected avg recall@10 >= 0.60, got {avgRecall:F3}");
     }
 
-    [Fact]
+    [HnswPerformanceFact]
     public void Benchmark_RecallTrend_ImprovesWithEfSearchAndM_Matrix()
     {
-        if (!ShouldRunHnswPerformanceBenchmarks())
-        {
-            return;
-        }
-
         const int dimension = 10;
         const int vectors = 220;
         const int queries = 14;
@@ -447,14 +437,9 @@ public class HNSWIndexTests : IDisposable
         Assert.True(recallHighM >= recallLowM - 1e-6, $"Expected higher M not to reduce recall. m8={recallLowM:F3}, m16={recallHighM:F3}");
     }
 
-    [Fact]
+    [HnswPerformanceFact]
     public void Benchmark_RecallTrend_ImprovesWithInsertionCandidateExpansion()
     {
-        if (!ShouldRunHnswPerformanceBenchmarks())
-        {
-            return;
-        }
-
         const int dimension = 10;
         const int vectors = 220;
         const int queries = 14;
@@ -488,14 +473,9 @@ public class HNSWIndexTests : IDisposable
             $"Expected insertion candidate expansion to maintain or improve recall trend. baseline={recallBaseline:F3}, expanded={recallExpanded:F3}");
     }
 
-    [Fact]
+    [HnswPerformanceFact]
     public void Benchmark_RecallTrend_AdaptiveInsertionExpansionPolicy_IsStable()
     {
-        if (!ShouldRunHnswPerformanceBenchmarks())
-        {
-            return;
-        }
-
         const int dimension = 10;
         const int vectors = 210;
         const int queries = 14;
@@ -533,14 +513,9 @@ public class HNSWIndexTests : IDisposable
             $"Expected adaptive insertion expansion policy to remain stable. fixed={recallFixed:F3}, adaptive={recallAdaptive:F3}");
     }
 
-    [Fact]
+    [HnswPerformanceFact]
     public void Benchmark_RecallStability_UnderInsertDeleteChurn_RemainsBounded()
     {
-        if (!ShouldRunHnswPerformanceBenchmarks())
-        {
-            return;
-        }
-
         const int dimension = 10;
         const int vectors = 220;
         const int queries = 14;
@@ -620,14 +595,9 @@ public class HNSWIndexTests : IDisposable
         Assert.True(drift <= 0.35d, $"Expected churn recall drift <= 0.35, got {drift:F3}");
     }
 
-    [Fact]
+    [HnswPerformanceFact]
     public void Benchmark_ChurnMatrix_RecallAndLatencyRemainStable()
     {
-        if (!ShouldRunHnswPerformanceBenchmarks())
-        {
-            return;
-        }
-
         const int dimension = 12;
         const int vectors = 260;
         const int queries = 16;
@@ -727,14 +697,9 @@ public class HNSWIndexTests : IDisposable
             $"Expected low-churn average recall to stay close to high-churn. low={ratioToAvgRecall[0.05d]:F3}, high={ratioToAvgRecall[0.20d]:F3}");
     }
 
-    [Fact]
+    [HnswPerformanceFact]
     public void Benchmark_ChurnSoak_MultiRunVariance_IsBounded()
     {
-        if (!ShouldRunHnswPerformanceBenchmarks())
-        {
-            return;
-        }
-
         const int runs = 2;
         const int dimension = 10;
         const int vectors = 200;
@@ -788,16 +753,11 @@ public class HNSWIndexTests : IDisposable
         }
     }
 
-    [Fact]
+    [HnswPerformanceFact]
     [Trait("Category", "Performance")]
     [Trait("Profile", "VeryLargeDataset")]
     public void Benchmark_Build_1M_Vectors_Profile()
     {
-        if (!ShouldRunHnswPerformanceBenchmarks())
-        {
-            return;
-        }
-
         bool runLong = ShouldRunLongBuildCheckpoints();
         int[] scalingSteps = runLong
             ? [1_000, 5_000, 10_000, 25_000, 50_000, 100_000, 1_000_000]
@@ -886,23 +846,11 @@ public class HNSWIndexTests : IDisposable
             || string.Equals(value, "true", StringComparison.OrdinalIgnoreCase);
     }
 
-    private static bool ShouldRunHnswPerformanceBenchmarks()
-    {
-        string? value = Environment.GetEnvironmentVariable("DATAVO_RUN_HNSW_PERF_TESTS");
-        return string.Equals(value, "1", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(value, "true", StringComparison.OrdinalIgnoreCase);
-    }
-
-    [Fact]
+    [HnswPerformanceFact]
     [Trait("Category", "Performance")]
     [Trait("Profile", "LargeDataset")]
     public void Benchmark_LargeDataset_RecallLatencyProfile_EfSearchScaling_IsStable()
     {
-        if (!ShouldRunHnswPerformanceBenchmarks())
-        {
-            return;
-        }
-
         const int vectors = 900;
         const int dimension = 48;
         const int queries = 20;
@@ -950,16 +898,11 @@ public class HNSWIndexTests : IDisposable
             $"Expected high efSearch p95 latency bounded. low={low.P95LatencyMs:F3}ms, high={high.P95LatencyMs:F3}ms, cap={maxAllowedHighP95:F3}ms");
     }
 
-    [Fact]
+    [HnswPerformanceFact]
     [Trait("Category", "Performance")]
     [Trait("Profile", "LargeDataset")]
     public void Benchmark_LargeDataset_RecallLatencyProfile_ConnectivityScaling_IsStable()
     {
-        if (!ShouldRunHnswPerformanceBenchmarks())
-        {
-            return;
-        }
-
         const int vectors = 800;
         const int dimension = 64;
         const int queries = 18;

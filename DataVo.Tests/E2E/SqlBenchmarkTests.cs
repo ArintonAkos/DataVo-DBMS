@@ -12,7 +12,7 @@ public class SqlBenchmarkTests : IDisposable
     private readonly ITestOutputHelper _output;
     private readonly string _testDb = $"BenchmarkDb_{Guid.NewGuid():N}";
     private readonly string _testTable = "PerfTable";
-    private readonly string _diskPath = Path.Combine(Path.GetTempPath(), $"test_datavo_benchmark_{Guid.NewGuid():N}");
+    private readonly string _lsmPath = Path.Combine(Path.GetTempPath(), $"test_datavo_benchmark_{Guid.NewGuid():N}");
     private readonly Guid _session = Guid.NewGuid();
     private DataVoEngine? _engine;
 
@@ -22,7 +22,7 @@ public class SqlBenchmarkTests : IDisposable
     }
 
     [Fact]
-    public void E2E_Benchmark_InMemory_vs_Disk_FullParsing()
+    public void E2E_Benchmark_InMemory_vs_Lsm_FullParsing()
     {
         // 10K iterations for E2E SQL parsing (Lexer -> Parser -> Evaluator -> Storage)
         // is very dense overhead compared to raw driver inserts. 
@@ -52,13 +52,13 @@ public class SqlBenchmarkTests : IDisposable
         var memoryReadTime = stopwatch.ElapsedMilliseconds;
 
 
-        // Cleanup manually before starting Disk test in the same context
+        // Cleanup manually before starting the LSM test in the same context
         _engine.Catalog.DropDatabase(_testDb);
 
 
-        // --- 2. DISK PIPELINE BENCHMARK ---
-        var diskConfig = new DataVoConfig { StorageMode = StorageMode.Lsm, DiskStoragePath = _diskPath };
-        _engine = DataVoEngine.Initialize(diskConfig);
+        // --- 2. LSM PIPELINE BENCHMARK ---
+        var lsmConfig = new DataVoConfig { StorageMode = StorageMode.Lsm, DiskStoragePath = _lsmPath };
+        _engine = DataVoEngine.Initialize(lsmConfig);
 
         Execute($"CREATE DATABASE {_testDb}");
         Execute($"USE {_testDb}");
@@ -72,12 +72,12 @@ public class SqlBenchmarkTests : IDisposable
         }
 
         stopwatch.Stop();
-        var diskInsertTime = stopwatch.ElapsedMilliseconds;
+        var lsmInsertTime = stopwatch.ElapsedMilliseconds;
 
         stopwatch.Restart();
-        var diskResults = ExecuteAndReturn($"SELECT * FROM {_testTable}").Data;
+        var lsmResults = ExecuteAndReturn($"SELECT * FROM {_testTable}").Data;
         stopwatch.Stop();
-        var diskReadTime = stopwatch.ElapsedMilliseconds;
+        var lsmReadTime = stopwatch.ElapsedMilliseconds;
 
         // Print Out fully E2E Parsed results
         _output.WriteLine($"[Full E2E SQL Parse Benchmark - {iterations:N0} queries]");
@@ -85,17 +85,17 @@ public class SqlBenchmarkTests : IDisposable
         _output.WriteLine($"[InMemory] Lex->Parse->Evaluator Insert Time: {memoryInsertTime} ms | ~{iterations / Math.Max(1, (memoryInsertTime / 1000.0)):N0} ops/sec");
         _output.WriteLine($"[InMemory] Lex->Parse->Evaluator Read   Time: {memoryReadTime} ms | ~{iterations / Math.Max(1, (memoryReadTime / 1000.0)):N0} ops/sec");
         _output.WriteLine("---------------------------------------------");
-        _output.WriteLine($"[Disk]     Lex->Parse->Evaluator Insert Time: {diskInsertTime} ms | ~{iterations / Math.Max(1, (diskInsertTime / 1000.0)):N0} ops/sec");
-        _output.WriteLine($"[Disk]     Lex->Parse->Evaluator Read   Time: {diskReadTime} ms | ~{iterations / Math.Max(1, (diskReadTime / 1000.0)):N0} ops/sec");
+        _output.WriteLine($"[Lsm]      Lex->Parse->Evaluator Insert Time: {lsmInsertTime} ms | ~{iterations / Math.Max(1, (lsmInsertTime / 1000.0)):N0} ops/sec");
+        _output.WriteLine($"[Lsm]      Lex->Parse->Evaluator Read   Time: {lsmReadTime} ms | ~{iterations / Math.Max(1, (lsmReadTime / 1000.0)):N0} ops/sec");
         _output.WriteLine("---------------------------------------------");
 
         Assert.Equal(iterations, memoryResults?.Count ?? 0);
-        Assert.Equal(iterations, diskResults?.Count ?? 0);
+        Assert.Equal(iterations, lsmResults?.Count ?? 0);
     }
 
     [Fact]
     [BrowserTranslateIgnore("Benchmark + engine reinitialization flow is not a deterministic browser SQL parity scenario")]
-    public void E2E_Benchmark_WhereFilter_InMemory_vs_Disk()
+    public void E2E_Benchmark_WhereFilter_InMemory_vs_Lsm()
     {
         int employees = 5_000;
 
@@ -120,8 +120,8 @@ public class SqlBenchmarkTests : IDisposable
 
         _engine.Catalog.DropDatabase(_testDb);
 
-        var diskConfig = new DataVoConfig { StorageMode = StorageMode.Lsm, DiskStoragePath = _diskPath };
-        _engine = DataVoEngine.Initialize(diskConfig);
+        var lsmConfig = new DataVoConfig { StorageMode = StorageMode.Lsm, DiskStoragePath = _lsmPath };
+        _engine = DataVoEngine.Initialize(lsmConfig);
 
         Execute($"CREATE DATABASE {_testDb}");
         Execute($"USE {_testDb}");
@@ -135,19 +135,19 @@ public class SqlBenchmarkTests : IDisposable
         }
 
         stopwatch.Restart();
-        var diskResult = ExecuteAndReturn("SELECT * FROM Employees WHERE Employees.Salary > 100500");
+        var lsmResult = ExecuteAndReturn("SELECT * FROM Employees WHERE Employees.Salary > 100500");
         stopwatch.Stop();
-        var diskQueryTime = stopwatch.ElapsedMilliseconds;
+        var lsmQueryTime = stopwatch.ElapsedMilliseconds;
 
         _output.WriteLine("[WHERE Filter E2E Benchmark]");
         _output.WriteLine($"Rows in Employees: {employees}");
         _output.WriteLine($"InMemory query time: {inMemoryQueryTime} ms");
-        _output.WriteLine($"Disk query time:     {diskQueryTime} ms");
+        _output.WriteLine($"Lsm query time:      {lsmQueryTime} ms");
 
         Assert.False(inMemoryResult.IsError);
-        Assert.False(diskResult.IsError);
+        Assert.False(lsmResult.IsError);
         Assert.NotEmpty(inMemoryResult.Data ?? []);
-        Assert.NotEmpty(diskResult.Data ?? []);
+        Assert.NotEmpty(lsmResult.Data ?? []);
     }
 
     private void Execute(string sql)
@@ -171,6 +171,6 @@ public class SqlBenchmarkTests : IDisposable
     {
         try { _engine?.Catalog.DropDatabase(_testDb); } catch { }
         try { _engine?.IndexManager.DropDatabaseIndexes(_testDb); } catch { }
-        try { if (Directory.Exists(_diskPath)) Directory.Delete(_diskPath, true); } catch { }
+        try { if (Directory.Exists(_lsmPath)) Directory.Delete(_lsmPath, true); } catch { }
     }
 }

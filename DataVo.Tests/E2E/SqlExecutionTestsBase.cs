@@ -8,7 +8,7 @@ namespace DataVo.Tests.E2E;
 /// <summary>
 /// The abstract foundation for all SQL E2E tests. 
 /// It encapsulates the raw SQL-to-Storage pipeline and guarantees tests run without race conditions.
-/// Classes that inherit from this will define specific StorageModes (Memory/Disk) to multiplex test execution.
+/// Classes that inherit from this will define specific StorageModes (InMemory/Lsm) to multiplex test execution.
 /// </summary>
 public abstract class SqlExecutionTestsBase : IDisposable
 {

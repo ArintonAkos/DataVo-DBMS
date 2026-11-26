@@ -7,7 +7,7 @@ using System.Collections.Concurrent;
 namespace DataVo.Tests.E2E;
 
 /// <summary>
-/// Concurrent disk-mode DML and secondary-index integrity tests covering overlapping updates/deletes,
+/// Concurrent LSM-mode DML and secondary-index integrity tests covering overlapping updates/deletes,
 /// duplicate primary-key races, composite indexes, and high-contention hot-key mutations.
 /// </summary>
 public class LsmIndexConcurrencyTests : SqlExecutionTestsBase
