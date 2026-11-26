@@ -53,8 +53,23 @@ public class DataVoCommand : DbCommand
     /// <inheritdoc />
     public override int CommandTimeout { get; set; } = 30;
 
-    /// <inheritdoc />
-    public override CommandType CommandType { get; set; } = CommandType.Text;
+    /// <summary>
+    /// Gets or sets how <see cref="CommandText"/> is interpreted. Only <see cref="System.Data.CommandType.Text"/> is
+    /// supported.
+    /// </summary>
+    /// <exception cref="NotSupportedException">The value is <see cref="System.Data.CommandType.StoredProcedure"/> or
+    /// <see cref="System.Data.CommandType.TableDirect"/>.</exception>
+    public override CommandType CommandType
+    {
+        get => CommandType.Text;
+        set
+        {
+            if (value != CommandType.Text)
+            {
+                throw new NotSupportedException($"DataVo supports only CommandType.Text; CommandType.{value} is not supported.");
+            }
+        }
+    }
 
     /// <inheritdoc />
     public override bool DesignTimeVisible { get; set; }
@@ -93,35 +108,47 @@ public class DataVoCommand : DbCommand
 
     /// <summary>
     /// Executes the command and returns a <see cref="DataVoDataReader"/> for reading the result set.
+    /// <see cref="CommandBehavior.CloseConnection"/> closes the connection with the reader,
+    /// <see cref="CommandBehavior.SingleResult"/> exposes only the first result set, and
+    /// <see cref="CommandBehavior.SingleRow"/> only the first row of it.
     /// </summary>
     protected override DbDataReader ExecuteDbDataReader(CommandBehavior behavior)
     {
         var results = ExecuteEngine();
-        return new DataVoDataReader(results);
+        DataVoConnection? closeOnDispose = (behavior & CommandBehavior.CloseConnection) != 0 ? _connection : null;
+        return new DataVoDataReader(results, behavior, closeOnDispose);
     }
 
     /// <summary>
-    /// Executes a non-query command (INSERT, UPDATE, DELETE, DDL) and returns
-    /// the number of rows affected, parsed from the engine's response messages.
+    /// Executes a non-query command (INSERT, UPDATE, DELETE, DDL) and returns the number of rows the DML statements
+    /// changed (<see cref="QueryResult.RowsAffected"/> summed over the batch); 0 when no statement changed rows.
     /// </summary>
     public override int ExecuteNonQuery()
     {
-        var results = ExecuteEngine();
-        int totalAffected = 0;
+        return SumRowsAffected(ExecuteEngine(), noRowsValue: 0);
+    }
 
+    /// <summary>
+    /// Sums the structured row counts of a batch's DML statements.
+    /// </summary>
+    /// <param name="results">The batch results.</param>
+    /// <param name="noRowsValue">The value returned when no statement reports a row count.</param>
+    /// <returns>The total number of rows changed, or <paramref name="noRowsValue"/>.</returns>
+    internal static int SumRowsAffected(List<QueryResult> results, int noRowsValue)
+    {
+        int total = 0;
+        bool any = false;
         for (int i = 0; i < results.Count; i++)
         {
-            List<string> messages = results[i].Messages;
-            for (int j = 0; j < messages.Count; j++)
+            int affected = results[i].RowsAffected;
+            if (affected >= 0)
             {
-                if (TryParseRowsAffected(messages[j], out int affected))
-                {
-                    totalAffected += affected;
-                }
+                total += affected;
+                any = true;
             }
         }
 
-        return totalAffected;
+        return any ? total : noRowsValue;
     }
 
     /// <summary>
@@ -187,6 +214,8 @@ public class DataVoCommand : DbCommand
             throw new InvalidOperationException("Connection is not set.");
         }
 
+        ValidateTransaction(_connection);
+
         List<QueryResult> results;
         if (_preparedStatement != null || _parameters.Count > 0)
         {
@@ -208,12 +237,7 @@ public class DataVoCommand : DbCommand
             if (result.IsError)
             {
                 // Carry the error contract to ADO.NET callers: they branch on ErrorCode, not message text.
-                throw new DataVoException(string.Join("; ", result.Messages))
-                {
-                    ErrorCode = result.ErrorCode,
-                    Line = result.ErrorLine,
-                    Column = result.ErrorColumn,
-                };
+                throw DataVoException.FromResult(result);
             }
         }
 
@@ -249,23 +273,25 @@ public class DataVoCommand : DbCommand
         return _parameterBuffer.AsSpan(0, written);
     }
 
-    private static bool TryParseRowsAffected(string message, out int count)
+    /// <summary>
+    /// Rejects a <see cref="DbCommand.Transaction"/> that belongs to another connection or has already completed,
+    /// as ADO.NET providers do, instead of silently running outside it.
+    /// </summary>
+    private void ValidateTransaction(DataVoConnection connection)
     {
-        const string prefix = "Rows affected:";
-        count = 0;
-        int idx = message.IndexOf(prefix, StringComparison.OrdinalIgnoreCase);
-        if (idx < 0)
+        if (_transaction is null)
         {
-            return false;
+            return;
         }
 
-        ReadOnlySpan<char> slice = message.AsSpan(idx + prefix.Length).Trim();
-        int end = 0;
-        while (end < slice.Length && char.IsDigit(slice[end]))
+        if (!ReferenceEquals(_transaction.OwningConnection, connection))
         {
-            end++;
+            throw new InvalidOperationException("The command's transaction belongs to a different connection.");
         }
 
-        return end > 0 && int.TryParse(slice[..end], out count);
+        if (_transaction.IsCompleted)
+        {
+            throw new InvalidOperationException("The command's transaction has already been committed or rolled back.");
+        }
     }
 }

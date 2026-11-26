@@ -1,6 +1,7 @@
 using System.Data;
 using System.Data.Common;
 using System.Diagnostics.CodeAnalysis;
+using System.Reflection;
 using DataVo.Core.Parser;
 using DataVo.Core.Runtime;
 using DataVo.Core.Transactions;
@@ -10,9 +11,9 @@ namespace DataVo.Data;
 /// <summary>
 /// Represents a connection to a DataVo embedded database.
 /// <para>
-/// Uses a connection string to configure the storage mode, data source path,
-/// and WAL settings. Opening the connection initializes the storage engine
-/// and automatically runs <c>USE {database}</c>.
+/// Uses a connection string to configure the storage mode, the data source path and the SQL database (see
+/// <see cref="DataVoConnectionStringBuilder"/>). Opening the connection initializes the storage engine, creates the
+/// database when it does not exist, and selects it with <c>USE {database}</c>.
 /// </para>
 /// </summary>
 /// <example>
@@ -25,9 +26,13 @@ namespace DataVo.Data;
 /// </example>
 public class DataVoConnection : DbConnection
 {
-    private readonly DataVoConnectionStringBuilder _builder;
+    private const string FallbackServerVersion = "0.5.1";
+    private static readonly string s_serverVersion = ResolveServerVersion();
+
+    private DataVoConnectionStringBuilder _builder;
     private ConnectionState _state = ConnectionState.Closed;
     private DataVoEngine? _engine;
+    private string? _currentDatabase;
 
     /// <summary>
     /// The internal session identifier used by the DataVo engine for this connection.
@@ -40,22 +45,44 @@ public class DataVoConnection : DbConnection
     internal DataVoEngine? Engine => _engine;
 
     /// <inheritdoc />
+    /// <exception cref="InvalidOperationException">The connection is open.</exception>
     [AllowNull]
     public override string ConnectionString
     {
         get => _connectionString;
-        set => _connectionString = value ?? string.Empty;
+        set
+        {
+            if (_state != ConnectionState.Closed)
+            {
+                throw new InvalidOperationException("The connection string cannot be changed while the connection is open.");
+            }
+
+            string normalized = value ?? string.Empty;
+            _builder = new DataVoConnectionStringBuilder(normalized);
+            _connectionString = normalized;
+            _currentDatabase = null;
+        }
     }
     private string _connectionString;
 
-    /// <inheritdoc />
-    public override string Database => _builder.DataSource;
+    /// <summary>
+    /// Gets the SQL database in use: the one selected by <see cref="ChangeDatabase"/>, otherwise the connection
+    /// string's database (see <see cref="DataVoConnectionStringBuilder.Database"/>).
+    /// </summary>
+    public override string Database => _currentDatabase ?? _builder.Database;
 
     /// <inheritdoc />
     public override string DataSource => _builder.DataSource;
 
-    /// <inheritdoc />
-    public override string ServerVersion => "DataVo 1.0";
+    /// <summary>
+    /// Gets the DataVo engine version, from the assembly's informational version (for example <c>0.5.1</c>).
+    /// </summary>
+    public override string ServerVersion => s_serverVersion;
+
+    /// <summary>
+    /// Gets the <see cref="DataVoFactory"/> that creates this provider's objects.
+    /// </summary>
+    protected override DbProviderFactory DbProviderFactory => DataVoFactory.Instance;
 
     /// <inheritdoc />
     public override ConnectionState State => _state;
@@ -67,10 +94,19 @@ public class DataVoConnection : DbConnection
     /// Semicolon-delimited key=value pairs. Supported keys:
     /// <c>StorageMode</c> and <c>DataSource</c>.
     /// </param>
-    public DataVoConnection(string connectionString)
+    public DataVoConnection(string? connectionString)
     {
-        _connectionString = connectionString;
-        _builder = new DataVoConnectionStringBuilder(connectionString);
+        _connectionString = connectionString ?? string.Empty;
+        _builder = new DataVoConnectionStringBuilder(_connectionString);
+    }
+
+    /// <summary>
+    /// Creates a connection with an empty connection string; set <see cref="ConnectionString"/> before
+    /// <see cref="Open"/>. Required by <see cref="DbProviderFactory"/>, dependency injection and ORMs.
+    /// </summary>
+    public DataVoConnection()
+        : this(string.Empty)
+    {
     }
 
     /// <summary>
@@ -82,12 +118,23 @@ public class DataVoConnection : DbConnection
             throw new InvalidOperationException("Connection is already open.");
 
         var config = _builder.ToConfig();
+        string database = _builder.Database;
         _engine = DataVoEngine.Initialize(config);
 
-        // Create and use the database
-        ExecuteInternal($"CREATE DATABASE IF NOT EXISTS {_builder.DataSource};");
-        ExecuteInternal($"USE {_builder.DataSource};");
+        try
+        {
+            // The SQL database is a logical name decoupled from the (possibly path-shaped) DataSource.
+            ExecuteInternal($"CREATE DATABASE IF NOT EXISTS {database};");
+            ExecuteInternal($"USE {database};");
+        }
+        catch
+        {
+            _engine.Dispose();
+            _engine = null;
+            throw;
+        }
 
+        _currentDatabase = database;
         _state = ConnectionState.Open;
     }
 
@@ -110,6 +157,7 @@ public class DataVoConnection : DbConnection
 
         _engine?.Dispose();
         _engine = null;
+        _currentDatabase = null;
         _state = ConnectionState.Closed;
     }
 
@@ -128,15 +176,30 @@ public class DataVoConnection : DbConnection
     public override void ChangeDatabase(string databaseName)
     {
         EnsureOpen();
+        if (string.IsNullOrWhiteSpace(databaseName))
+        {
+            throw new ArgumentException("Database name is required.", nameof(databaseName));
+        }
+
         ExecuteInternal($"USE {databaseName};");
+        _currentDatabase = databaseName;
     }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Starts a transaction. DataVo transactions run under snapshot isolation with first-committer-wins write
+    /// conflict detection, so <see cref="IsolationLevel.Unspecified"/>, <see cref="IsolationLevel.ReadCommitted"/>,
+    /// <see cref="IsolationLevel.RepeatableRead"/> and <see cref="IsolationLevel.Snapshot"/> all run as
+    /// <see cref="IsolationLevel.Snapshot"/> (each is satisfied or exceeded by it).
+    /// </summary>
+    /// <param name="isolationLevel">The requested isolation level.</param>
+    /// <exception cref="NotSupportedException"><see cref="IsolationLevel.ReadUncommitted"/>,
+    /// <see cref="IsolationLevel.Serializable"/> or <see cref="IsolationLevel.Chaos"/>: DataVo cannot honour them.</exception>
     protected override DbTransaction BeginDbTransaction(IsolationLevel isolationLevel)
     {
         EnsureOpen();
+        IsolationLevel effective = DataVoTransaction.ResolveIsolationLevel(isolationLevel);
         ExecuteInternal("BEGIN;");
-        return new DataVoTransaction(this);
+        return new DataVoTransaction(this, effective);
     }
 
     /// <inheritdoc />
@@ -165,8 +228,25 @@ public class DataVoConnection : DbConnection
         foreach (var result in results)
         {
             if (result.IsError)
-                throw new DataVoException(string.Join("; ", result.Messages));
+                throw DataVoException.FromResult(result);
         }
+    }
+
+    /// <summary>Gets whether this connection's session has an open engine transaction.</summary>
+    internal bool HasActiveTransaction => _engine?.TransactionManager.HasActiveTransaction(Session) == true;
+
+    private static string ResolveServerVersion()
+    {
+        string? informational = typeof(DataVoConnection).Assembly
+            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
+        if (string.IsNullOrWhiteSpace(informational))
+        {
+            return FallbackServerVersion;
+        }
+
+        // Drop SourceLink's "+<commit>" build metadata: callers compare versions, not commits.
+        int metadata = informational!.IndexOf('+');
+        return metadata > 0 ? informational.Substring(0, metadata) : informational;
     }
 
     private void EnsureOpen()

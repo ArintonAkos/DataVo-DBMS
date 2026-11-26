@@ -104,7 +104,7 @@ public class DataVoParameterCollection : DbParameterCollection
     public override void Clear() => _parameters.Clear();
 
     /// <inheritdoc />
-    public override bool Contains(object value) => _parameters.Contains((DataVoParameter)value);
+    public override bool Contains(object value) => value is DataVoParameter parameter && _parameters.Contains(parameter);
 
     /// <inheritdoc />
     public override bool Contains(string value) => _parameters.Exists(p => p.ParameterName == value);
@@ -116,7 +116,7 @@ public class DataVoParameterCollection : DbParameterCollection
     public override System.Collections.IEnumerator GetEnumerator() => _parameters.GetEnumerator();
 
     /// <inheritdoc />
-    public override int IndexOf(object value) => _parameters.IndexOf((DataVoParameter)value);
+    public override int IndexOf(object value) => value is DataVoParameter parameter ? _parameters.IndexOf(parameter) : -1;
 
     /// <inheritdoc />
     public override int IndexOf(string parameterName) => _parameters.FindIndex(p => p.ParameterName == parameterName);
@@ -137,7 +137,14 @@ public class DataVoParameterCollection : DbParameterCollection
     protected override DbParameter GetParameter(int index) => _parameters[index];
 
     /// <inheritdoc />
-    protected override DbParameter GetParameter(string parameterName) => _parameters.First(p => p.ParameterName == parameterName);
+    /// <exception cref="IndexOutOfRangeException">No parameter has that name.</exception>
+    protected override DbParameter GetParameter(string parameterName)
+    {
+        int index = IndexOf(parameterName);
+        return index >= 0
+            ? _parameters[index]
+            : throw new IndexOutOfRangeException($"No parameter named '{parameterName}' is in the collection.");
+    }
 
     /// <inheritdoc />
     protected override void SetParameter(int index, DbParameter value) => _parameters[index] = (DataVoParameter)value;
@@ -146,7 +153,9 @@ public class DataVoParameterCollection : DbParameterCollection
     protected override void SetParameter(string parameterName, DbParameter value)
     {
         int idx = IndexOf(parameterName);
-        if (idx >= 0) _parameters[idx] = (DataVoParameter)value;
+        if (idx < 0)
+            throw new IndexOutOfRangeException($"No parameter named '{parameterName}' is in the collection.");
+        _parameters[idx] = (DataVoParameter)value;
     }
 
     /// <summary>
