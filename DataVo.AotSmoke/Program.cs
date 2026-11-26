@@ -23,7 +23,7 @@ static void Require(bool condition, string message)
     Console.WriteLine($"  ok: {message}");
 }
 
-Console.WriteLine("DataVo AOT smoke — engine + typed insert + borrowed reactive + ADO.NET");
+Console.WriteLine("DataVo AOT smoke — engine + typed insert + borrowed reactive + ADO.NET + VectorData");
 
 // 1) Engine + typed insert fast lane.
 Console.WriteLine("[1] engine + InsertTyped");
@@ -111,10 +111,35 @@ using (var connection = new DataVoConnection("StorageMode=InMemory;DataSource=Sm
         Require(rows == 2, $"ADO.NET reader returned 2 rows (got {rows})");
     }
 
+    using (var schemaCommand = connection.CreateCommand())
+    {
+        schemaCommand.CommandText = "SELECT Id, Name FROM Items;";
+        using var reader = schemaCommand.ExecuteReader();
+        System.Data.DataTable schema = reader.GetSchemaTable();
+        Require(schema.Rows.Count == 2 && (Type)schema.Rows[0][System.Data.Common.SchemaTableColumn.DataType] == typeof(int), "reader GetSchemaTable describes the columns");
+    }
+
+    using (var tx = connection.BeginTransaction())
+    {
+        using var insert = connection.CreateCommand();
+        insert.CommandText = "INSERT INTO Items VALUES (3, 'gamma');";
+        insert.ExecuteNonQuery();
+    } // disposed uncommitted: rolled back
+
+    using (var count = connection.CreateCommand())
+    {
+        count.CommandText = "SELECT COUNT(*) FROM Items;";
+        Require(Convert.ToInt64(count.ExecuteScalar()) == 2, "disposing an uncommitted transaction rolls it back");
+    }
+
+    Require(System.Data.Common.DbProviderFactories.GetFactory(connection) is DataVoFactory, "DbProviderFactory resolves to DataVoFactory");
+    Require(!string.Equals(connection.ServerVersion, "DataVo 1.0", StringComparison.Ordinal), $"ServerVersion from the assembly ({connection.ServerVersion})");
+
     connection.Close();
 }
 
 DataVo.AotSmoke.GeneratedTableSmoke.Run();
+DataVo.AotSmoke.VectorDataSmoke.Run();
 
 Console.WriteLine("ALL SMOKE CHECKS PASSED");
 return 0;
