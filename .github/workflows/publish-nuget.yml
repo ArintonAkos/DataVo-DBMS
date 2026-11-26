@@ -14,10 +14,10 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v5
         with:
           dotnet-version: |
             8.0.x
@@ -38,6 +38,10 @@ jobs:
 
       - name: Verify runtime support claims
         run: bash scripts/check-unity-support-status.sh
+
+      # Fail before packing if Native AOT/trim diagnostics regressed in a locked library.
+      - name: AOT fence (Core, Data and VectorData)
+        run: bash scripts/check-aot-baseline.sh
 
       # Pack only the five publishable projects explicitly. Packing the whole
       # solution would try to build DataVo.Browser, which needs the wasm-tools
@@ -60,9 +64,7 @@ jobs:
 
       - name: Verify release package contents
         shell: bash
-        run: >-
-          bash scripts/assert-core-package-targets.sh
-          artifacts/packages/DataVo.Core.*.nupkg
+        run: bash scripts/assert-release-package-targets.sh artifacts/packages
 
       # Trusted Publishing: exchange the GitHub OIDC token for a short-lived
       # (~1h) nuget.org API key. Requested right before the push so it can't
