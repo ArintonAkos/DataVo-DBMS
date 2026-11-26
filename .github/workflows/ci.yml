@@ -120,6 +120,13 @@ jobs:
           ./artifacts/aot-smoke/DataVo.AotSmoke | tee artifacts/aot-smoke.log
           grep -q "ALL SMOKE CHECKS PASSED" artifacts/aot-smoke.log
 
+      # The hybrid vector RAG example is the Native AOT showcase (PublishAot=true): publish it and run the binary.
+      - name: Publish and run the HybridVectorRagAot native example
+        run: |
+          set -euo pipefail
+          dotnet publish examples/HybridVectorRagAot/HybridVectorRagAot.csproj -c Release -r linux-x64 -o artifacts/hybrid-rag-aot
+          ./artifacts/hybrid-rag-aot/HybridVectorRagAot
+
   portable:
     name: Portable netstandard2.1 candidate build
     runs-on: ubuntu-latest
@@ -147,6 +154,39 @@ jobs:
       - name: Verify runtime support claims
         run: bash scripts/check-unity-support-status.sh
 
+  tools:
+    name: Benchmarks, tools and portable package smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: |
+            8.0.x
+            9.0.x
+            10.0.x
+
+      - name: Install ripgrep (used by the candidate inspector contract)
+        run: sudo apt-get update && sudo apt-get install -y ripgrep
+
+      # Build-only: running the BenchmarkDotNet suite belongs to benchmark.yml.
+      - name: Build the BenchmarkDotNet suite
+        run: dotnet build benchmarks/DataVo.Benchmarks/DataVo.Benchmarks.csproj -c Release
+
+      # Packs DataVo.Core, asserts its four-TFM layout, builds tools/DataVo.PortableConsumer against the packed
+      # netstandard2.1 asset, then builds and runs tools/DataVo.PortablePackageSmoke against that exact DLL.
+      - name: Portable package smoke (PortableConsumer + PortablePackageSmoke)
+        run: bash scripts/verify-portable-candidate.sh
+
+      - name: Unity candidate inspector contract
+        run: |
+          set -euo pipefail
+          dotnet build DataVo.Core/DataVo.Core.csproj -f netstandard2.1
+          dotnet build tools/DataVo.UnityCandidateInspector/DataVo.UnityCandidateInspector.csproj
+          bash scripts/test-unity-candidate-inspector.sh
+
   examples:
     name: Examples (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -172,3 +212,9 @@ jobs:
           set -euo pipefail
           dotnet run -c Release --project examples/MicrosoftAiLocalRag | tee artifacts-rag.log
           grep -q "RAG demo finished" artifacts-rag.log
+
+      - name: Run the hybrid vector RAG example (JIT)
+        run: dotnet run -c Release --project examples/HybridVectorRagAot
+
+      - name: Run the live reactive leaderboard example (short run)
+        run: dotnet run -c Release --project examples/LiveReactiveLeaderboard -- --ticks 20 --events 200
