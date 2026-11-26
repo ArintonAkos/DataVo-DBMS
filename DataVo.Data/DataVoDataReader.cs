@@ -342,7 +342,9 @@ public class DataVoDataReader : DbDataReader
         table.Columns.Add(SchemaTableColumn.ColumnSize, typeof(int));
         table.Columns.Add(SchemaTableColumn.NumericPrecision, typeof(short));
         table.Columns.Add(SchemaTableColumn.NumericScale, typeof(short));
-        table.Columns.Add(SchemaTableColumn.DataType, typeof(Type));
+        // Typed as object, not Type: a DataColumn of System.Type makes the trimmer keep Type's annotated members
+        // (IL2111). Each cell still holds the column's System.Type, which is what schema-table readers cast to.
+        table.Columns.Add(SchemaTableColumn.DataType, typeof(object));
         table.Columns.Add(SchemaTableColumn.AllowDBNull, typeof(bool));
         table.Columns.Add(SchemaTableColumn.IsKey, typeof(bool));
         table.Columns.Add(SchemaTableColumn.IsUnique, typeof(bool));
