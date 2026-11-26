@@ -268,6 +268,12 @@ ClientBin/
 # Track UPM package documentation; Unity reserves the Documentation~ directory name.
 !integrations/unity/com.datavo.unity.mathematics/Documentation~/
 !integrations/unity/com.datavo.unity.mathematics/Documentation~/**
+# Track UPM package samples; Unity reserves the Samples~ directory name (copied by package-unity-upm.sh).
+!integrations/unity/com.datavo.core/Samples~/
+!integrations/unity/com.datavo.core/Samples~/**
+# UPM packages need their .meta files (stable GUIDs) when installed read-only or from a git URL.
+!integrations/unity/com.datavo.core/**/*.meta
+!integrations/unity/com.datavo.unity.mathematics/**/*.meta
 
 # Unity smoke-project source and generated candidate boundary.
 /tests/unity/DataVo.UnitySmoke/Library/

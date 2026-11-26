@@ -1,0 +1,6 @@
+{
+  "name": "DataVo.QuickStart",
+  "overrideReferences": true,
+  "precompiledReferences": ["DataVo.Core.dll"],
+  "autoReferenced": false
+}
