@@ -171,7 +171,7 @@ internal sealed class LsmCommitLog : IDisposable
         {
             if (record.Header.OpType != WalFrameOperationType.CommitBatch
                 || !LsmCommitBatchCodec.TryRead(record.Payload, out List<LsmCommitOperation> operations)
-                || operations.Count != record.Header.RowId)
+                || operations.Count != record.Header.OperationCount)
             {
                 throw new InvalidDataException(
                     $"Commit log '{FilePath}' has a checksummed frame at LSN {record.Header.Lsn} that is not a valid commit batch.");
@@ -202,7 +202,7 @@ internal sealed class LsmCommitLog : IDisposable
         _store.ReleaseFileHandle();
     }
 
-    // Same 32-byte header as the other binary WAL frames; the RowId slot carries the operation count.
+    // The 32-byte frame header (see WalFrameFormat); the reserved bytes stay zero.
     private static void WriteHeader(Span<byte> frame, long lsn, int operationCount)
     {
         Span<byte> header = frame[..WalFrameFormat.FrameHeaderSize];
@@ -211,7 +211,6 @@ internal sealed class LsmCommitLog : IDisposable
         BinaryPrimitives.WriteInt64LittleEndian(header[8..], lsn);
         header[16] = (byte)WalFrameOperationType.CommitBatch;
         BinaryPrimitives.WriteInt64LittleEndian(header[20..], operationCount);
-        BinaryPrimitives.WriteInt32LittleEndian(header[28..], 0);
         uint checksum = WalCrc32C.HashToUInt32(frame[8..]);
         BinaryPrimitives.WriteUInt32LittleEndian(header[4..], checksum);
     }

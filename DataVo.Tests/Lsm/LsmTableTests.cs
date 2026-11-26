@@ -1,6 +1,5 @@
 using System.Text;
 using DataVo.Core.StorageEngine.Lsm;
-using DataVo.Core.Transactions;
 
 namespace DataVo.Tests.Lsm;
 
@@ -22,154 +21,13 @@ public sealed class LsmTableTests
         Assert.Equal(2, table.ActiveCount);
     }
 
-    [Fact]
-    public void Put_WithWalEnabled_AppendsBinaryWalFrameBeforeActiveWrite()
-    {
-        using var fixture = new TableFixture();
-        var table = new LsmTable(
-            fixture.TableDirectory,
-            fixture.Manifest,
-            fixture.WalPath,
-            LsmWalDurabilityMode.StrictFsync);
-        byte[] userKey = Key(1);
-        byte[] value = Val("one");
-
-        table.Put(userKey, seqno: 7, value);
-
-        WalFrameRecord frame = Assert.Single(new WalFileStore(fixture.WalPath).ReadBinaryFrames());
-        Assert.Equal(WalFrameOperationType.Insert, frame.Header.OpType);
-        Assert.True(LsmWalRecordCodec.TryRead(frame.Payload, out LsmWalRecord record));
-        Assert.Equal(userKey, record.UserKey);
-        Assert.Equal(7UL, record.Seqno);
-        Assert.Equal(LsmValueType.Put, record.ValueType);
-        Assert.Equal(value, record.Value);
-        Assert.Equal(1, table.ActiveCount);
-    }
-
-    [Fact]
-    public void Delete_WithWalEnabled_AppendsTombstoneWalFrame()
-    {
-        using var fixture = new TableFixture();
-        var table = new LsmTable(
-            fixture.TableDirectory,
-            fixture.Manifest,
-            fixture.WalPath,
-            LsmWalDurabilityMode.StrictFsync);
-        byte[] userKey = Key(3);
-
-        table.Delete(userKey, seqno: 9);
-
-        WalFrameRecord frame = Assert.Single(new WalFileStore(fixture.WalPath).ReadBinaryFrames());
-        Assert.Equal(WalFrameOperationType.Delete, frame.Header.OpType);
-        Assert.True(LsmWalRecordCodec.TryRead(frame.Payload, out LsmWalRecord record));
-        Assert.Equal(userKey, record.UserKey);
-        Assert.Equal(9UL, record.Seqno);
-        Assert.Equal(LsmValueType.Deletion, record.ValueType);
-        Assert.Empty(record.Value);
-        Assert.Equal(1, table.ActiveCount);
-    }
-
-    [Fact]
-    public void Put_WhenWalAppendFails_DoesNotMutateActiveMemTable()
-    {
-        using var fixture = new TableFixture();
-        Directory.CreateDirectory(fixture.WalPath);
-        var table = new LsmTable(
-            fixture.TableDirectory,
-            fixture.Manifest,
-            fixture.WalPath,
-            LsmWalDurabilityMode.StrictFsync);
-
-        Assert.Throws<UnauthorizedAccessException>(() => table.Put(Key(1), seqno: 1, Val("one")));
-        Assert.Equal(0, table.ActiveCount);
-    }
-
-    [Fact]
-    public void Constructor_WithWalEnabled_ReplaysUnflushedPutIntoActiveMemTable()
-    {
-        using var fixture = new TableFixture();
-        byte[] userKey = Key(4);
-        byte[] value = Val("wal-only");
-        using (var table = new LsmTable(
-            fixture.TableDirectory,
-            fixture.Manifest,
-            fixture.WalPath,
-            LsmWalDurabilityMode.StrictFsync))
-        {
-            table.Put(userKey, seqno: 11, value);
-        }
-
-        using var reopened = new LsmTable(
-            fixture.TableDirectory,
-            fixture.Manifest,
-            fixture.WalPath,
-            LsmWalDurabilityMode.StrictFsync);
-
-        LsmFlushResult result = reopened.FlushActiveMemTable()!.Value;
-        TestSsTable reader = TestSsTable.Open(result.FilePath);
-        Assert.True(reader.TryGet(userKey, snapshotSeqno: 11, out byte[] actual, out bool tombstone));
-        Assert.False(tombstone);
-        Assert.Equal(value, actual);
-    }
-
-    [Fact]
-    public void Constructor_WithWalEnabled_StopsReplayAtTornTail()
-    {
-        using var fixture = new TableFixture();
-        byte[] userKey = Key(6);
-        byte[] value = Val("valid-prefix");
-        using (var table = new LsmTable(
-            fixture.TableDirectory,
-            fixture.Manifest,
-            fixture.WalPath,
-            LsmWalDurabilityMode.StrictFsync))
-        {
-            table.Put(userKey, seqno: 13, value);
-        }
-
-        using (var stream = new FileStream(fixture.WalPath, FileMode.Append, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete))
-        {
-            stream.Write([0x01, 0x02, 0x03]);
-            stream.Flush(flushToDisk: true);
-        }
-
-        using var reopened = new LsmTable(
-            fixture.TableDirectory,
-            fixture.Manifest,
-            fixture.WalPath,
-            LsmWalDurabilityMode.StrictFsync);
-
-        LsmFlushResult result = reopened.FlushActiveMemTable()!.Value;
-        TestSsTable reader = TestSsTable.Open(result.FilePath);
-        Assert.True(reader.TryGet(userKey, snapshotSeqno: 13, out byte[] actual, out bool tombstone));
-        Assert.False(tombstone);
-        Assert.Equal(value, actual);
-    }
-
-    [Fact]
-    public void WalWriter_StrictModeFlushesToDiskAndRelaxedModeOnlyAppends()
-    {
-        using var fixture = new TableFixture();
-        byte[] key = Key(8);
-        var strict = new LsmWalWriter(Path.Combine(fixture.TableDirectory, "strict.wal"), LsmWalDurabilityMode.StrictFsync);
-        var relaxed = new LsmWalWriter(Path.Combine(fixture.TableDirectory, "relaxed.wal"), LsmWalDurabilityMode.RelaxedOsBuffer);
-
-        strict.AppendMutation(key, seqno: 1, LsmValueType.Put, Val("strict"));
-        relaxed.AppendMutation(key, seqno: 1, LsmValueType.Put, Val("relaxed"));
-
-        Assert.Equal(1, strict.DurableFlushCount);
-        Assert.Equal(0, relaxed.DurableFlushCount);
-        Assert.Single(new WalFileStore(Path.Combine(fixture.TableDirectory, "strict.wal")).ReadBinaryFrames());
-        Assert.Single(new WalFileStore(Path.Combine(fixture.TableDirectory, "relaxed.wal")).ReadBinaryFrames());
-    }
-
     [Theory]
     [InlineData((int)LsmCrashPoint.AfterSstableTempFileFsyncBeforeRename, false, true)]
     [InlineData((int)LsmCrashPoint.AfterSstableRenameBeforeDirectoryFsync, true, false)]
     [InlineData((int)LsmCrashPoint.AfterSstableDirectoryFsyncBeforeManifest, true, false)]
     [InlineData((int)LsmCrashPoint.AfterManifestTempFileFsyncBeforeRename, true, true)]
     [InlineData((int)LsmCrashPoint.AfterManifestRenameBeforeDirectoryFsync, true, false)]
-    public void FlushActiveMemTable_WhenCrashBeforeWalClear_ReopenIgnoresOrphansAndReplaysWal(
+    public void FlushActiveMemTable_WhenCrashMidPublish_KeepsGenerationAndReopenIgnoresOrphans(
         int crashPointValue,
         bool expectOrphanSstable,
         bool expectTempFile)
@@ -177,12 +35,10 @@ public sealed class LsmTableTests
         using var fixture = new TableFixture();
         var crashPoint = (LsmCrashPoint)crashPointValue;
         byte[] userKey = Key(12);
-        byte[] value = Val("wal-survives");
+        byte[] value = Val("flushed-after-reopen");
         using var table = LsmTable.CreateForTesting(
             fixture.TableDirectory,
             fixture.Manifest,
-            fixture.WalPath,
-            LsmWalDurabilityMode.StrictFsync,
             point =>
             {
                 if (point == crashPoint)
@@ -194,15 +50,15 @@ public sealed class LsmTableTests
 
         LsmCrashSimulationException ex = Assert.Throws<LsmCrashSimulationException>(() => table.FlushActiveMemTable());
         Assert.Equal(crashPoint, ex.CrashPoint);
-        Assert.True(File.Exists(fixture.WalPath));
+        Assert.Equal(1, table.ActiveCount);
         Assert.Equal(expectOrphanSstable, File.Exists(Path.Combine(fixture.TableDirectory, "000001.sst")));
         Assert.Equal(expectTempFile, Directory.EnumerateFiles(fixture.TableDirectory, "*.tmp-*").Any());
 
+        // The owner's commit log would replay the lost rows; here the test writes them again.
         using var reopened = new LsmTable(
             fixture.TableDirectory,
-            new LsmManifest(Path.Combine(fixture.TableDirectory, "MANIFEST")),
-            fixture.WalPath,
-            LsmWalDurabilityMode.StrictFsync);
+            new LsmManifest(Path.Combine(fixture.TableDirectory, "MANIFEST")));
+        reopened.Put(userKey, seqno: 21, value);
 
         LsmFlushResult recovered = reopened.FlushActiveMemTable()!.Value;
         TestSsTable reader = TestSsTable.Open(recovered.FilePath);
@@ -212,7 +68,7 @@ public sealed class LsmTableTests
     }
 
     [Fact]
-    public void FlushActiveMemTable_WhenManifestCommittedBeforeWalClear_ReopenKeepsManifestAndReplaysIdempotently()
+    public void FlushActiveMemTable_WhenCrashAfterManifestCommit_ReopenKeepsCommittedFile()
     {
         using var fixture = new TableFixture();
         byte[] userKey = Key(14);
@@ -220,11 +76,9 @@ public sealed class LsmTableTests
         using var table = LsmTable.CreateForTesting(
             fixture.TableDirectory,
             fixture.Manifest,
-            fixture.WalPath,
-            LsmWalDurabilityMode.StrictFsync,
             point =>
             {
-                if (point == LsmCrashPoint.AfterManifestDirectoryFsyncBeforeWalClear)
+                if (point == LsmCrashPoint.AfterManifestDirectoryFsync)
                 {
                     throw new LsmCrashSimulationException(point);
                 }
@@ -232,18 +86,17 @@ public sealed class LsmTableTests
         table.Put(userKey, seqno: 23, value);
 
         Assert.Throws<LsmCrashSimulationException>(() => table.FlushActiveMemTable());
-        Assert.True(File.Exists(fixture.WalPath));
         LsmTableFileMetadata committed = Assert.Single(new LsmManifest(Path.Combine(fixture.TableDirectory, "MANIFEST")).GetLiveFiles(0));
 
         using var reopened = new LsmTable(
             fixture.TableDirectory,
-            new LsmManifest(Path.Combine(fixture.TableDirectory, "MANIFEST")),
-            fixture.WalPath,
-            LsmWalDurabilityMode.StrictFsync);
+            new LsmManifest(Path.Combine(fixture.TableDirectory, "MANIFEST")));
 
-        LsmFlushResult replayed = reopened.FlushActiveMemTable()!.Value;
-        Assert.True(File.Exists(Path.Combine(fixture.TableDirectory, committed.FileName)));
-        Assert.True(File.Exists(replayed.FilePath));
+        Assert.Equal(0, reopened.ActiveCount);
+        TestSsTable reader = TestSsTable.Open(Path.Combine(fixture.TableDirectory, committed.FileName));
+        Assert.True(reader.TryGet(userKey, snapshotSeqno: 23, out byte[] actual, out bool tombstone));
+        Assert.False(tombstone);
+        Assert.Equal(value, actual);
     }
 
     [Fact]
@@ -270,25 +123,6 @@ public sealed class LsmTableTests
         Assert.Equal(result.Value.Metadata.FileNumber, live.FileNumber);
         Assert.Equal(result.Value.Metadata.SmallestInternalKey, live.SmallestInternalKey);
         Assert.Equal(result.Value.Metadata.LargestInternalKey, live.LargestInternalKey);
-    }
-
-    [Fact]
-    public void FlushActiveMemTable_WithWalEnabled_ClearsWalOnlyAfterManifestCommit()
-    {
-        using var fixture = new TableFixture();
-        var table = new LsmTable(
-            fixture.TableDirectory,
-            fixture.Manifest,
-            fixture.WalPath,
-            LsmWalDurabilityMode.StrictFsync);
-        table.Put(Key(1), seqno: 1, Val("one"));
-        Assert.True(File.Exists(fixture.WalPath));
-
-        LsmFlushResult? result = table.FlushActiveMemTable();
-
-        Assert.NotNull(result);
-        Assert.Single(fixture.Manifest.GetLiveFiles(0));
-        Assert.False(File.Exists(fixture.WalPath));
     }
 
     [Fact]
@@ -479,8 +313,6 @@ public sealed class LsmTableTests
         public string TableDirectory { get; }
 
         public LsmManifest Manifest { get; }
-
-        public string WalPath => Path.Combine(TableDirectory, "active.wal");
 
         public void Dispose()
         {

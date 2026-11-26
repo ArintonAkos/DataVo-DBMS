@@ -7,12 +7,6 @@ namespace DataVo.Core.Transactions;
 /// </summary>
 internal enum WalFrameOperationType : byte
 {
-    /// <summary>An Lsm table-WAL frame holding one put.</summary>
-    Insert = 1,
-
-    /// <summary>An Lsm table-WAL frame holding one delete.</summary>
-    Delete = 3,
-
     /// <summary>An Lsm commit-log frame: every mutation of one statement or transaction.</summary>
     CommitBatch = 6,
 }
@@ -20,20 +14,27 @@ internal enum WalFrameOperationType : byte
 /// <summary>
 /// Decoded fixed-size WAL frame header.
 /// </summary>
+/// <param name="FrameLength">Bytes in the frame, header included.</param>
+/// <param name="Crc32C">CRC32C over everything after the CRC field.</param>
+/// <param name="Lsn">The frame's log sequence number.</param>
+/// <param name="OpType">The frame's operation.</param>
+/// <param name="OperationCount">How many operations the payload holds.</param>
 internal readonly record struct WalFrameHeader(
     int FrameLength,
     uint Crc32C,
     long Lsn,
     WalFrameOperationType OpType,
-    byte Flags,
-    long RowId,
-    int TableId);
+    long OperationCount);
 
 /// <summary>
-/// The binary WAL frame layout shared by the Lsm table WALs and commit log: a 32-byte little-endian header
-/// (frame length, CRC32C over everything after the CRC field, LSN, operation, flags, row id, table id) followed by
-/// the payload.
+/// The binary frame layout of the Lsm commit log: a 32-byte little-endian header followed by the payload.
 /// </summary>
+/// <remarks>
+/// <code>
+/// header := i32 frame length | u32 crc32c | i64 lsn | u8 operation | 3 reserved bytes | i64 operation count | 4 reserved bytes
+/// </code>
+/// The reserved bytes are written as zero.
+/// </remarks>
 internal static class WalFrameFormat
 {
     /// <summary>Size of the fixed frame header in bytes.</summary>
@@ -65,9 +66,7 @@ internal static class WalFrameFormat
             BinaryPrimitives.ReadUInt32LittleEndian(frame.Slice(4, sizeof(uint))),
             BinaryPrimitives.ReadInt64LittleEndian(frame.Slice(8, sizeof(long))),
             (WalFrameOperationType)opTypeByte,
-            frame[17],
-            BinaryPrimitives.ReadInt64LittleEndian(frame.Slice(20, sizeof(long))),
-            BinaryPrimitives.ReadInt32LittleEndian(frame.Slice(28, sizeof(int))));
+            BinaryPrimitives.ReadInt64LittleEndian(frame.Slice(20, sizeof(long))));
 
         return true;
     }

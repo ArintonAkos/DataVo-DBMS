@@ -369,7 +369,7 @@ public sealed class LsmManifest
             CrashHook,
             LsmCrashPoint.AfterManifestTempFileFsyncBeforeRename,
             LsmCrashPoint.AfterManifestRenameBeforeDirectoryFsync,
-            LsmCrashPoint.AfterManifestDirectoryFsyncBeforeWalClear);
+            LsmCrashPoint.AfterManifestDirectoryFsync);
     }
 
     private static Dictionary<int, List<LsmTableFileMetadata>> CopyLevels(

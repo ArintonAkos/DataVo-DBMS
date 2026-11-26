@@ -91,44 +91,12 @@ public sealed class LsmBackgroundPipelineTests : IDisposable
     }
 
     [Fact]
-    public void GroupCommit_OneFsyncCoversAllPendingTickets()
+    public void ConcurrentWriters_EveryVersionLandsInActiveMemTable()
     {
-        string dir = Path.Combine(_root, "groupcommit-tickets");
+        string dir = Path.Combine(_root, "concurrent-writers");
         Directory.CreateDirectory(dir);
         var manifest = new LsmManifest(Path.Combine(dir, "MANIFEST"));
-        using var table = new LsmTable(dir, manifest, Path.Combine(dir, "active.wal"));
-
-        // Append many frames without waiting, then wait on the LAST ticket: the leader's single
-        // fsync must cover every frame appended before it, and earlier tickets must observe the
-        // advanced durable watermark and complete without issuing their own fsync.
-        const int Ops = 100;
-        var tickets = new LsmWalDurabilityTicket[Ops];
-        Span<byte> key = stackalloc byte[sizeof(long)];
-        for (int i = 0; i < Ops; i++)
-        {
-            InternalKey.EncodeInt64UserKey(key, i + 1);
-            tickets[i] = table.PutDeferDurability(key, (ulong)(i + 1), Value(i));
-        }
-
-        Assert.Equal(0, table.WalDurableFlushCount);
-        tickets[Ops - 1].Wait();
-        Assert.Equal(1, table.WalDurableFlushCount);
-
-        for (int i = 0; i < Ops - 1; i++)
-        {
-            tickets[i].Wait();
-        }
-
-        Assert.Equal(1, table.WalDurableFlushCount);
-    }
-
-    [Fact]
-    public void GroupCommit_ConcurrentStrictWritersStayCorrectAndAmortized()
-    {
-        string dir = Path.Combine(_root, "groupcommit-threads");
-        Directory.CreateDirectory(dir);
-        var manifest = new LsmManifest(Path.Combine(dir, "MANIFEST"));
-        using var table = new LsmTable(dir, manifest, Path.Combine(dir, "active.wal"));
+        using var table = new LsmTable(dir, manifest);
 
         const int Threads = 8;
         const int OpsPerThread = 40;
@@ -136,7 +104,7 @@ public sealed class LsmBackgroundPipelineTests : IDisposable
         using var barrier = new Barrier(Threads);
 
         // Dedicated threads plus a start barrier guarantee genuine overlap: all writers are inside
-        // the Put/ticket-wait cycle simultaneously, so leader fsyncs cover follower frames.
+        // Put simultaneously.
         var workers = new Thread[Threads];
         for (int w = 0; w < Threads; w++)
         {
@@ -161,16 +129,7 @@ public sealed class LsmBackgroundPipelineTests : IDisposable
             worker.Join();
         }
 
-        int totalOps = Threads * OpsPerThread;
-        int fsyncs = table.WalDurableFlushCount;
-        Assert.True(fsyncs > 0, "strict mode must fsync");
-        // No amortization-ratio assertion here: when device fsync latency is lower than writer
-        // inter-arrival time, perfectly alternating writers legitimately produce one fsync per op.
-        // The amortization CONTRACT (one fsync covers all pending tickets; earlier tickets no-op)
-        // is proven deterministically by GroupCommit_OneFsyncCoversAllPendingTickets; this test
-        // proves the protocol is correct under genuine thread overlap.
-        Assert.True(fsyncs <= totalOps, $"fsyncs={fsyncs} must not exceed ops={totalOps}");
-        Assert.Equal(totalOps, table.ActiveCount);
+        Assert.Equal(Threads * OpsPerThread, table.ActiveCount);
     }
 
     [Fact]

@@ -20,5 +20,5 @@ internal enum LsmCrashPoint
     AfterSstableDirectoryFsyncBeforeManifest,
     AfterManifestTempFileFsyncBeforeRename,
     AfterManifestRenameBeforeDirectoryFsync,
-    AfterManifestDirectoryFsyncBeforeWalClear,
+    AfterManifestDirectoryFsync,
 }

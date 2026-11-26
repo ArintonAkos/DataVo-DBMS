@@ -1,6 +1,4 @@
 using System.Buffers;
-using System.Globalization;
-using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using DataVo.Core.StorageEngine.Lsm.V2;
@@ -17,17 +15,15 @@ public readonly record struct LsmFlushResult(
 /// Coordinates the active MemTable, a queue of frozen (immutable) MemTable generations awaiting
 /// background flush, SSTable/manifest publication, and background Level-0 compaction.
 /// <para>
-/// Write path: mutations append to the current WAL segment and the active MemTable under the write
-/// gate. When the active MemTable crosses the size threshold it is frozen, a fresh MemTable and WAL
-/// segment are swapped in atomically, and the frozen generation is handed to a single background
-/// worker — the crossing writer returns without performing flush I/O. Writers block on the flush
-/// pipeline only when <see cref="MaxPendingFrozenGenerations"/> generations are already queued
-/// (backpressure), never for routine flush I/O.
+/// Write path: mutations go to the active MemTable under the write gate. When the active MemTable
+/// crosses the size threshold it is frozen, a fresh MemTable is swapped in atomically, and the frozen
+/// generation is handed to a single background worker — the crossing writer returns without performing
+/// flush I/O. Writers block on the flush pipeline only when <see cref="MaxPendingFrozenGenerations"/>
+/// generations are already queued (backpressure), never for routine flush I/O.
 /// </para>
 /// <para>
-/// Each generation owns its own WAL segment; the segment is deleted only after the generation's
-/// SSTable and manifest edit are durable, so a crash at any point recovers every acknowledged write
-/// by replaying the surviving segments in order.
+/// The table keeps no log of its own: durability comes from the owner's shared commit log, which holds
+/// every mutation before it reaches a MemTable (see <see cref="BeforeFlushDurabilityBarrier"/>).
 /// </para>
 /// </summary>
 public sealed class LsmTable : IDisposable
@@ -91,7 +87,7 @@ public sealed class LsmTable : IDisposable
     /// </summary>
     internal int BloomSuffixLength { get; set; }
 
-    /// <summary>How compaction reads v2 inputs.</summary>
+    /// <summary>How compaction reads row-keyed inputs.</summary>
     internal LsmReadMode ReadMode { get; set; }
 
     /// <summary>The engine's block cache for positional reads, or null.</summary>
@@ -103,8 +99,6 @@ public sealed class LsmTable : IDisposable
     /// </summary>
     internal Action<MemTable>? AfterSstablePublished { get; set; }
 
-    private sealed record FrozenGeneration(MemTable Table, LsmWalWriter? Wal);
-
     private readonly object _gate = new();
     private int _frameHolds; // guarded by _gate
     private readonly object _ioGate = new();
@@ -112,12 +106,7 @@ public sealed class LsmTable : IDisposable
     private readonly LsmManifest _manifest;
     private readonly Action<LsmVersionEdit> _applyEdit;
     private readonly Action<LsmCrashPoint>? _crashHook;
-    private readonly string? _walBasePath;
-    private readonly LsmWalDurabilityMode _walDurabilityMode;
-    private readonly Queue<FrozenGeneration> _frozenQueue = new();
-    private readonly List<string> _recoveredWalPaths = [];
-    private LsmWalWriter? _currentWal;
-    private long _walSegmentSeq;
+    private readonly Queue<MemTable> _frozenQueue = new();
     private MemTable _active = new();
     private MemTable? _flushing; // frozen generation dequeued by the worker but not yet durable
     private Task _flushWorker = Task.CompletedTask;
@@ -129,28 +118,13 @@ public sealed class LsmTable : IDisposable
 
     /// <summary>Creates an LSM table rooted at <paramref name="tableDirectory"/> and backed by <paramref name="manifest"/>.</summary>
     public LsmTable(string tableDirectory, LsmManifest manifest)
-        : this(tableDirectory, manifest, walPath: null, LsmWalDurabilityMode.StrictFsync, applyEdit: null)
-    {
-    }
-
-    /// <summary>
-    /// Creates an LSM table whose MemTable generations are covered by WAL segments derived from
-    /// <paramref name="walPath"/>. Strict fsync is the default production durability mode.
-    /// </summary>
-    public LsmTable(
-        string tableDirectory,
-        LsmManifest manifest,
-        string walPath,
-        LsmWalDurabilityMode durabilityMode = LsmWalDurabilityMode.StrictFsync)
-        : this(tableDirectory, manifest, walPath, durabilityMode, applyEdit: null)
+        : this(tableDirectory, manifest, applyEdit: null)
     {
     }
 
     private LsmTable(
         string tableDirectory,
         LsmManifest manifest,
-        string? walPath,
-        LsmWalDurabilityMode durabilityMode,
         Action<LsmVersionEdit>? applyEdit,
         Action<LsmCrashPoint>? crashHook = null)
     {
@@ -160,26 +134,21 @@ public sealed class LsmTable : IDisposable
         _tableDirectory = tableDirectory;
         _manifest = manifest;
         _crashHook = crashHook;
-        _walBasePath = walPath;
-        _walDurabilityMode = durabilityMode;
         _applyEdit = applyEdit ?? manifest.ApplyEdit;
         Directory.CreateDirectory(_tableDirectory);
-        RecoverWalSegments();
     }
 
     internal static LsmTable CreateForTesting(
         string tableDirectory,
         LsmManifest manifest,
         Action<LsmVersionEdit> applyEdit) =>
-        new(tableDirectory, manifest, walPath: null, LsmWalDurabilityMode.StrictFsync, applyEdit);
+        new(tableDirectory, manifest, applyEdit);
 
     internal static LsmTable CreateForTesting(
         string tableDirectory,
         LsmManifest manifest,
-        string walPath,
-        LsmWalDurabilityMode durabilityMode,
         Action<LsmCrashPoint> crashHook) =>
-        new(tableDirectory, manifest, walPath, durabilityMode, applyEdit: null, crashHook);
+        new(tableDirectory, manifest, applyEdit: null, crashHook);
 
     /// <summary>Number of version entries currently buffered in the active mutable MemTable.</summary>
     public int ActiveCount
@@ -194,59 +163,32 @@ public sealed class LsmTable : IDisposable
         }
     }
 
-    /// <summary>
-    /// Adds a value version to the active MemTable. Synchronously durable in strict mode: the call
-    /// returns only after the WAL frame is covered by a (possibly shared, group-commit) fsync.
-    /// </summary>
+    /// <summary>Adds a value version to the active MemTable.</summary>
     public void Put(ReadOnlySpan<byte> userKey, ulong seqno, ReadOnlySpan<byte> value)
-    {
-        PutDeferDurability(userKey, seqno, value).Wait();
-    }
-
-    /// <summary>
-    /// Adds a value version and returns a durability ticket instead of waiting: the caller must
-    /// invoke <see cref="LsmWalDurabilityTicket.Wait"/> OUTSIDE its own locks before acknowledging
-    /// the operation, which lets concurrent strict-mode writers share one group-commit fsync.
-    /// </summary>
-    internal LsmWalDurabilityTicket PutDeferDurability(ReadOnlySpan<byte> userKey, ulong seqno, ReadOnlySpan<byte> value)
     {
         lock (_gate)
         {
             ThrowIfUnusableNoLock();
-            LsmWalDurabilityTicket ticket =
-                _currentWal?.AppendMutationBuffered(userKey, seqno, LsmValueType.Put, value)
-                ?? LsmWalDurabilityTicket.None;
             _active.Put(userKey, seqno, LsmValueType.Put, value);
             RotateIfOversizedNoLock();
-            return ticket;
         }
     }
 
-    /// <summary>Adds a tombstone version to the active MemTable (synchronously durable in strict mode).</summary>
+    /// <summary>Adds a tombstone version to the active MemTable.</summary>
     public void Delete(ReadOnlySpan<byte> userKey, ulong seqno)
-    {
-        DeleteDeferDurability(userKey, seqno).Wait();
-    }
-
-    internal LsmWalDurabilityTicket DeleteDeferDurability(ReadOnlySpan<byte> userKey, ulong seqno)
     {
         lock (_gate)
         {
             ThrowIfUnusableNoLock();
-            LsmWalDurabilityTicket ticket =
-                _currentWal?.AppendMutationBuffered(userKey, seqno, LsmValueType.Deletion, ReadOnlySpan<byte>.Empty)
-                ?? LsmWalDurabilityTicket.None;
             _active.Delete(userKey, seqno);
             RotateIfOversizedNoLock();
-            return ticket;
         }
     }
 
     /// <summary>
     /// Synchronously drains the background flush queue, then flushes the active MemTable inline:
     /// serializes it to a Level-0 SSTable, publishes it atomically, registers it in the manifest,
-    /// installs a fresh active table, and clears the covered WAL state. Empty active tables are a
-    /// no-op. Used by explicit maintenance (compaction, close) and tests; routine flushes ride the
+    /// and installs a fresh active table. Empty active tables are a no-op. Used by explicit maintenance (compaction, close) and tests; routine flushes ride the
     /// background pipeline instead.
     /// </summary>
     public LsmFlushResult? FlushActiveMemTable()
@@ -265,7 +207,6 @@ public sealed class LsmTable : IDisposable
 
             if (_active.Count == 0)
             {
-                CleanupRecoveredWalsNoLock();
                 return null;
             }
 
@@ -274,8 +215,6 @@ public sealed class LsmTable : IDisposable
             flushed.Freeze();
             _active = new MemTable();
             flushed.Dispose();
-            _currentWal?.Clear();
-            CleanupRecoveredWalsNoLock();
         }
 
         ScheduleCompactionCheck();
@@ -304,9 +243,9 @@ public sealed class LsmTable : IDisposable
 
                 Consider(_active);
                 Consider(_flushing);
-                foreach (FrozenGeneration generation in _frozenQueue)
+                foreach (MemTable frozen in _frozenQueue)
                 {
-                    Consider(generation.Table);
+                    Consider(frozen);
                 }
 
                 return oldest;
@@ -319,18 +258,6 @@ public sealed class LsmTable : IDisposable
     /// compaction) that mutate SSTable files and the manifest.
     /// </summary>
     internal object MaintenanceGate => _ioGate;
-
-    /// <summary>Physical fsyncs issued by the CURRENT WAL segment (diagnostics/tests).</summary>
-    internal int WalDurableFlushCount
-    {
-        get
-        {
-            lock (_gate)
-            {
-                return _currentWal?.DurableFlushCount ?? 0;
-            }
-        }
-    }
 
     /// <summary>
     /// Waits until all queued frozen MemTable flushes and scheduled background compaction checks finish.
@@ -367,7 +294,7 @@ public sealed class LsmTable : IDisposable
             // Drain pending flushes and any in-flight compaction so no background work touches state
             // after disposal; scheduled compaction checks that have not started exit early on _stopping.
             // A background error at this point is swallowed: Dispose must not throw, and every
-            // acknowledged write remains recoverable from the surviving WAL segments.
+            // acknowledged write remains recoverable from the owner's commit log.
             WaitForFlushPipelineNoLock(waitForScheduledCompactions: false);
 
             _disposed = true;
@@ -422,16 +349,8 @@ public sealed class LsmTable : IDisposable
 
         MemTable frozen = _active;
         frozen.Freeze();
-        LsmWalWriter? frozenWal = _currentWal;
-
         _active = new MemTable();
-        // The frozen generation keeps its own segment file (the base path for the first
-        // generation, a numbered path otherwise); the new active generation always gets a fresh
-        // numbered segment. No file is ever renamed, so in-flight group-commit tickets against the
-        // frozen segment keep fsyncing the file that actually holds their frames.
-        _currentWal = _walBasePath is null ? null : CreateNextWalSegmentNoLock();
-
-        _frozenQueue.Enqueue(new FrozenGeneration(frozen, frozenWal));
+        _frozenQueue.Enqueue(frozen);
         _flushWorker = _flushWorker.ContinueWith(
             _ => DrainFrozenQueue(),
             CancellationToken.None,
@@ -443,7 +362,7 @@ public sealed class LsmTable : IDisposable
     {
         while (true)
         {
-            FrozenGeneration generation;
+            MemTable generation;
             lock (_gate)
             {
                 if (_backgroundError is not null || _frozenQueue.Count == 0)
@@ -454,7 +373,7 @@ public sealed class LsmTable : IDisposable
                 }
 
                 generation = _frozenQueue.Dequeue();
-                _flushing = generation.Table;
+                _flushing = generation;
                 _workerBusy = true;
             }
 
@@ -491,23 +410,20 @@ public sealed class LsmTable : IDisposable
         }
     }
 
-    private void FlushGeneration(FrozenGeneration generation)
+    private void FlushGeneration(MemTable generation)
     {
         // The read lease pins the frozen generation's arena slabs while the SSTable image is
         // serialized from them; without it, a concurrent Dispose could return slabs to the shared
         // pool while this thread still reads their spans.
-        using (ArenaLease lease = generation.Table.AcquireReadLease())
+        using (ArenaLease lease = generation.AcquireReadLease())
         {
-            if (generation.Table.Count > 0)
+            if (generation.Count > 0)
             {
-                FlushMemTableToSstable(generation.Table);
+                FlushMemTableToSstable(generation);
             }
         }
 
-        generation.Table.Dispose();
-        // The generation's WAL segment is deleted only now, after its SSTable and manifest edit are
-        // durable: a crash before this point replays the segment; after it, the SSTable is truth.
-        generation.Wal?.Clear();
+        generation.Dispose();
     }
 
     private LsmFlushResult FlushMemTableToSstable(MemTable memTable)
@@ -526,7 +442,7 @@ public sealed class LsmTable : IDisposable
     }
 
     /// <summary>
-    /// Streams <paramref name="memTable"/> into a v2 SSTable block by block (no whole-file image), publishes
+    /// Streams <paramref name="memTable"/> into a row-keyed SSTable block by block (no whole-file image), publishes
     /// it through the file registry's version gate, then lets the owner evict the flushed versions.
     /// </summary>
     private readonly record struct RowBounds(
@@ -599,7 +515,7 @@ public sealed class LsmTable : IDisposable
                 overwrite: false,
                 stream =>
                 {
-                    using var writer = new SsTableV2Writer(stream, alignment: 0, memTable.Count, columnar: ColumnarSpec);
+                    using var writer = new SsTableV2Writer(stream, alignment: 0, columnar: ColumnarSpec);
                     RowBounds bounds = WriteRows(writer, memTable);
                     if (!bounds.HasRows)
                     {
@@ -833,7 +749,7 @@ public sealed class LsmTable : IDisposable
             stream =>
             {
                 SsTableV2Properties properties = reader.Properties;
-                using var writer = new SsTableV2Writer(stream, alignment: 0, (int)Math.Min(properties.EntryCount, int.MaxValue), columnar: spec);
+                using var writer = new SsTableV2Writer(stream, alignment: 0, columnar: spec);
                 SsTableV2Cursor cursor = reader.OpenCursor();
                 try
                 {
@@ -1026,92 +942,9 @@ public sealed class LsmTable : IDisposable
         if (_backgroundError is not null)
         {
             throw new InvalidOperationException(
-                "The LSM table is fail-stopped: a background flush or compaction failed. All acknowledged writes remain recoverable from the WAL segments.",
+                "The LSM table is fail-stopped: a background flush or compaction failed. All acknowledged writes remain recoverable from the commit log.",
                 _backgroundError);
         }
-    }
-
-    private LsmWalWriter CreateNextWalSegmentNoLock()
-    {
-        _walSegmentSeq++;
-        return new LsmWalWriter(WalSegmentPath(_walSegmentSeq), _walDurabilityMode);
-    }
-
-    private string WalSegmentPath(long seq)
-    {
-        string directory = Path.GetDirectoryName(_walBasePath!)!;
-        string stem = Path.GetFileNameWithoutExtension(_walBasePath!);
-        return Path.Combine(directory, $"{stem}.{seq:D6}.wal");
-    }
-
-    private void RecoverWalSegments()
-    {
-        if (_walBasePath is null)
-        {
-            _currentWal = null;
-            return;
-        }
-
-        string directory = Path.GetDirectoryName(_walBasePath)!;
-        string stem = Path.GetFileNameWithoutExtension(_walBasePath);
-        var segments = new List<(long Seq, string Path)>();
-
-        // The live segment sits at the base path; it is replayed before any rotated (numbered) segment.
-        if (File.Exists(_walBasePath))
-        {
-            segments.Add((-1L, _walBasePath));
-        }
-
-        var pattern = new Regex(
-            "^" + Regex.Escape(stem) + @"\.(\d{6,})\.wal$",
-            RegexOptions.CultureInvariant);
-        if (Directory.Exists(directory))
-        {
-            foreach (string path in Directory.GetFiles(directory, $"{stem}.*.wal"))
-            {
-                Match match = pattern.Match(Path.GetFileName(path));
-                if (match.Success)
-                {
-                    segments.Add((long.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture), path));
-                }
-            }
-        }
-
-        segments.Sort(static (left, right) => left.Seq.CompareTo(right.Seq));
-        long maxSeq = 0;
-        foreach ((long seq, string path) in segments)
-        {
-            var replayWriter = new LsmWalWriter(path, _walDurabilityMode);
-            replayWriter.ReplayInto(_active);
-            maxSeq = Math.Max(maxSeq, seq);
-            if (seq >= 0)
-            {
-                // Numbered (rotated) segments are deleted once the recovered data is flushed. The
-                // base path is not tracked here: it becomes the live segment again below, and its
-                // replayed frames are cleared by the current writer's own post-flush Clear.
-                _recoveredWalPaths.Add(path);
-            }
-        }
-
-        // The live WAL always sits at the base path; rotated frozen generations get numbered paths.
-        _walSegmentSeq = maxSeq;
-        _currentWal = new LsmWalWriter(_walBasePath, _walDurabilityMode);
-
-        if (_active.Count == 0)
-        {
-            // Nothing recoverable in the surviving rotated segments; deleting them loses nothing.
-            CleanupRecoveredWalsNoLock();
-        }
-    }
-
-    private void CleanupRecoveredWalsNoLock()
-    {
-        foreach (string path in _recoveredWalPaths)
-        {
-            DeleteFileIfExists(path);
-        }
-
-        _recoveredWalPaths.Clear();
     }
 
     private static (byte[] Smallest, byte[] Largest) ComputeBounds(MemTable memTable)
