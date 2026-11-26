@@ -18,50 +18,39 @@ trap cleanup EXIT
 
 mkdir -p "$PACKAGES_DIR" "$NUGET_PACKAGES"
 
-echo "[1/6] Packing DataVo.Core and DataVo.Data..."
-dotnet pack "$ROOT_DIR/DataVo.Core/DataVo.Core.csproj" \
-  -c Release \
-  -p:PackageVersion="$PACKAGE_VERSION" \
-  -o "$PACKAGES_DIR" >/dev/null
-dotnet pack "$ROOT_DIR/DataVo.Data/DataVo.Data.csproj" \
-  -c Release \
-  -p:PackageVersion="$PACKAGE_VERSION" \
-  -o "$PACKAGES_DIR" >/dev/null
+readonly PROJECTS=(
+  DataVo.Core
+  DataVo.Data
+  DataVo.EntityFrameworkCore
+  DataVo.Generators
+  DataVo.VectorData
+)
 
-echo "[2/6] Verifying package artifacts exist..."
-CORE_PACKAGE="$(
-  find "$PACKAGES_DIR" -maxdepth 1 -type f \
-    -name 'DataVo.Core.*.nupkg' -print
-)"
-DATA_PACKAGE="$(
-  find "$PACKAGES_DIR" -maxdepth 1 -type f \
-    -name 'DataVo.Data.*.nupkg' -print
-)"
+echo "[1/5] Packing the five publishable packages..."
+for project in "${PROJECTS[@]}"; do
+  dotnet pack "$ROOT_DIR/$project/$project.csproj" \
+    -c Release \
+    -p:PackageVersion="$PACKAGE_VERSION" \
+    -o "$PACKAGES_DIR" >/dev/null
+done
 
-if [[ -z "$CORE_PACKAGE" || "$CORE_PACKAGE" == *$'\n'* ]]; then
-  echo "Expected exactly one DataVo.Core nupkg, found:" >&2
-  printf '%s\n' "${CORE_PACKAGE:-<none>}" >&2
-  exit 1
-fi
+echo "[2/5] Verifying every package exists with its expected target layout..."
+bash "$ROOT_DIR/scripts/assert-release-package-targets.sh" "$PACKAGES_DIR"
 
-if [[ -z "$DATA_PACKAGE" || "$DATA_PACKAGE" == *$'\n'* ]]; then
-  echo "Expected exactly one DataVo.Data nupkg, found:" >&2
-  printf '%s\n' "${DATA_PACKAGE:-<none>}" >&2
-  exit 1
-fi
-
-echo "[3/6] Verifying the public Core target boundary..."
-bash "$ROOT_DIR/scripts/assert-core-package-targets.sh" "$CORE_PACKAGE"
-
-echo "[4/6] Creating temporary consumer app..."
+echo "[3/5] Creating temporary consumer app..."
 dotnet new console -n DataVo.PackageSmoke -o "$APP_DIR" --force >/dev/null
 
 cat > "$APP_DIR/Program.cs" <<'CS'
 using System;
+using System.IO;
 using System.Linq;
 using DataVo.Core;
 using DataVo.Core.StorageEngine.Config;
 using DataVo.Data;
+using DataVo.EntityFrameworkCore;
+using DataVo.VectorData;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.VectorData;
 
 using (var ctx = new DataVoContext(new DataVoConfig { StorageMode = StorageMode.InMemory }))
 {
@@ -96,25 +85,127 @@ using (var connection = new DataVoConnection("StorageMode=InMemory;DataSource=De
   }
 }
 
+using (var store = new DataVoVectorStore(new DataVoConfig { StorageMode = StorageMode.InMemory }))
+{
+  VectorStoreCollection<int, Doc> docs = store.GetCollection<int, Doc>("docs");
+  await docs.EnsureCollectionExistsAsync();
+  await docs.UpsertAsync([
+    new Doc { Id = 1, Title = "east", Vector = new float[] { 1f, 0f } },
+    new Doc { Id = 2, Title = "north", Vector = new float[] { 0f, 1f } },
+  ]);
+
+  var hits = await docs.SearchAsync(new ReadOnlyMemory<float>(new float[] { 0.9f, 0.1f }), top: 1).ToListAsync();
+  if (hits.Count != 1 || hits[0].Record.Id != 1)
+  {
+    throw new Exception("DataVo.VectorData validation failed in external consumer app.");
+  }
+}
+
+string efDataSource = $"datavo_package_smoke_ef_{Guid.NewGuid():N}";
+string efConnectionString = $"StorageMode=Lsm;DataSource={efDataSource}";
+try
+{
+  var efOptions = new DbContextOptionsBuilder<SmokeContext>()
+    .UseInMemoryDatabase(efDataSource)
+    .UseDataVo(efConnectionString)
+    .Options;
+  using (var ef = new SmokeContext(efOptions))
+  {
+    ef.Database.EnsureDataVoCreated();
+    ef.Add(new Ticket { Id = 1, Title = "ship" });
+    if (ef.SaveChangesToDataVo() != 1)
+    {
+      throw new Exception("DataVo.EntityFrameworkCore validation failed in external consumer app.");
+    }
+  }
+
+  using var efConnection = new DataVoConnection(efConnectionString);
+  efConnection.Open();
+  using var efCommand = efConnection.CreateCommand();
+  efCommand.CommandText = "SELECT Title FROM Tickets WHERE Id = 1;";
+  using var efReader = efCommand.ExecuteReader();
+  if (!efReader.Read() || !string.Equals(efReader[0]?.ToString(), "ship", StringComparison.Ordinal))
+  {
+    throw new Exception("DataVo.EntityFrameworkCore row was not persisted in external consumer app.");
+  }
+}
+finally
+{
+  string efPath = Path.Combine(Directory.GetCurrentDirectory(), efDataSource);
+  if (Directory.Exists(efPath))
+  {
+    Directory.Delete(efPath, recursive: true);
+  }
+}
+
 Console.WriteLine("External consumer package validation passed.");
+
+public sealed class Doc
+{
+  [VectorStoreKey]
+  public int Id { get; set; }
+
+  [VectorStoreData]
+  public string Title { get; set; } = "";
+
+  [VectorStoreVector(2, DistanceFunction = DistanceFunction.CosineSimilarity, IndexKind = IndexKind.Flat)]
+  public ReadOnlyMemory<float> Vector { get; set; }
+}
+
+public sealed class Ticket
+{
+  public int Id { get; set; }
+  public string Title { get; set; } = "";
+}
+
+public sealed class SmokeContext(DbContextOptions<SmokeContext> options) : DbContext(options)
+{
+  protected override void OnModelCreating(ModelBuilder modelBuilder)
+  {
+    modelBuilder.Entity<Ticket>(entity =>
+    {
+      entity.ToTable("Tickets");
+      entity.HasKey(static ticket => ticket.Id);
+      entity.Property(static ticket => ticket.Title).HasMaxLength(50);
+    });
+  }
+}
 CS
 
-echo "[5/6] Installing local packages from artifacts..."
-dotnet add "$APP_DIR/DataVo.PackageSmoke.csproj" package DataVo.Core --source "$PACKAGES_DIR" --version "$PACKAGE_VERSION" >/dev/null
-dotnet add "$APP_DIR/DataVo.PackageSmoke.csproj" package DataVo.Data --source "$PACKAGES_DIR" --version "$PACKAGE_VERSION" >/dev/null
+echo "[4/5] Installing local packages from artifacts..."
+# The local artifacts feed supplies the DataVo candidates; nuget.org supplies their third-party dependencies.
+cat > "$APP_DIR/nuget.config" <<XML
+<?xml version="1.0" encoding="utf-8"?>
+<configuration>
+  <packageSources>
+    <clear />
+    <add key="datavo-local" value="$PACKAGES_DIR" />
+    <add key="nuget.org" value="https://api.nuget.org/v3/index.json" />
+  </packageSources>
+</configuration>
+XML
+for project in "${PROJECTS[@]}"; do
+  dotnet add "$APP_DIR/DataVo.PackageSmoke.csproj" package "$project" --version "$PACKAGE_VERSION" --no-restore >/dev/null
+done
+# The EF Core bridge tracks entities through an EF provider; the in-memory one keeps the smoke self-contained.
+dotnet add "$APP_DIR/DataVo.PackageSmoke.csproj" package Microsoft.EntityFrameworkCore.InMemory --version 10.0.0 --no-restore >/dev/null
+dotnet restore "$APP_DIR/DataVo.PackageSmoke.csproj" >/dev/null
 
 ASSETS_FILE="$APP_DIR/obj/project.assets.json"
-if ! grep -Fq "\"DataVo.Core/$PACKAGE_VERSION\":" "$ASSETS_FILE"; then
-  echo "Expected consumer assets to resolve DataVo.Core/$PACKAGE_VERSION." >&2
+for project in "${PROJECTS[@]}"; do
+  if ! grep -Fq "\"$project/$PACKAGE_VERSION\":" "$ASSETS_FILE"; then
+    echo "Expected consumer assets to resolve $project/$PACKAGE_VERSION." >&2
+    exit 1
+  fi
+done
+
+# The source generator must reach the consumer as an analyzer, not as a referenced library.
+if ! grep -Fq "analyzers/dotnet/cs/DataVo.Generators.dll" "$ASSETS_FILE"; then
+  echo "Expected consumer assets to load DataVo.Generators as an analyzer." >&2
   exit 1
 fi
 
-if ! grep -Fq "\"DataVo.Data/$PACKAGE_VERSION\":" "$ASSETS_FILE"; then
-  echo "Expected consumer assets to resolve DataVo.Data/$PACKAGE_VERSION." >&2
-  exit 1
-fi
-
-echo "[6/6] Running consumer app with local packages..."
-dotnet run --project "$APP_DIR/DataVo.PackageSmoke.csproj" -c Release >/dev/null
+echo "[5/5] Running consumer app with local packages..."
+dotnet run --project "$APP_DIR/DataVo.PackageSmoke.csproj" -c Release
 
 echo "SUCCESS: local DataVo package smoke test passed."
