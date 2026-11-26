@@ -59,7 +59,6 @@ try
         });
 
     // 2. Top-10 leaderboard: an incremental ORDER BY ... LIMIT over the standings table.
-    var top = new (int Id, string Name, int Score)[10];
     long topDeltas = 0;
     var leaderboard = new SortedSet<(int Score, int Id)>(Comparer<(int Score, int Id)>.Create((a, b) => b.Score != a.Score ? b.Score.CompareTo(a.Score) : a.Id.CompareTo(b.Id)));
     var names = new Dictionary<int, string>();

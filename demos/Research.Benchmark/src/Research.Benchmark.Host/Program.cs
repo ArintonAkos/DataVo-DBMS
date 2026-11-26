@@ -111,8 +111,8 @@ else if (benchmarkScenario.Equals("disk-crud-wal", StringComparison.OrdinalIgnor
                 : RunDiskCrudConcurrent(engine, records, writerWorkers, progressEvery, root);
 
         // Durability matrix: each DataVo mode has a like-for-like SQLite counterpart.
-        //   not power-durable: DataVo (Disk), DataVo (LSM Relaxed) <-> SQLite (WAL, synchronous=NORMAL)
-        //   power-durable:     DataVo (Disk+fsync), DataVo (LSM Production) <-> SQLite (WAL, synchronous=FULL)
+        //   not power-durable: DataVo (LSM Relaxed)    <-> SQLite (WAL, synchronous=NORMAL)
+        //   power-durable:     DataVo (LSM Production) <-> SQLite (WAL, synchronous=FULL)
         foreach (IDiskCrudEngine engine in DiskCrudEngineMatrix.Create(engineFilter, zeroAllocUpdate))
         {
             results.Add(RunDiskScenario(engine));

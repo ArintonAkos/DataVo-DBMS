@@ -7,8 +7,8 @@ namespace Research.Benchmark.Runners.DiskCrud;
 /// SQLite disk-CRUD engine: a file-based database in <c>journal_mode=WAL</c>, with a configurable
 /// <c>synchronous</c> level so we can compare like-for-like against DataVo's two durability modes:
 /// <list type="bullet">
-/// <item><c>synchronous=NORMAL</c> — the recommended WAL pairing; commits do not fsync (only checkpoints do). Comparable to DataVo (Disk).</item>
-/// <item><c>synchronous=FULL</c> — fsync the WAL on every commit (power-crash durable). Comparable to DataVo (Disk+fsync).</item>
+/// <item><c>synchronous=NORMAL</c> — the recommended WAL pairing; commits do not fsync (only checkpoints do). Comparable to DataVo (LSM Relaxed).</item>
+/// <item><c>synchronous=FULL</c> — fsync the WAL on every commit (power-crash durable). Comparable to DataVo (LSM Production).</item>
 /// </list>
 /// Inserts run inside a single transaction; updates run as individual autocommit statements (one commit each).
 /// </summary>

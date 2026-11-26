@@ -9,16 +9,16 @@ mkdir -p "$ARTIFACT_ROOT"
 
 echo "Running browser strict stress lane..."
 
-echo "[1/4] Deploying browser WASM assets..."
+echo "[1/5] Deploying browser WASM assets..."
 bash "$ROOT_DIR/scripts/deploy-browser-wasm.sh"
 
-echo "[2/4] Ensuring docs dependencies are installed..."
+echo "[2/5] Ensuring docs dependencies are installed..."
 cd "$ROOT_DIR/docs"
 if [[ ! -d node_modules ]]; then
   npm install
 fi
 
-echo "[3/4] Ensuring Chromium is installed for Playwright..."
+echo "[3/5] Ensuring Chromium is installed for Playwright..."
 npm run test:browser:install
 
 echo "[4/5] Generating browser scenarios from DataVo.Tests..."

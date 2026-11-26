@@ -18,8 +18,6 @@ process instead of making the application repeatedly poll and recompute whole vi
   and recent trades.
 - `src/LiveDeltaGateway.Demo` — ASP.NET Core + browser UI where the client sends SQL subscriptions
   over WebSocket and receives DataVo `QueryChange` deltas.
-- `browser-wasm-showcase` — compatibility notes and next-step design for running the same idea in
-  the existing `DataVo.Browser` WebAssembly runtime.
 - `architecture-comparison.md` — diagrams for SQLite polling, app-maintained caches, external
   streaming stacks, and DataVo reactive.
 - `metrics-catalog.md` — p50/p95/p99, GC, frame-budget, and work-avoided definitions.
@@ -75,10 +73,10 @@ Run only polling baseline:
 dotnet run --project demos/realtime-benchmarks/src/GameArena.Demo/GameArena.Demo.csproj -- --mode polling
 ```
 
-Disk-backed run:
+LSM (on-disk) run:
 
 ```bash
-dotnet run --project demos/realtime-benchmarks/src/TradingOrderBook.Demo/TradingOrderBook.Demo.csproj -- --storage disk
+dotnet run --project demos/realtime-benchmarks/src/TradingOrderBook.Demo/TradingOrderBook.Demo.csproj -- --storage lsm
 ```
 
 ## Compared Architectures

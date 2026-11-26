@@ -6,9 +6,14 @@ namespace DataVo.Benchmarks.Common;
 
 public static class DataVoBenchmarkContext
 {
+    /// <summary>Opens a benchmark database for <c>--storage in-memory</c> (default) or <c>--storage lsm</c>.</summary>
+    /// <param name="storage">The storage name from the command line.</param>
+    /// <param name="scenarioName">The scenario name used for the LSM data directory.</param>
+    /// <returns>The opened database; it deletes its LSM directory on dispose.</returns>
+    /// <exception cref="ArgumentException">The storage name is not <c>in-memory</c> or <c>lsm</c>.</exception>
     public static BenchmarkDatabase Create(string storage, string scenarioName)
     {
-        if (storage.Equals("lsm", StringComparison.OrdinalIgnoreCase) || storage.Equals("disk", StringComparison.OrdinalIgnoreCase))
+        if (storage.Equals("lsm", StringComparison.OrdinalIgnoreCase))
         {
             string path = Path.Combine(Path.GetTempPath(), $"datavo_{scenarioName}_{Guid.NewGuid():N}");
             var context = new DataVoContext(new DataVoConfig
@@ -20,7 +25,12 @@ public static class DataVoBenchmarkContext
             return new BenchmarkDatabase(context, path);
         }
 
-        return new BenchmarkDatabase(new DataVoContext(new DataVoConfig { StorageMode = StorageMode.InMemory }), null);
+        if (storage.Equals("in-memory", StringComparison.OrdinalIgnoreCase) || storage.Equals("inmemory", StringComparison.OrdinalIgnoreCase))
+        {
+            return new BenchmarkDatabase(new DataVoContext(new DataVoConfig { StorageMode = StorageMode.InMemory }), null);
+        }
+
+        throw new ArgumentException($"Unknown --storage '{storage}'. Use 'in-memory' or 'lsm'.", nameof(storage));
     }
 
     public static void ExecuteOk(this DataVoContext context, string sql)

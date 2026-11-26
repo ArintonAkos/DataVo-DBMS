@@ -18,8 +18,6 @@ The host reports total time, p50 latency, p99 latency, and GC allocation.
 | DuckDB | Embedded polling SQL | Indexed recompute query |
 | SQLite | Embedded polling SQL | Indexed recompute query |
 
-Postgres and Redis runners are scaffolded for later phases.
-
 ## Complex VIP Exposure Benchmark
 
 This is the default scenario and the one that shows the relational "complexity wall" DataVo is meant to attack. A live risk dashboard needs total exposure by market category, but only for VIP accounts:

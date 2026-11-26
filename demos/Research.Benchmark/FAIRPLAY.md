@@ -1,8 +1,7 @@
 # Fair Play Benchmark Suite
 
 Objective, in-memory comparison of **DataVo** against market-standard embedded engines (**LiteDB**,
-**SQLite** / `sqlite-vec`) across three workloads. Design + fairness rules:
-[`../../docs/superpowers/specs/2026-06-23-fair-play-benchmark-suite-design.md`](../../docs/superpowers/specs/2026-06-23-fair-play-benchmark-suite-design.md).
+**SQLite** / `sqlite-vec`) across three workloads, under the fairness rules below.
 
 All engines run **in-memory**, with identical data/warm-up and the same measurement harness
 (`Stopwatch` + `GC.GetAllocatedBytesForCurrentThread`). The engine interfaces are synchronous so per-op

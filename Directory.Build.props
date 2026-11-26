@@ -45,14 +45,14 @@
   <PropertyGroup Condition="'$(MSBuildProjectName)' == 'DataVo.Core'">
     <PackageId>DataVo.Core</PackageId>
     <Title>DataVo Core</Title>
-    <PackageReleaseNotes>0.5.0: net8.0/net9.0/net10.0/netstandard2.1 targets, native DATETIME, EXPLAIN with the executed operator, a sharded LSM block cache, typed reactive top-K and join views, ReadOnlyMemory&lt;float&gt; vectors ([VectorDimensions] models, parameters, SearchNearest), NULL keys held by LSM indexes (index-only GROUP BY counts), and ordinal text comparison on every path. Breaking: the paged Disk storage mode and pre-release on-disk format upgrades were removed; InMemory and Lsm remain.</PackageReleaseNotes>
+    <PackageReleaseNotes>0.5.1: concurrency fixes. Single-row INSERT takes the table intent lock plus key locks instead of the table write lock; UPDATE reserves new primary and unique key values before checking them; CREATE INDEX, DROP INDEX, DROP TABLE and VACUUM take the exclusive table lock; lock-free primary-key point reads follow a moved row; the fixed-width compiled UPDATE fast path also runs in InMemory mode. 0.5.0: net8.0/net9.0/net10.0/netstandard2.1 targets, native DATETIME, EXPLAIN with the executed operator, a sharded LSM block cache, typed reactive top-K and join views, ReadOnlyMemory&lt;float&gt; vectors ([VectorDimensions] models, parameters, SearchNearest), NULL keys held by LSM indexes (index-only GROUP BY counts), and ordinal text comparison on every path. Breaking: the paged Disk storage mode and pre-release on-disk format upgrades were removed; InMemory and Lsm remain.</PackageReleaseNotes>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(MSBuildProjectName)' == 'DataVo.Data'">
     <PackageId>DataVo.Data</PackageId>
     <Title>DataVo Data</Title>
     <Description>ADO.NET-facing abstractions and integration layer for the DataVo engine.</Description>
-    <PackageReleaseNotes>DataVo data-access package. 0.5.0 aligns with DataVo.Core 0.5.0; StorageMode in connection strings accepts InMemory or Lsm and rejects anything else.</PackageReleaseNotes>
+    <PackageReleaseNotes>DataVo data-access package. 0.5.1 aligns with DataVo.Core 0.5.1; StorageMode in connection strings accepts InMemory or Lsm and rejects anything else.</PackageReleaseNotes>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(MSBuildProjectName)' == 'DataVo.EntityFrameworkCore'">
@@ -75,7 +75,7 @@
     <IncludeSymbols>true</IncludeSymbols>
     <SymbolPackageFormat>snupkg</SymbolPackageFormat>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
-    <PackageReleaseNotes>EF Core schema bridge for generating DataVo DDL from EF models. 0.5.0 aligns with DataVo.Core 0.5.0; the persistent mode is DataVoStorageMode.Lsm (UseLsmStorage).</PackageReleaseNotes>
+    <PackageReleaseNotes>EF Core schema bridge for generating DataVo DDL from EF models. 0.5.1 aligns with DataVo.Core 0.5.1; the persistent mode is DataVoStorageMode.Lsm (UseLsmStorage).</PackageReleaseNotes>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(MSBuildProjectName)' == 'DataVo.VectorData'">
