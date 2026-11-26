@@ -1,4 +1,6 @@
-﻿using DataVo.Core.Models.Statement;
+﻿using System.Globalization;
+using System.Text;
+using DataVo.Core.Models.Statement;
 using DataVo.Core.Exceptions;
 using DataVo.Core.Parser.AST;
 using DataVo.Core.Parser.Types;
@@ -51,12 +53,13 @@ internal class GroupBy
         return groupedTableData;
     }
 
+    /// <summary>Builds the group key of a row from its grouping column values.</summary>
     private string CreateHashForRow(JoinedRow row)
     {
-        List<string> columnValues = [];
-
-        Model.Columns.ForEach(column =>
+        var values = new object?[Model.Columns.Count];
+        for (int i = 0; i < values.Length; i++)
         {
+            var column = Model.Columns[i];
             if (!row.ContainsKey(column.TableName) || row[column.TableName] == null)
             {
                 throw new BindingException("Trying to group by inexistent table!");
@@ -67,19 +70,34 @@ internal class GroupBy
                 throw new BindingException("Trying to group by inexistent column!");
             }
 
-            if (row[column.TableName][column.ColumnName] == null)
-            {
-                columnValues.Add(string.Empty);
-            }
-            else
-            {
-                var columnValue = row[column.TableName][column.ColumnName]?.ToString() ?? string.Empty;
-                string hashCode = columnValue.GetHashCode().ToString();
+            values[i] = row[column.TableName][column.ColumnName];
+        }
 
-                columnValues.Add(hashCode);
-            }
-        });
+        return BuildGroupKey(values);
+    }
 
-        return string.Join("##", columnValues);
+    /// <summary>
+    /// Builds a group key from the grouping values themselves, never from hash codes, so distinct groups can
+    /// never collide. Each value is length-prefixed (NULL has its own marker), so no combination of values can
+    /// spell another.
+    /// </summary>
+    /// <param name="values">The row's grouping values, in GROUP BY order.</param>
+    /// <returns>A key equal for two rows exactly when their grouping values are equal.</returns>
+    internal static string BuildGroupKey(IReadOnlyList<object?> values)
+    {
+        var key = new StringBuilder();
+        foreach (object? value in values)
+        {
+            if (value is null)
+            {
+                key.Append('N');
+                continue;
+            }
+
+            string text = Convert.ToString(value, CultureInfo.InvariantCulture) ?? string.Empty;
+            key.Append('V').Append(text.Length.ToString(CultureInfo.InvariantCulture)).Append(':').Append(text);
+        }
+
+        return key.ToString();
     }
 }

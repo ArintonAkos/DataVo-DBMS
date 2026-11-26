@@ -142,8 +142,7 @@ public class Parser(List<Token> tokens)
                     throw new ParserException($"Parser Error: Parenthesized SELECT or compound queries are not supported yet near {Current}.");
                 }
 
-                Advance();
-                continue;
+                throw new ParserException($"Parser Error: Unexpected token {Current}.");
             }
 
             if (MatchKeywordOrIdentifierValue(SqlKeywords.EXPLAIN))

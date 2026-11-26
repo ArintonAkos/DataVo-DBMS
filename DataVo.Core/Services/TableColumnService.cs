@@ -41,7 +41,7 @@ namespace DataVo.Core.Services
         {
             string type = column.RawType().ToLower();
 
-            return (type == "date");
+            return type is "date" or "datetime";
         }
     }
 }
