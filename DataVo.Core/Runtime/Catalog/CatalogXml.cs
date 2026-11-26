@@ -5,8 +5,7 @@ namespace DataVo.Core.Runtime.Catalog;
 
 /// <summary>
 /// Reflection-free (Native-AOT-safe) mappers between catalog model objects and their on-disk XML form.
-/// Replaces the previous <c>XmlSerializer</c> round-trip used by both <see cref="CatalogStore"/> and the
-/// static <see cref="Models.Catalog.Catalog"/>. The element and attribute names reproduce the exact
+/// Replaces the previous <c>XmlSerializer</c> round-trip used by <see cref="CatalogStore"/>. The element and attribute names reproduce the exact
 /// <c>Catalog.xml</c> format the catalog reader navigates, so the on-disk format is preserved
 /// (no breaking change) while removing the runtime-code-generating serializer.
 /// </summary>

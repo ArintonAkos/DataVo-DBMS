@@ -26,15 +26,5 @@ namespace DataVo.Core.Utils
         {
             return new Row(dictionary);
         }
-
-        /// <summary>
-        /// Converts a keyed joined-row dictionary into a hashed table.
-        /// </summary>
-        /// <param name="dictionary">The keyed joined-row map.</param>
-        /// <returns>A hashed table over the provided dictionary.</returns>
-        public static HashedTable ToHashedTable(this Dictionary<JoinedRowId, JoinedRow> dictionary)
-        {
-            return new HashedTable(dictionary);
-        }
     }
 }

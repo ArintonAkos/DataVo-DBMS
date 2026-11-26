@@ -205,7 +205,6 @@ internal static class PortableSmoke
     private static void VerifyPortableCompatibilitySeams()
     {
         VerifyPortableGuards();
-        VerifyPortableCancellationWaiter();
         VerifyPortableMonotonicClock();
         VerifyPortablePriorityQueue();
     }
@@ -250,29 +249,6 @@ internal static class PortableSmoke
             "Portable disposed guard accepted a disposed instance.");
         Require(disposedError.ObjectName == typeof(PortableDisposedMarker).FullName,
             $"Portable disposed guard object name was '{disposedError.ObjectName}'.");
-    }
-
-    private static void VerifyPortableCancellationWaiter()
-    {
-        TaskCancellationWaiter.WaitAsync(Task.CompletedTask, CancellationToken.None)
-            .GetAwaiter()
-            .GetResult();
-
-        var completion = new TaskCompletionSource<object?>(TaskCreationOptions.RunContinuationsAsynchronously);
-        using var cancellation = new CancellationTokenSource();
-        Task wait = TaskCancellationWaiter.WaitAsync(completion.Task, cancellation.Token);
-        cancellation.Cancel();
-
-        OperationCanceledException cancellationError = Expect<OperationCanceledException>(
-            () => wait.GetAwaiter().GetResult(),
-            "Portable cancellation waiter ignored cancellation.");
-        Require(cancellationError.CancellationToken == cancellation.Token,
-            "Portable cancellation waiter did not preserve the cancellation token.");
-        Require(!completion.Task.IsCompleted,
-            "Portable cancellation waiter completed the underlying task.");
-
-        completion.SetResult(null);
-        completion.Task.GetAwaiter().GetResult();
     }
 
     private static void VerifyPortableMonotonicClock()

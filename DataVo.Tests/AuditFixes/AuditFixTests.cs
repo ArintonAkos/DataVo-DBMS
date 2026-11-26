@@ -1,5 +1,4 @@
 using DataVo.Core;
-using DataVo.Core.Cache;
 using DataVo.Core.Exceptions;
 using DataVo.Core.MVCC;
 using DataVo.Core.Models.Catalog;
@@ -17,7 +16,7 @@ using Xunit;
 namespace DataVo.Tests.AuditFixes;
 
 /// <summary>
-/// Tests covering the Phase 1 audit fixes: domain exceptions, CacheStorage thread safety,
+/// Tests covering the Phase 1 audit fixes: domain exceptions,
 /// TransactionIdAllocator lock-free upgrade, and VersionStorageManager IDisposable.
 /// </summary>
 public class AuditFixTests

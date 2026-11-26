@@ -180,7 +180,7 @@ public static class Operators
         {
             int opLen = op.Length;
 
-            return remainingLength >= opLen - 1 && op.EqualsSerialized(input.Substring(pos, opLen));
+            return remainingLength >= opLen - 1 && string.Equals(op, input.Substring(pos, opLen), StringComparison.OrdinalIgnoreCase);
         });
 
 
