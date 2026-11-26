@@ -59,6 +59,7 @@ public sealed partial class DataVoEngine : IDisposable
         LockManager = new LockManager(Config.LockAcquireTimeoutMs);
         IndexManager = new PolyIndexManager();
         Columnar = new Indexing.Columnar.ColumnarIndexManager(this);
+        JoinCardinalityFeedback = new Execution.Volcano.JoinCardinalityFeedbackStore(Config);
         if (StorageContext.LsmIndexStore is { } lsmIndexStore)
         {
             // LSM mode: scalar indexes and key lanes live in the engine's persisted index tables.
@@ -223,6 +224,9 @@ public sealed partial class DataVoEngine : IDisposable
 
     /// <summary>Gets the columnar indexes of this engine's tables.</summary>
     internal Indexing.Columnar.ColumnarIndexManager Columnar { get; }
+
+    /// <summary>Gets the join output sizes the Volcano planner learned on this engine.</summary>
+    internal Execution.Volcano.JoinCardinalityFeedbackStore JoinCardinalityFeedback { get; }
 
     /// <summary>
     /// Gets the version storage manager owned by this engine for MVCC support.
@@ -726,14 +730,6 @@ public sealed partial class DataVoEngine : IDisposable
     }
 
     /// <summary>
-    /// Gets the principal currently bound to the logical session, if any.
-    /// </summary>
-    public SessionPrincipal? GetSessionPrincipal(Guid session)
-    {
-        return SessionSecurity.Get(session);
-    }
-
-    /// <summary>
     /// Enforces <paramref name="permission"/> for a direct (non-SQL) API call; a no-op unless
     /// <see cref="DataVoConfig.EnableAuthorization"/> is set, so default unauthenticated use is unaffected.
     /// </summary>
@@ -743,6 +739,14 @@ public sealed partial class DataVoEngine : IDisposable
         {
             SessionSecurity.Authorize(session, permission, Config);
         }
+    }
+
+    /// <summary>
+    /// Gets the principal currently bound to the logical session, if any.
+    /// </summary>
+    public SessionPrincipal? GetSessionPrincipal(Guid session)
+    {
+        return SessionSecurity.Get(session);
     }
 
     /// <summary>

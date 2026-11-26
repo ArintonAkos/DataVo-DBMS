@@ -46,7 +46,7 @@ public abstract class ExplainTestsBase(DataVoConfig config, string testDbName) :
     }
 
     [Fact]
-    public void ExplainSelect_DoesNotRequireReadingRowsForCostEstimate()
+    public void ExplainSelect_EstimatesCostFromStoredRowCountMetadata()
     {
         Execute("CREATE TABLE EmptyItems (Id INT, Name VARCHAR)");
         Execute("CREATE TABLE PopulatedItems (Id INT, Name VARCHAR)");
@@ -63,9 +63,12 @@ public abstract class ExplainTestsBase(DataVoConfig config, string testDbName) :
         var emptyRow = Assert.Single(emptyResult.Data);
         var populatedRow = Assert.Single(populatedResult.Data);
 
+        // The estimate comes from the storage engine's row count (no rows are read), so it reflects table size.
         Assert.Equal(emptyRow["Plan"], populatedRow["Plan"]);
         Assert.Equal(emptyRow["Physical"], populatedRow["Physical"]);
-        Assert.Equal(emptyRow["EstimatedCost"], populatedRow["EstimatedCost"]);
+        Assert.True(
+            Convert.ToInt32(populatedRow["EstimatedCost"]) > Convert.ToInt32(emptyRow["EstimatedCost"]),
+            $"populated {populatedRow["EstimatedCost"]} vs empty {emptyRow["EstimatedCost"]}");
     }
 }
 

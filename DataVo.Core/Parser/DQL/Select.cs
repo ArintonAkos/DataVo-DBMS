@@ -18,10 +18,7 @@ using DataVo.Core.Runtime.Diagnostics;
 using DataVo.Core.StorageEngine;
 using DataVo.Core.Execution.Volcano;
 using DataVo.Core.MVCC;
-using System.Collections.Concurrent;
 using System.Globalization;
-using System.Text.Json;
-using DataVo.Core.Serialization;
 
 namespace DataVo.Core.Parser.DQL;
 
@@ -94,11 +91,6 @@ internal partial class Select(SelectStatement ast) : BaseDbAction
     /// The parsed model representation of the SELECT statement.
     /// </summary>
     private readonly SelectModel _model = SelectModel.FromAst(ast);
-    private const double JoinCardinalityFeedbackAlpha = 0.35d;
-    private static readonly object _joinCardinalityFeedbackSync = new();
-    private static readonly ConcurrentDictionary<string, double> _joinCardinalityFeedback = new(StringComparer.OrdinalIgnoreCase);
-    private static string? _joinCardinalityFeedbackLoadedPath;
-    private static bool _joinCardinalityFeedbackLoaded;
     private readonly Dictionary<JoinedRow, Dictionary<string, object?>> _windowValues = [];
     private bool _volcanoLimitPushedDown;
     private bool _volcanoOffsetPushedDown;
@@ -2154,34 +2146,8 @@ internal partial class Select(SelectStatement ast) : BaseDbAction
         return estimatedOutputRowsHeuristic;
     }
 
-    private bool TryGetJoinCardinalityFeedback(string edgeKey, out long learnedRows)
-    {
-        if (!Engine.Config.EnableVolcanoJoinCardinalityFeedback)
-        {
-            learnedRows = 0;
-            return false;
-        }
-
-        EnsureJoinCardinalityFeedbackLoaded();
-
-        if (_joinCardinalityFeedback.TryGetValue(edgeKey, out var value))
-        {
-            learnedRows = Math.Max(1L, (long)Math.Round(value));
-            return true;
-        }
-
-        learnedRows = 0;
-        return false;
-    }
-
-    private static void RecordJoinCardinalityFeedback(string edgeKey, long observedRows)
-    {
-        double sanitizedObserved = Math.Max(1L, observedRows);
-        _joinCardinalityFeedback.AddOrUpdate(
-            edgeKey,
-            sanitizedObserved,
-            (_, existing) => (existing * (1d - JoinCardinalityFeedbackAlpha)) + (sanitizedObserved * JoinCardinalityFeedbackAlpha));
-    }
+    private bool TryGetJoinCardinalityFeedback(string edgeKey, out long learnedRows) =>
+        Engine.JoinCardinalityFeedback.TryGet(edgeKey, out learnedRows);
 
     private void UpdateJoinCardinalityFeedback(
         List<(string FeedbackKey, CountingPassthroughOperator Counter, int EstimatedOutputRows)> joinCounters)
@@ -2191,118 +2157,10 @@ internal partial class Select(SelectStatement ast) : BaseDbAction
             return;
         }
 
-        EnsureJoinCardinalityFeedbackLoaded();
-
+        Engine.JoinCardinalityFeedback.Record(joinCounters.Select(join => (join.FeedbackKey, join.Counter.EmittedRows)));
         foreach (var (feedbackKey, counter, estimatedOutputRows) in joinCounters)
         {
-            long observed = Math.Max(1, counter.EmittedRows);
-            RecordJoinCardinalityFeedback(feedbackKey, observed);
-            Logger.Info($"Planner: join feedback learned for {feedbackKey}: observed={observed}, estimated={estimatedOutputRows}");
-        }
-
-        TrimJoinCardinalityFeedbackEntries();
-        PersistJoinCardinalityFeedbackIfEnabled();
-    }
-
-    private void EnsureJoinCardinalityFeedbackLoaded()
-    {
-        if (!Engine.Config.EnableVolcanoJoinCardinalityFeedbackPersistence)
-        {
-            return;
-        }
-
-        string? path = Engine.Config.VolcanoJoinCardinalityFeedbackPersistenceFile;
-        if (string.IsNullOrWhiteSpace(path))
-        {
-            return;
-        }
-
-        lock (_joinCardinalityFeedbackSync)
-        {
-            bool samePath = string.Equals(_joinCardinalityFeedbackLoadedPath, path, StringComparison.OrdinalIgnoreCase);
-            if (_joinCardinalityFeedbackLoaded && samePath)
-            {
-                return;
-            }
-
-            _joinCardinalityFeedback.Clear();
-
-            try
-            {
-                if (File.Exists(path))
-                {
-                    string json = File.ReadAllText(path);
-                    Dictionary<string, double>? loaded = JsonSerializer.Deserialize(json, DataVoJsonContext.Default.StringDoubleMap);
-                    if (loaded != null)
-                    {
-                        foreach (var entry in loaded)
-                        {
-                            if (!string.IsNullOrWhiteSpace(entry.Key) && entry.Value > 0)
-                            {
-                                _joinCardinalityFeedback[entry.Key] = entry.Value;
-                            }
-                        }
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                Logger.Info($"Planner: unable to load join feedback persistence: {ex.Message}");
-            }
-
-            _joinCardinalityFeedbackLoadedPath = path;
-            _joinCardinalityFeedbackLoaded = true;
-        }
-    }
-
-    private void PersistJoinCardinalityFeedbackIfEnabled()
-    {
-        if (!Engine.Config.EnableVolcanoJoinCardinalityFeedbackPersistence)
-        {
-            return;
-        }
-
-        string? path = Engine.Config.VolcanoJoinCardinalityFeedbackPersistenceFile;
-        if (string.IsNullOrWhiteSpace(path))
-        {
-            return;
-        }
-
-        try
-        {
-            string directory = Path.GetDirectoryName(path) ?? string.Empty;
-            if (!string.IsNullOrWhiteSpace(directory))
-            {
-                Directory.CreateDirectory(directory);
-            }
-
-            var snapshot = _joinCardinalityFeedback.ToDictionary(k => k.Key, v => v.Value, StringComparer.OrdinalIgnoreCase);
-            string json = JsonSerializer.Serialize(snapshot, DataVoJsonContext.Default.StringDoubleMap);
-            File.WriteAllText(path, json);
-        }
-        catch (Exception ex)
-        {
-            Logger.Info($"Planner: unable to persist join feedback: {ex.Message}");
-        }
-    }
-
-    private void TrimJoinCardinalityFeedbackEntries()
-    {
-        int maxEntries = Math.Max(16, Engine.Config.VolcanoJoinCardinalityFeedbackMaxEntries);
-        if (_joinCardinalityFeedback.Count <= maxEntries)
-        {
-            return;
-        }
-
-        var keep = _joinCardinalityFeedback
-            .OrderByDescending(entry => entry.Value)
-            .Take(maxEntries)
-            .ToDictionary(entry => entry.Key, entry => entry.Value, StringComparer.OrdinalIgnoreCase);
-
-        _joinCardinalityFeedback.Clear();
-        foreach (var entry in keep)
-        {
-            _joinCardinalityFeedback[entry.Key] = entry.Value;
+            Logger.Info($"Planner: join feedback learned for {feedbackKey}: observed={Math.Max(1, counter.EmittedRows)}, estimated={estimatedOutputRows}");
         }
     }
 

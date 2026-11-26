@@ -1,5 +1,3 @@
-using System.Globalization;
-
 namespace DataVo.Core.Execution.Volcano;
 
 /// <summary>
@@ -64,7 +62,11 @@ public sealed class InnerJoinOperator : IQueryOperator
                     continue;
                 }
 
-                string key = NormalizeJoinKey(joinValue);
+                if (!JoinKeys.TryNormalize(joinValue, out string key))
+                {
+                    continue; // a NULL key joins with nothing
+                }
+
                 if (!_rightLookup.TryGetValue(key, out var bucket))
                 {
                     bucket = [];
@@ -109,8 +111,8 @@ public sealed class InnerJoinOperator : IQueryOperator
                 continue;
             }
 
-            string key = NormalizeJoinKey(leftJoinValue);
-            if (_rightLookup.TryGetValue(key, out var matches) && matches.Count > 0)
+            if (JoinKeys.TryNormalize(leftJoinValue, out string key)
+                && _rightLookup.TryGetValue(key, out var matches) && matches.Count > 0)
             {
                 _currentMatches = matches;
             }
@@ -146,32 +148,5 @@ public sealed class InnerJoinOperator : IQueryOperator
 
         _outputRowId++;
         return new ExecutionRow(_outputRowId, values);
-    }
-
-    private static string NormalizeJoinKey(object? value)
-    {
-        if (value == null)
-        {
-            return "<NULL>";
-        }
-
-        if (value is string text)
-        {
-            return text.Trim('\'');
-        }
-
-        if (value is IConvertible && value is not bool && value is not char)
-        {
-            try
-            {
-                decimal numeric = Convert.ToDecimal(value, CultureInfo.InvariantCulture);
-                return numeric.ToString(CultureInfo.InvariantCulture);
-            }
-            catch
-            {
-            }
-        }
-
-        return Convert.ToString(value, CultureInfo.InvariantCulture) ?? string.Empty;
     }
 }

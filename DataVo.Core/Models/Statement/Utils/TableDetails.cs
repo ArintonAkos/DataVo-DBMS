@@ -178,28 +178,39 @@ namespace DataVo.Core.Models.Statement.Utils
         /// asks the storage engine for a cheap estimate, so that planning a point query never loads the
         /// whole table. Falls back to loading the content only for backends that cannot estimate.
         /// </summary>
-        public int EstimatedRowCount
+        public int EstimatedRowCount => TryEstimateRowCountFromMetadata(out int estimate)
+            ? estimate
+            : TableContentValues?.Count ?? 0;
+
+        /// <summary>
+        /// Estimates the row count without reading the table: from rows this detail already holds, or from the
+        /// storage engine's row-count metadata.
+        /// </summary>
+        /// <param name="estimate">The estimated row count.</param>
+        /// <returns><see langword="false"/> when only reading the rows could tell.</returns>
+        internal bool TryEstimateRowCountFromMetadata(out int estimate)
         {
-            get
+            if (_tableContentValuesCache != null)
             {
-                if (_tableContentValuesCache != null)
-                {
-                    return _tableContentValuesCache.Count;
-                }
-
-                if (_tableContentCache != null)
-                {
-                    return _tableContentCache.Count;
-                }
-
-                if (DatabaseName is not null
-                    && DataVoEngine.Current().StorageContext.TryEstimateRowCount(TableName, DatabaseName, out long estimate))
-                {
-                    return (int)Math.Min(estimate, int.MaxValue);
-                }
-
-                return TableContentValues?.Count ?? 0;
+                estimate = _tableContentValuesCache.Count;
+                return true;
             }
+
+            if (_tableContentCache != null)
+            {
+                estimate = _tableContentCache.Count;
+                return true;
+            }
+
+            if (DatabaseName is not null
+                && DataVoEngine.Current().StorageContext.TryEstimateRowCount(TableName, DatabaseName, out long stored))
+            {
+                estimate = (int)Math.Min(stored, int.MaxValue);
+                return true;
+            }
+
+            estimate = 0;
+            return false;
         }
 
         /// <summary>

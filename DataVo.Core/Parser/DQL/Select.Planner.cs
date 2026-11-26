@@ -368,36 +368,45 @@ internal partial class Select
         return 0.5d;
     }
 
-    private int EstimateFromTableRowCount(bool useRowMaterializationForEstimates)
-    {
-        if (!useRowMaterializationForEstimates)
-        {
-            return UnknownRowCountEstimate;
-        }
-
-        return _model.FromTable?.EstimatedRowCount ?? 0;
-    }
+    private int EstimateFromTableRowCount(bool useRowMaterializationForEstimates) =>
+        EstimateRowCount(_model.FromTable, useRowMaterializationForEstimates);
 
     private int EstimateJoinInputRowCount(bool useRowMaterializationForEstimates = true)
     {
-        if (!useRowMaterializationForEstimates)
-        {
-            int tableCount = 1 + (_model.JoinStatement?.Model.JoinTableDetails.Count ?? 0);
-            return Math.Max(UnknownRowCountEstimate, tableCount * UnknownRowCountEstimate);
-        }
-
-        int total = _model.FromTable?.EstimatedRowCount ?? 0;
-        if (_model.TableService == null)
+        int total = EstimateRowCount(_model.FromTable, useRowMaterializationForEstimates);
+        if (_model.TableService == null || _model.JoinStatement is null)
         {
             return total;
         }
 
         foreach (var detail in _model.JoinStatement.Model.JoinTableDetails.Values)
         {
-            total += detail.EstimatedRowCount;
+            total += EstimateRowCount(detail, useRowMaterializationForEstimates);
         }
 
         return total;
+    }
+
+    /// <summary>
+    /// Estimates a table's row count. Without materialization (EXPLAIN) only metadata is consulted: rows the
+    /// detail already holds, or the storage engine's row count; a table neither can size counts as
+    /// <see cref="UnknownRowCountEstimate"/>.
+    /// </summary>
+    private static int EstimateRowCount(Models.Statement.Utils.TableDetail? detail, bool useRowMaterializationForEstimates)
+    {
+        if (detail is null)
+        {
+            return useRowMaterializationForEstimates ? 0 : UnknownRowCountEstimate;
+        }
+
+        if (useRowMaterializationForEstimates)
+        {
+            return detail.EstimatedRowCount;
+        }
+
+        return detail.TryEstimateRowCountFromMetadata(out int estimate)
+            ? Math.Max(UnknownRowCountEstimate, estimate)
+            : UnknownRowCountEstimate;
     }
 
     private bool ShouldUseVolcanoInnerJoinPath(ExpressionNode? whereExpression)

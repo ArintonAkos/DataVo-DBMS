@@ -1,5 +1,3 @@
-using System.Globalization;
-
 namespace DataVo.Core.Execution.Volcano;
 
 /// <summary>
@@ -91,22 +89,23 @@ public sealed class NestedLoopJoinOperator : IQueryOperator
                 }
             }
 
-            if (!_currentLeft.Values.TryGetValue(_leftJoinColumn, out var leftJoinValue))
+            if (!_currentLeft.Values.TryGetValue(_leftJoinColumn, out var leftJoinValue)
+                || !JoinKeys.TryNormalize(leftJoinValue, out string leftKey))
             {
-                _currentLeft = null;
+                _currentLeft = null; // absent or NULL: joins with nothing
                 continue;
             }
 
-            string leftKey = NormalizeJoinKey(leftJoinValue);
             while (_rightIndex < _rightRows.Count)
             {
                 var rightRow = _rightRows[_rightIndex++];
-                if (!rightRow.Values.TryGetValue(_rightJoinColumn, out var rightJoinValue))
+                if (!rightRow.Values.TryGetValue(_rightJoinColumn, out var rightJoinValue)
+                    || !JoinKeys.TryNormalize(rightJoinValue, out string rightKey))
                 {
                     continue;
                 }
 
-                if (leftKey.Equals(NormalizeJoinKey(rightJoinValue), StringComparison.Ordinal))
+                if (leftKey.Equals(rightKey, StringComparison.Ordinal))
                 {
                     return MergeRows(_currentLeft, rightRow);
                 }
@@ -144,32 +143,5 @@ public sealed class NestedLoopJoinOperator : IQueryOperator
 
         _outputRowId++;
         return new ExecutionRow(_outputRowId, values);
-    }
-
-    private static string NormalizeJoinKey(object? value)
-    {
-        if (value == null)
-        {
-            return "<NULL>";
-        }
-
-        if (value is string text)
-        {
-            return text.Trim('\'');
-        }
-
-        if (value is IConvertible && value is not bool && value is not char)
-        {
-            try
-            {
-                decimal numeric = Convert.ToDecimal(value, CultureInfo.InvariantCulture);
-                return numeric.ToString(CultureInfo.InvariantCulture);
-            }
-            catch
-            {
-            }
-        }
-
-        return Convert.ToString(value, CultureInfo.InvariantCulture) ?? string.Empty;
     }
 }
