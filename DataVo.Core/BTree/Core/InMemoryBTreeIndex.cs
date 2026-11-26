@@ -10,7 +10,7 @@ namespace DataVo.Core.BTree;
 /// </summary>
 public class InMemoryBTreeIndex(int minDegree) : IIndex
 {
-    private const int DefaultMinDegree = 50;
+    internal const int DefaultMinDegree = 50;
     private readonly object _treeLock = new();
 
     /// <summary>

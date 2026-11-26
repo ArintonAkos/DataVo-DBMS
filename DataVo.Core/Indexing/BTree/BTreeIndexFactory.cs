@@ -21,8 +21,7 @@ public class BTreeIndexFactory : IIndexFactory
     /// <returns>A newly created index instance.</returns>
     public object CreateIndex(string indexName, string columnName, Dictionary<string, object> @params)
     {
-        // Default minimum degree for B-Tree
-        int minDegree = 3;
+        int minDegree = InMemoryBTreeIndex.DefaultMinDegree;
 
         if (@params.TryGetValue("minDegree", out var val) && val is int degree)
             minDegree = degree;
