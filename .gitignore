@@ -28,18 +28,6 @@
 /.matplotlib-cache/
 /docs/research/datavo-engine-whitepaper.md
 
-# Generated publication outputs
-/output/pdf/*.aux
-/output/pdf/*.out
-/output/pdf/*.pdf
-/output/pdf/datavo_managed_database_benchmark_whitepaper.*
-/output/pdf/datavo_pgfplots_snippet.tex
-/output/pdf/whitepaper_*.txt
-/output/pdf/datavo_executable_artifacts.md
-/output/pdf/test.txt
-/output/pdf/figures/
-/output/pdf/references/
-
 # User-specific files (MonoDevelop/Xamarin Studio)
 *.userprefs
 
@@ -443,7 +431,13 @@ docs/scripts/.matplotlib-cache/
 # macOS local Application Support directory
 /Library/
 
-output/
-
+# Generated publication and media outputs (whitepaper PDFs, promo videos, ...)
 output/
 supabase_answers.txt
+
+# Local tool state and editor/build artifacts that must never be committed.
+# NuGet CLI writes ~/.local/share/NuGet into the project dir when HOME is unset/overridden.
+.local/
+.vscode/mcp.json
+*.tsbuildinfo
+dist/

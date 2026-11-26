@@ -15,15 +15,15 @@
     },
     {
       "label": "pack",
-      "command": "dotnet",
-      "type": "process",
-      "args": [
-        "pack",
-        "${workspaceFolder}/DataVo.sln",
-        "-c",
-        "Release"
+      "dependsOn": [
+        "pack: core",
+        "pack: data",
+        "pack: efcore",
+        "pack: generators",
+        "pack: vectordata"
       ],
-      "problemMatcher": "$msCompile"
+      "dependsOrder": "sequence",
+      "problemMatcher": []
     },
     {
       "label": "pack: core",
@@ -44,6 +44,42 @@
       "args": [
         "pack",
         "${workspaceFolder}/DataVo.Data/DataVo.Data.csproj",
+        "-c",
+        "Release"
+      ],
+      "problemMatcher": "$msCompile"
+    },
+    {
+      "label": "pack: efcore",
+      "command": "dotnet",
+      "type": "process",
+      "args": [
+        "pack",
+        "${workspaceFolder}/DataVo.EntityFrameworkCore/DataVo.EntityFrameworkCore.csproj",
+        "-c",
+        "Release"
+      ],
+      "problemMatcher": "$msCompile"
+    },
+    {
+      "label": "pack: generators",
+      "command": "dotnet",
+      "type": "process",
+      "args": [
+        "pack",
+        "${workspaceFolder}/DataVo.Generators/DataVo.Generators.csproj",
+        "-c",
+        "Release"
+      ],
+      "problemMatcher": "$msCompile"
+    },
+    {
+      "label": "pack: vectordata",
+      "command": "dotnet",
+      "type": "process",
+      "args": [
+        "pack",
+        "${workspaceFolder}/DataVo.VectorData/DataVo.VectorData.csproj",
         "-c",
         "Release"
       ],
