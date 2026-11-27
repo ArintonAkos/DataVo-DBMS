@@ -87,8 +87,8 @@ VALUES (@id, @title, @category, @embedding);
 - **Index maintenance:** All B-Tree, `HNSW`, `FLAT`, and `COLUMNAR` indexes on the table are updated automatically.
 - **Transactions:** Inside an explicit `BEGIN` ... `COMMIT` block, inserted rows are buffered in `TransactionContext`, visible immediately to subsequent queries in the same transaction, and cleanly discarded on `ROLLBACK` or `ROLLBACK TO SAVEPOINT`.
 
-::: warning Unsupported `INSERT` Clauses in v0.4
-The following SQL extensions are **not** supported in DataVo v0.4:
+::: warning Unsupported `INSERT` Clauses in v0.5
+The following SQL extensions are **not** supported in DataVo v0.5:
 - `INSERT ... ON CONFLICT DO UPDATE / DO NOTHING` (upsert)
 - `INSERT OR REPLACE` / `REPLACE INTO`
 - `INSERT INTO ... SELECT ...`

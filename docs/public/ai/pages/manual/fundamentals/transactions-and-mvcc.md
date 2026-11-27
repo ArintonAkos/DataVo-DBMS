@@ -81,6 +81,10 @@ COMMIT;                                               -- net no-op for id = 3
 
 Multiple updates to the same row coalesce into a single pending version, and key checks account for keys inserted or deleted earlier in the same transaction.
 
+### Direct C# APIs Inside a Transaction
+
+The direct write APIs on `DataVoContext` join the session's open transaction instead of bypassing it. `InsertTyped`, `InsertTypedBatch`, `Insert<T>`, and `BulkInsert` validate their rows like SQL `INSERT` and buffer them in the transaction (they return provisional keys that identify the rows only within that transaction). `ApplyBatch` writes its folded batch into the transaction under a savepoint, and compiled `UPDATE`s (including the fixed-width and batched variants) run as transactional updates instead of patching committed storage. `COMMIT` applies all of it through the same pipeline as SQL; `ROLLBACK` discards it.
+
 ## Write Conflicts & Atomic Commit
 
 DataVo enforces **first-committer-wins**:

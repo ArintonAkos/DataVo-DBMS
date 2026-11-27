@@ -1,6 +1,6 @@
 {
   "name": "DataVo Documentation",
-  "generatedAt": "2026-11-26T11:43:08.201Z",
+  "generatedAt": "2026-11-27T13:16:21.483Z",
   "pages": [
     {
       "title": "Introduction",
@@ -117,6 +117,12 @@
       "aiPath": "/ai/pages/manual/client-interfaces/entity-framework.md"
     },
     {
+      "title": "Microsoft.Extensions.VectorData",
+      "route": "/manual/client-interfaces/vector-data",
+      "source": "manual/client-interfaces/vector-data.md",
+      "aiPath": "/ai/pages/manual/client-interfaces/vector-data.md"
+    },
+    {
       "title": "SQL Compatibility",
       "route": "/manual/sql/compatibility",
       "source": "manual/sql/compatibility.md",
@@ -211,6 +217,12 @@
       "route": "/manual/internals/compiled-scan-kernels",
       "source": "manual/internals/compiled-scan-kernels.md",
       "aiPath": "/ai/pages/manual/internals/compiled-scan-kernels.md"
+    },
+    {
+      "title": "INSERT Intent & Key Locking",
+      "route": "/manual/internals/insert-intent-row-locking",
+      "source": "manual/internals/insert-intent-row-locking.md",
+      "aiPath": "/ai/pages/manual/internals/insert-intent-row-locking.md"
     },
     {
       "title": "DataVo vs SQLite: When Each Engine Wins",

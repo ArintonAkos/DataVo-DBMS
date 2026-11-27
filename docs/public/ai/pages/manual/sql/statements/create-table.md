@@ -29,7 +29,7 @@ CREATE TABLE [IF NOT EXISTS] <table_name> (
 | `IF NOT EXISTS` | No | Succeeds as a no-op if `<table_name>` already exists in the active database instead of throwing an error. |
 | `<table_name>` | Yes | Unique table identifier within the active database. |
 | `<column_name>` | Yes | Column identifier. Must be unique within the table and cannot be a reserved keyword such as `VECTOR`. |
-| `<data_type>` | Yes | Any supported DataVo SQL type (`INT`, `BIGINT`, `FLOAT`, `DOUBLE`, `BIT`, `DATE`, `GUID`, `VARCHAR(n)`, `VECTOR(n)`, and their aliases). See [Data Types](/manual/sql/data-types). |
+| `<data_type>` | Yes | Any supported DataVo SQL type (`INT`, `BIGINT`, `FLOAT`, `DOUBLE`, `BIT`, `DATE`, `DATETIME`, `GUID`, `VARCHAR(n)`, `VECTOR(n)`, and their aliases). See [Data Types](/manual/sql/data-types). |
 | `NOT NULL` / `NULL` | No | Controls whether `NULL` values are rejected on `INSERT` and `UPDATE`. Columns allow `NULL` by default unless `NOT NULL` or `PRIMARY KEY` is specified. |
 | `DEFAULT <literal>` | No | Constant fallback value used when a column is omitted from `INSERT`. Must be a literal (`NULL`, number, quoted string, `true`, or `false`). |
 | `PRIMARY KEY` | No | Uniquely identifies rows. May be declared on one column or as a composite table-level constraint. At most one `PRIMARY KEY` per table. |
@@ -99,7 +99,7 @@ Expression defaults such as `DEFAULT NOW()` or `DEFAULT (1 + 1)` are rejected at
 
 ## Unique Constraints
 
-`UNIQUE` may be declared inline on a column or as a single-column table constraint. Multiple `NULL` values are allowed in a `UNIQUE` column because scalar indexes omit `NULL` keys.
+`UNIQUE` may be declared inline on a column or as a single-column table constraint. Multiple `NULL` values are allowed in a `UNIQUE` column because a `NULL` key never matches a lookup, so it never conflicts (see [CREATE INDEX](/manual/sql/statements/indexes#behavior-query-acceleration)).
 
 ```sql
 CREATE TABLE users (
@@ -110,7 +110,7 @@ CREATE TABLE users (
 );
 ```
 
-Declaring a multi-column `UNIQUE (col1, col2)` constraint throws a `ParserException` in `v0.4`.
+Declaring a multi-column `UNIQUE (col1, col2)` constraint throws a `ParserException` in `v0.5`.
 
 ## Foreign Keys
 
@@ -153,12 +153,12 @@ CREATE TABLE world_entities (
 
 After creating the table, attach an `HNSW` or `FLAT` index with [`CREATE INDEX`](/manual/sql/statements/indexes) to accelerate similarity search.
 
-## Unsupported Constraints in v0.4
+## Unsupported Constraints in v0.5
 
 ::: warning
-`CHECK` constraints are **not supported** in DataVo `v0.4` and will fail with a `ParserException`. Enforce domain checks in application logic before writing.
+`CHECK` constraints are **not supported** in DataVo `v0.5` and will fail with a `ParserException`. Enforce domain checks in application logic before writing.
 
-Multi-column `UNIQUE (c1, c2)` constraints, expression-based `DEFAULT` clauses, and `ON UPDATE` foreign-key actions are also not supported in `v0.4`.
+Multi-column `UNIQUE (c1, c2)` constraints, expression-based `DEFAULT` clauses, and `ON UPDATE` foreign-key actions are also not supported in `v0.5`.
 :::
 
 ## See Also

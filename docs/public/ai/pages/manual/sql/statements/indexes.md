@@ -27,8 +27,8 @@ CREATE INDEX <index_name> ON <table_name> (<column_name> [, <column_name>, ...])
 | `USING <method>` | No | Index implementation: `BTREE` (default when omitted), `HNSW`, `FLAT`, or `COLUMNAR`. |
 | `WITH (<opt> = <val>, ...)` | No | Key-value tuning options for vector indexes (`HNSW` and `FLAT`). Option names ignore case and underscores. |
 
-::: warning Syntax Notes in v0.4
-`CREATE INDEX` does **not** support `UNIQUE` or `IF NOT EXISTS` in DataVo `v0.4`. To enforce uniqueness on a column, declare `UNIQUE` inside [`CREATE TABLE`](/manual/sql/statements/create-table).
+::: warning Syntax Notes in v0.5
+`CREATE INDEX` does **not** support `UNIQUE` or `IF NOT EXISTS` in DataVo `v0.5`. To enforce uniqueness on a column, declare `UNIQUE` inside [`CREATE TABLE`](/manual/sql/statements/create-table).
 :::
 
 ## Index Methods Overview
@@ -38,7 +38,7 @@ CREATE INDEX <index_name> ON <table_name> (<column_name> [, <column_name>, ...])
 | `BTREE` (default) | `USING BTREE` (or omit `USING`) | Single or composite scalar columns | Equality lookups, range scans, selective join probes, and single-key integer `GROUP BY COUNT`. |
 | `HNSW` | `USING HNSW [WITH (...)]` | Single `VECTOR(n)` column | Fast approximate nearest-neighbor (ANN) search on medium and large embedding tables. |
 | `FLAT` | `USING FLAT [WITH (metric = ...)]` | Single `VECTOR(n)` column | Exact exhaustive vector search on small tables and recall benchmarks. |
-| `COLUMNAR` | `USING COLUMNAR` | Numeric (`INT`, `BIGINT`, `FLOAT`, `DOUBLE`), `BIT`, and `DATE` columns | Vectorized `COUNT`, `SUM`, `AVG`, `MIN`, and `MAX` aggregations without decoding full rows. |
+| `COLUMNAR` | `USING COLUMNAR` | Numeric (`INT`, `BIGINT`, `FLOAT`, `DOUBLE`), `BIT`, `DATE`, and `DATETIME` columns | Vectorized `COUNT`, `SUM`, `AVG`, `MIN`, and `MAX` aggregations without decoding full rows. |
 
 ## Scalar B-Tree Indexes (`USING BTREE`)
 

@@ -1,6 +1,6 @@
 {
   "name": "datavo-docs",
-  "description": "Local MCP server configuration for the curated DataVo v0.4.0-rc.1 manual and engineering blog.",
+  "description": "Local MCP server configuration for the curated DataVo v0.5.1 manual and engineering blog.",
   "docsBaseUrl": "https://arintonakos.github.io/DataVo-DBMS/",
   "aiIndex": "https://arintonakos.github.io/DataVo-DBMS/ai/index.json",
   "llms": "https://arintonakos.github.io/DataVo-DBMS/llms.txt",

@@ -27,7 +27,6 @@ using var db = new DataVoContext(new DataVoConfig
 | `WasmStorageEngine` | `null` | Browser storage engine when `StorageMode = StorageMode.Wasm`. |
 | `LockAcquireTimeoutMs` | `30000` | Maximum milliseconds to wait for a lock before failing (`-1` waits indefinitely). |
 | `TransactionIdStateFilePath` | `"datavo.txid"` | Persisted MVCC transaction ID watermark file. |
-| `CheckpointStateFilePath` | `"datavo.ckpt"` | Persisted binary WAL checkpoint LSN watermark file. |
 
 ## LSM & I/O
 
@@ -37,7 +36,7 @@ using var db = new DataVoContext(new DataVoConfig
 | `LsmReadMode` | `LsmReadMode.Auto` | `Auto` memory-maps SSTables on 64-bit platforms; `PositionalRead` uses standard file reads. |
 | `LsmBlockCacheSizeBytes` | `67108864` (64 MiB) | Byte budget of the sharded (32-shard, SIEVE-evicted) block cache that serves positional SSTable reads. Every block read from disk is CRC32C-verified before it is served or cached; warm hits allocate 0 B. `0` disables the cache. Ignored when SSTables are memory-mapped. |
 | `ClusteredPrimaryKeys` | `true` | Stores new LSM tables with single-column `INT` or `GUID` primary keys clustered under that key. |
-| `EnableZeroAllocCompiledUpdate` | `true` | Allows eligible fixed-width single-row compiled `UPDATE`s to byte-patch stored rows in place. |
+| `EnableZeroAllocCompiledUpdate` | `true` | Lets eligible fixed-width single-row compiled `UPDATE`s skip dictionary materialization: `Lsm` byte-patches the stored row, `InMemory` appends a patched copy and re-points the primary key. `false` forces the dictionary path (A/B measurement, safety fallback). |
 
 The LSM MemTable flush threshold (32 MB) is an internal engine constant rather than a `DataVoConfig` property.
 
@@ -69,14 +68,40 @@ Telemetry flags (`EnableVectorPredicateFastPathTelemetry`, `EnableHybridRoutingT
 | Property | Default | Description |
 | --- | --- | --- |
 | `EnableAuthorization` | `false` | Enforces users, roles, and SQL `GRANT`/`REVOKE` checks. |
-| `Username`, `Password` | `""` | Credentials for the default session principal (or supply `PasswordHash` + `PasswordSalt`). |
-| `Role`, `Roles` | `ReadWrite`, `[]` | Built-in role and custom role names assigned to the session principal. |
 | `AllowAnonymousSession` | `true` | Permits unauthenticated sessions when `EnableAuthorization` is `true`. |
 | `AnonymousRole` | `DatabaseRole.ReadOnly` | Role granted to anonymous sessions. |
 | `AuthorizationUsers` | `[]` | List of `DataVoAuthUser` principals provisioned at startup. |
+
+### `DataVoAuthUser`
+
+Each entry in `AuthorizationUsers` is a `DataVoAuthUser` (these are not `DataVoConfig` properties):
+
+| Property | Default | Description |
+| --- | --- | --- |
+| `Username` | `""` | Unique login name. |
+| `Password` | `""` | Plaintext bootstrap password; startup converts it to a hash and salt and clears it. |
+| `PasswordHash`, `PasswordSalt` | `""` | Pre-computed credentials, as an alternative to `Password`. |
+| `Role` | `DatabaseRole.ReadWrite` | Primary built-in role. |
+| `Roles` | `[]` | Additional custom role memberships. |
+
+```csharp
+using DataVo.Core;
+using DataVo.Core.Runtime.Security;
+using DataVo.Core.StorageEngine.Config;
+
+using var db = new DataVoContext(new DataVoConfig
+{
+    EnableAuthorization = true,
+    AllowAnonymousSession = false,
+    AuthorizationUsers =
+    [
+        new DataVoAuthUser { Username = "admin", Password = "change-me", Role = DatabaseRole.Admin },
+    ],
+});
+```
 
 ## See Also
 
 - [Storage Modes](/manual/fundamentals/storage-modes): Comparing `InMemory` and `Lsm`
 - [LSM & Durability](/manual/fundamentals/lsm-and-durability): `LsmStrictFsync` trade-offs and recovery guarantees
-- [ADO.NET Provider](/manual/client-interfaces/ado-net): Connection string keys (`StorageMode`, `DataSource`)
+- [ADO.NET Provider](/manual/client-interfaces/ado-net): Connection string keys (`StorageMode`, `DataSource`, `Database`)

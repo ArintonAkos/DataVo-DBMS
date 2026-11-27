@@ -3,7 +3,7 @@
 > Source route: /manual/sql/functions
 > Source file: manual/sql/functions.md
 
-DataVo v0.4 provides a focused set of SQL aggregate functions, the `RANK()` window function, `LOWER`/`UPPER` string scalar functions, standard relational and arithmetic operators, and native vector distance operators (`<->`, `<=>`).
+DataVo v0.5 provides a focused set of SQL aggregate functions, the `RANK()` window function, `LOWER`/`UPPER` string scalar functions, standard relational and arithmetic operators, and native vector distance operators (`<->`, `<=>`).
 
 ```sql
 SELECT
@@ -28,8 +28,8 @@ Aggregate functions compute a single summary value over each `GROUP BY` group, o
 | `COUNT` | `COUNT(*)`, `COUNT([DISTINCT] expr)` | Any (`*` or column/expr) | `BIGINT` (`long`) | `COUNT(*)` counts all rows including `NULL`s; `COUNT(expr)` ignores `NULL`s. Returns `0` for empty input. |
 | `SUM` | `SUM([DISTINCT] expr)` | Numeric (`INT`, `BIGINT`, `FLOAT`, `DOUBLE`) | Numeric (`BIGINT` for integers, `DOUBLE` for floats) | Ignores `NULL`s. Returns `NULL` when the group is empty or all values are `NULL`. |
 | `AVG` | `AVG([DISTINCT] expr)` | Numeric (`INT`, `BIGINT`, `FLOAT`, `DOUBLE`) | `DOUBLE` (`double`) | Ignores `NULL`s. Returns `NULL` when the group is empty or all values are `NULL`. |
-| `MIN` | `MIN([DISTINCT] expr)` | Numeric, `VARCHAR`, `DATE` | Matches column type | Ignores `NULL`s. Returns `NULL` when the group is empty or all values are `NULL`. |
-| `MAX` | `MAX([DISTINCT] expr)` | Numeric, `VARCHAR`, `DATE` | Matches column type | Ignores `NULL`s. Returns `NULL` when the group is empty or all values are `NULL`. |
+| `MIN` | `MIN([DISTINCT] expr)` | Numeric, `VARCHAR`, `DATE`, `DATETIME` | Matches column type | Ignores `NULL`s. Returns `NULL` when the group is empty or all values are `NULL`. |
+| `MAX` | `MAX([DISTINCT] expr)` | Numeric, `VARCHAR`, `DATE`, `DATETIME` | Matches column type | Ignores `NULL`s. Returns `NULL` when the group is empty or all values are `NULL`. |
 
 ### `COUNT`
 
@@ -59,7 +59,7 @@ HAVING SUM(Points) >= 200;
 
 ### `MIN` & `MAX`
 
-Return the smallest or largest non-`NULL` value across numeric, `VARCHAR` (ordinal UTF-8 order), or `DATE` columns while preserving the input column's type.
+Return the smallest or largest non-`NULL` value across numeric, `VARCHAR` (ordinal UTF-8 order), `DATE`, or `DATETIME` columns while preserving the input column's type.
 
 ```sql
 SELECT
@@ -77,7 +77,7 @@ GROUP BY PlayerId;
 
 ## Window Functions
 
-DataVo v0.4 implements a single window function: `RANK()`. Unlike aggregates, `RANK()` preserves every input row and computes a `BIGINT` (`long`) rank over each partition.
+DataVo v0.5 implements a single window function: `RANK()`. Unlike aggregates, `RANK()` preserves every input row and computes a `BIGINT` (`long`) rank over each partition.
 
 ### Syntax
 
@@ -107,13 +107,13 @@ FROM players
 ORDER BY Region ASC, RegionRank ASC;
 ```
 
-::: warning Supported Window Functions in v0.4
-Only `RANK() OVER ([PARTITION BY ...] ORDER BY <col> [ASC | DESC])` is supported in v0.4. `ROW_NUMBER()`, `DENSE_RANK()`, `LAG()`, `LEAD()`, `FIRST_VALUE()`, `LAST_VALUE()`, and window frame clauses (`ROWS BETWEEN ...`) are not implemented and throw a `ParserException`.
+::: warning Supported Window Functions in v0.5
+Only `RANK() OVER ([PARTITION BY ...] ORDER BY <col> [ASC | DESC])` is supported in v0.5. `ROW_NUMBER()`, `DENSE_RANK()`, `LAG()`, `LEAD()`, `FIRST_VALUE()`, `LAST_VALUE()`, and window frame clauses (`ROWS BETWEEN ...`) are not implemented and throw a `ParserException`.
 :::
 
 ## Scalar Functions
 
-DataVo v0.4 supports two single-argument string case-conversion scalar functions in `SELECT`, `WHERE`, and `ORDER BY` expressions:
+DataVo v0.5 supports two single-argument string case-conversion scalar functions in `SELECT`, `WHERE`, and `ORDER BY` expressions:
 
 | Function | Syntax | Input | Return Type | `NULL` Behavior |
 | --- | --- | --- | --- | --- |
@@ -165,10 +165,10 @@ WHERE Score - 50 >= 500;
 | --- | --- | --- |
 | `=` | Equal | Compares values across compatible numeric widths; `VARCHAR` uses ordinal UTF-8 comparison. |
 | `!=`, `<>` | Not equal | Both spellings are accepted and equivalent. |
-| `<` | Less than | Valid on numeric, `VARCHAR` (ordinal), and `DATE` values. |
-| `<=` | Less than or equal | Valid on numeric, `VARCHAR`, and `DATE` values. |
-| `>` | Greater than | Valid on numeric, `VARCHAR`, and `DATE` values. |
-| `>=` | Greater than or equal | Valid on numeric, `VARCHAR`, and `DATE` values. |
+| `<` | Less than | Valid on numeric, `VARCHAR` (ordinal), `DATE`, and `DATETIME` values. |
+| `<=` | Less than or equal | Valid on numeric, `VARCHAR`, `DATE`, and `DATETIME` values. |
+| `>` | Greater than | Valid on numeric, `VARCHAR`, `DATE`, and `DATETIME` values. |
+| `>=` | Greater than or equal | Valid on numeric, `VARCHAR`, `DATE`, and `DATETIME` values. |
 
 Any comparison where either side is `NULL` evaluates to unknown (`NULL`), which `WHERE` and `HAVING` filters treat as false. Use `IS NULL` / `IS NOT NULL` to test for nulls.
 
@@ -238,13 +238,13 @@ LIMIT 10;
 ```
 
 ::: warning No `<#>` Operator or Core SQL Distance Functions
-DataVo v0.4 supports **only** `<->` (L2) and `<=>` (Cosine). There is **no** `<#>` inner-product operator, and there are **no** core SQL `COSINE_DISTANCE()` or `L2_DISTANCE()` scalar functions; always use the infix `<=>` and `<->` operators in SQL queries.
+DataVo v0.5 supports **only** `<->` (L2) and `<=>` (Cosine). There is **no** `<#>` inner-product operator, and there are **no** core SQL `COSINE_DISTANCE()` or `L2_DISTANCE()` scalar functions; always use the infix `<=>` and `<->` operators in SQL queries.
 :::
 
-## Excluded Functions & Expressions in v0.4
+## Excluded Functions & Expressions in v0.5
 
-::: info Intentionally Excluded in DataVo v0.4
-To keep the embedded parser and execution engine compact and predictable, the following SQL functions and constructs are **not** included in DataVo v0.4 core SQL:
+::: info Intentionally Excluded in DataVo v0.5
+To keep the embedded parser and execution engine compact and predictable, the following SQL functions and constructs are **not** included in DataVo v0.5 core SQL:
 
 - **Conditional & null helpers:** `CASE WHEN ... THEN ... ELSE ... END`, `COALESCE`, `NULLIF`, `IFNULL`, `IIF`
 - **Type casting & pragmas:** `CAST(... AS ...)`, `CONVERT`, `::type`, `PRAGMA`

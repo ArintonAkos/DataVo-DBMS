@@ -20,9 +20,9 @@ ORDER BY distance ASC
 LIMIT 5;
 ```
 
-## Dialect Matrix (DataVo v0.4 vs. SQLite & PostgreSQL)
+## Dialect Matrix (DataVo v0.5 vs. SQLite & PostgreSQL)
 
-| Feature | DataVo v0.4 | SQLite / PostgreSQL Difference |
+| Feature | DataVo v0.5 | SQLite / PostgreSQL Difference |
 | --- | --- | --- |
 | `CREATE` / `DROP` (`DATABASE`, `TABLE`, `INDEX`) | Supported | Uses `DROP INDEX name ON table`; supports `USING BTREE`, `HNSW`, `FLAT`, `COLUMNAR`. |
 | `ALTER TABLE` | Limited | Supports `ADD COLUMN`, `DROP COLUMN`, `MODIFY COLUMN`; rejects key, FK, or indexed column changes. |

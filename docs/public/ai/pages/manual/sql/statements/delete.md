@@ -51,14 +51,14 @@ DELETE FROM matches;
 ```
 
 ::: warning Destructive Operation
-DataVo v0.4 does not have a `TRUNCATE TABLE` statement; `DELETE FROM table_name;` removes every row and executes through normal constraint, index, and transaction paths. Wrap bulk deletes inside `BEGIN` ... `COMMIT` if you need an undo boundary.
+DataVo v0.5 does not have a `TRUNCATE TABLE` statement; `DELETE FROM table_name;` removes every row and executes through normal constraint, index, and transaction paths. Wrap bulk deletes inside `BEGIN` ... `COMMIT` if you need an undo boundary.
 :::
 
 ## Foreign Keys & Index Maintenance
 
 - **Referential actions:** Deleting a parent row checks all referencing child tables. `ON DELETE CASCADE` removes dependent child rows automatically; `ON DELETE RESTRICT` rejects the `DELETE` if any child row still references the target key.
 - **Automatic index cleanup:** Removed rows are purged from all B-Tree, `HNSW`, `FLAT`, and `COLUMNAR` indexes on the table.
-- **Unsupported clauses:** `DELETE ... USING` joins and `RETURNING` clauses are not supported in DataVo v0.4.
+- **Unsupported clauses:** `DELETE ... USING` joins and `RETURNING` clauses are not supported in DataVo v0.5.
 
 ## Transactions & Rollback Behavior
 

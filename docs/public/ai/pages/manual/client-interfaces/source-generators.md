@@ -84,7 +84,7 @@ Rules for `[DataVoQuery]` methods:
 
 ### SQL `DATE` Projections
 
-Generated models map SQL `DATE` columns to `DataVo.Core.DataVoDate` (and `DataVoDate?`) across all target frameworks. On modern .NET (`net10.0`), `System.DateOnly` and `System.DateOnly?` are also supported as explicit adapters.
+Generated models map SQL `DATE` columns to `DataVo.Core.DataVoDate` (and `DataVoDate?`) across all target frameworks. On `net8.0` and later, `System.DateOnly` and `System.DateOnly?` are also supported as explicit adapters.
 
 ## Schema Manifest Validation
 

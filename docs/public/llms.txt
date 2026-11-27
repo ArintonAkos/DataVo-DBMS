@@ -1,6 +1,6 @@
 # DataVo Documentation
 
-DataVo is a C#-native embedded database engine. This file exposes the curated public v0.4.0-rc.1 Release Candidate manual and engineering blog.
+DataVo is a C#-native embedded database engine. This file exposes the curated public v0.5.1 manual and engineering blog.
 
 ## Public Pages
 - [Introduction](https://arintonakos.github.io/DataVo-DBMS/ai/pages/manual/getting-started/introduction.md)
@@ -22,6 +22,7 @@ DataVo is a C#-native embedded database engine. This file exposes the curated pu
 - [ADO.NET Provider (`DataVo.Data`)](https://arintonakos.github.io/DataVo-DBMS/ai/pages/manual/client-interfaces/ado-net.md)
 - [Dapper](https://arintonakos.github.io/DataVo-DBMS/ai/pages/manual/client-interfaces/dapper.md)
 - [Entity Framework Core](https://arintonakos.github.io/DataVo-DBMS/ai/pages/manual/client-interfaces/entity-framework.md)
+- [Microsoft.Extensions.VectorData](https://arintonakos.github.io/DataVo-DBMS/ai/pages/manual/client-interfaces/vector-data.md)
 - [SQL Compatibility](https://arintonakos.github.io/DataVo-DBMS/ai/pages/manual/sql/compatibility.md)
 - [Data Types](https://arintonakos.github.io/DataVo-DBMS/ai/pages/manual/sql/data-types.md)
 - [SELECT](https://arintonakos.github.io/DataVo-DBMS/ai/pages/manual/sql/statements/select.md)
@@ -38,6 +39,7 @@ DataVo is a C#-native embedded database engine. This file exposes the curated pu
 - [Query Planner & Fast Paths](https://arintonakos.github.io/DataVo-DBMS/ai/pages/manual/internals/query-planner.md)
 - [Zero-Allocation Row Model](https://arintonakos.github.io/DataVo-DBMS/ai/pages/manual/internals/zero-allocation-rows.md)
 - [Compiled Scan Kernels](https://arintonakos.github.io/DataVo-DBMS/ai/pages/manual/internals/compiled-scan-kernels.md)
+- [INSERT Intent & Key Locking](https://arintonakos.github.io/DataVo-DBMS/ai/pages/manual/internals/insert-intent-row-locking.md)
 - [DataVo vs SQLite: When Each Engine Wins](https://arintonakos.github.io/DataVo-DBMS/ai/pages/manual/performance/datavo-vs-sqlite.md)
 - [Benchmark Results & Methodology](https://arintonakos.github.io/DataVo-DBMS/ai/pages/manual/performance/benchmarks.md)
 - [Reproducing Benchmarks](https://arintonakos.github.io/DataVo-DBMS/ai/pages/manual/performance/reproducing-benchmarks.md)

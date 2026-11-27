@@ -303,7 +303,7 @@ Standard one-shot `SELECT` queries support non-recursive `WITH` CTEs. **`WITH RE
 
 ## Window Functions
 
-DataVo v0.4 supports the `RANK()` window function to assign competition ranks (`1, 2, 2, 4, ...`) within optional partitions without collapsing rows.
+DataVo v0.5 supports the `RANK()` window function to assign competition ranks (`1, 2, 2, 4, ...`) within optional partitions without collapsing rows.
 
 ```sql
 SELECT
@@ -318,8 +318,8 @@ ORDER BY Region ASC, RegionRank ASC;
 - `ORDER BY <column> [ASC | DESC]` inside `OVER (...)` is **required** and accepts a single column reference.
 - `PARTITION BY <col1> [, <col2>, ...]` is **optional**; omitting it ranks across the entire result set.
 
-::: warning Window Function Scope in v0.4
-Only `RANK() OVER ([PARTITION BY ...] ORDER BY <col> [ASC | DESC])` is supported in v0.4. `ROW_NUMBER()`, `DENSE_RANK()`, `LAG()`, `LEAD()`, `FIRST_VALUE()`, `LAST_VALUE()`, and window frame clauses (`ROWS BETWEEN ...`) are not implemented and throw a `ParserException`.
+::: warning Window Function Scope in v0.5
+Only `RANK() OVER ([PARTITION BY ...] ORDER BY <col> [ASC | DESC])` is supported in v0.5. `ROW_NUMBER()`, `DENSE_RANK()`, `LAG()`, `LEAD()`, `FIRST_VALUE()`, `LAST_VALUE()`, and window frame clauses (`ROWS BETWEEN ...`) are not implemented and throw a `ParserException`.
 :::
 
 ## Set Operations
@@ -342,7 +342,7 @@ SELECT Id, Name FROM players WHERE Region = 'NA';
 - `UNION ALL` concatenates all branch rows without deduplication and avoids the hashing cost.
 
 ::: warning Unsupported Set Operations
-`INTERSECT`, `EXCEPT`, and parenthesized `UNION` sub-branches are not supported in v0.4.
+`INTERSECT`, `EXCEPT`, and parenthesized `UNION` sub-branches are not supported in v0.5.
 :::
 
 ## See Also

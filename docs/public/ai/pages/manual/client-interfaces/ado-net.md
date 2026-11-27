@@ -29,9 +29,10 @@ Use `DataVoConnectionStringBuilder` or a semicolon-delimited string with three s
 | Key | Default | Description |
 | --- | --- | --- |
 | `StorageMode` | `InMemory` | `InMemory` or `Lsm`. Any other value throws `ArgumentException`. |
-| `DataSource` | `"datavo"` | Database name (and storage directory path for `Lsm`). |
+| `DataSource` | `"datavo"` | The data directory in `Lsm` mode, and the engine name in `InMemory` mode. |
+| `Database` | Last segment of `DataSource` | The SQL database created (if missing) and selected on `Open()`. |
 
-When `conn.Open()` runs, it initializes the embedded engine, executes `CREATE DATABASE IF NOT EXISTS` for the `DataSource` database name, and selects it with `USE`. `Close()` rolls back any uncommitted transaction and releases the session.
+When `conn.Open()` runs, it initializes the embedded engine, executes `CREATE DATABASE IF NOT EXISTS` for the `Database` name, and selects it with `USE`. `ChangeDatabase(name)` switches to another database on the open connection. `Close()` rolls back any uncommitted transaction and releases the session.
 
 ## Provider Types
 
@@ -42,10 +43,9 @@ When `conn.Open()` runs, it initializes the embedded engine, executes `CREATE DA
 | `DbDataReader` | `DataVoDataReader` | Forward-only reader over materialized command results. |
 | `DbTransaction` | `DataVoTransaction` | Supports `Commit()`, `Rollback()`, and savepoints (`Save`, `Rollback(name)`, `Release`). |
 | `DbParameter` | `DataVoParameter` | Supports `Parameters.AddWithValue("@name", value)`. |
-| `DbConnectionStringBuilder` | `DataVoConnectionStringBuilder` | Strongly-typed builder for `StorageMode` and `DataSource`. |
-| `Exception` | `DataVoException` | Exposes `ErrorCode`, `Line`, and `Column`. |
-
-`DataVo.Data` does **not** ship a `DbProviderFactory`.
+| `DbConnectionStringBuilder` | `DataVoConnectionStringBuilder` | Strongly-typed `StorageMode`, `DataSource`, and `Database` properties over the standard key/value builder. |
+| `DbException` | `DataVoException` | Exposes the DataVo `ErrorCode` string, `Line`, and `Column`. |
+| `DbProviderFactory` | `DataVoFactory` | Register with `DbProviderFactories.RegisterFactory("DataVo", DataVoFactory.Instance)`. |
 
 ## Transactions & Prepared Commands
 

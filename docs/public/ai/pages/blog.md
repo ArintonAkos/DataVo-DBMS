@@ -3,7 +3,7 @@
 > Source route: /blog
 > Source file: blog/index.md
 
-Notes on building **DataVo-DBMS** (an MIT-licensed embedded relational and vector database in C# for .NET 10) and **DataVo-Sync** (its commercial offline-first PostgreSQL sync add-on), with reproducible measurements and postmortems.
+Notes on building **DataVo-DBMS** (an MIT-licensed embedded relational and vector database in C# for .NET 8, 9 and 10) and **DataVo-Sync** (its commercial offline-first PostgreSQL sync add-on), with reproducible measurements and postmortems.
 
 ## Series: Building DataVo
 

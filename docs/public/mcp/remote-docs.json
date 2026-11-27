@@ -1,6 +1,6 @@
 {
   "name": "DataVo public documentation",
-  "description": "HTTP-retrievable AI documentation surface for the curated DataVo v0.4.0-rc.1 manual and engineering blog.",
+  "description": "HTTP-retrievable AI documentation surface for the curated DataVo v0.5.1 manual and engineering blog.",
   "publicScope": "Curated manual pages and engineering blog only.",
   "baseUrl": "https://arintonakos.github.io/DataVo-DBMS/",
   "entrypoints": {
@@ -105,6 +105,11 @@
       "markdown": "https://arintonakos.github.io/DataVo-DBMS/ai/pages/manual/client-interfaces/entity-framework.md"
     },
     {
+      "title": "Microsoft.Extensions.VectorData",
+      "route": "/manual/client-interfaces/vector-data",
+      "markdown": "https://arintonakos.github.io/DataVo-DBMS/ai/pages/manual/client-interfaces/vector-data.md"
+    },
+    {
       "title": "SQL Compatibility",
       "route": "/manual/sql/compatibility",
       "markdown": "https://arintonakos.github.io/DataVo-DBMS/ai/pages/manual/sql/compatibility.md"
@@ -183,6 +188,11 @@
       "title": "Compiled Scan Kernels",
       "route": "/manual/internals/compiled-scan-kernels",
       "markdown": "https://arintonakos.github.io/DataVo-DBMS/ai/pages/manual/internals/compiled-scan-kernels.md"
+    },
+    {
+      "title": "INSERT Intent & Key Locking",
+      "route": "/manual/internals/insert-intent-row-locking",
+      "markdown": "https://arintonakos.github.io/DataVo-DBMS/ai/pages/manual/internals/insert-intent-row-locking.md"
     },
     {
       "title": "DataVo vs SQLite: When Each Engine Wins",

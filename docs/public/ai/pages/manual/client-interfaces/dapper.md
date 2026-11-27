@@ -27,7 +27,7 @@ int total = conn.ExecuteScalar<int>("SELECT COUNT(*) FROM players");
 Install both packages:
 
 ```bash
-dotnet add package DataVo.Data --prerelease
+dotnet add package DataVo.Data
 dotnet add package Dapper
 ```
 

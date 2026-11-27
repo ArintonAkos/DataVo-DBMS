@@ -3,7 +3,7 @@
 > Source route: /manual/getting-started/quickstart
 > Source file: manual/getting-started/quickstart.md
 
-Get a working DataVo database running in a `.NET 10` console app in under a minute. You will start with `StorageMode.InMemory` for zero-setup iteration, then switch to crash-safe `StorageMode.Lsm` with a two-line config change.
+Get a working DataVo database running in a .NET 8, 9 or 10 console app in under a minute. You will start with `StorageMode.InMemory` for zero-setup iteration, then switch to crash-safe `StorageMode.Lsm` with a two-line config change.
 
 ```csharp
 using DataVo.Core;
@@ -38,7 +38,7 @@ foreach (var row in result.Data)
 ```bash
 dotnet new console -n DataVoQuickstart
 cd DataVoQuickstart
-dotnet add package DataVo.Core --prerelease
+dotnet add package DataVo.Core
 ```
 
 ## 2. Open a `DataVoContext`

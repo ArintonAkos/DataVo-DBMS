@@ -5,7 +5,7 @@
 
 This page summarizes DataVo's performance across **BenchmarkDotNet microbenchmarks**, **systems workloads** (durability, concurrency, reactive IVM, vector search, and 1M-row SQL), and **cross-platform CI runners** (macOS Apple Silicon, Linux x64, Windows x64), along with the methodology and caveats behind every number.
 
-> **Looking for the latest v0.4 SQL & hybrid vector numbers?** See [DataVo vs SQLite: When Each Engine Wins](/manual/performance/datavo-vs-sqlite) for the 28-query 1M-row SQL matrix and 5 filtered vector shapes.
+> **Looking for the SQL & hybrid vector matrix?** See [DataVo vs SQLite: When Each Engine Wins](/manual/performance/datavo-vs-sqlite) for the 28-query 1M-row SQL matrix and 5 filtered vector shapes.
 
 ## Executive Summary
 
@@ -185,7 +185,7 @@ Inserting 50,000 orders one-by-one and reading a live dashboard after each inser
 
 The `sql-workload` scenario runs prepared SQL text over 1,000,000 file-backed rows (DataVo LSM Relaxed vs. SQLite WAL `NORMAL`, DuckDB, and LiteDB).
 
-> **v0.4 Update:** Key range scans were upgraded to SSTable seeks (**12.9 µs** for 100 rows vs. SQLite's **18.2 µs**), and `ORDER BY ... LIMIT 10` eliminated per-row sort-key boxing (**48 KB** vs. 84 MB). See [DataVo vs SQLite](/manual/performance/datavo-vs-sqlite) for the latest v0.4 measurements across all 28 SQL shapes.
+> **v0.4 Update:** Key range scans were upgraded to SSTable seeks (**12.9 µs** for 100 rows vs. SQLite's **18.2 µs**), and `ORDER BY ... LIMIT 10` eliminated per-row sort-key boxing (**48 KB** vs. 84 MB). See [DataVo vs SQLite](/manual/performance/datavo-vs-sqlite) for measurements across all 28 SQL shapes (v0.4 runs plus the v0.5.0 re-run).
 
 ::: details Historical 12 November `sql-workload` Table (0.2.0-rc.3 baseline)
 | Operation | DataVo | SQLite | DuckDB | LiteDB |
@@ -268,6 +268,6 @@ Only configurations with matching durability should be compared. Key caveats:
 - **API overhead:** SQLite and DuckDB are measured through ADO.NET (the standard .NET client path), while DataVo uses its native compiled LINQ and prepared-statement APIs.
 
 ## See Also
-- [DataVo vs SQLite](/manual/performance/datavo-vs-sqlite): Detailed v0.4 28-query SQL matrix and hybrid vector guide
+- [DataVo vs SQLite](/manual/performance/datavo-vs-sqlite): Detailed 28-query SQL matrix (v0.4 runs, v0.5.0 re-run) and hybrid vector guide
 - [Reproducing Benchmarks](/manual/performance/reproducing-benchmarks): CLI cookbook to run every benchmark suite locally
 - [LSM Storage & Durability](/manual/fundamentals/lsm-and-durability): Configuring `LsmStrictFsync`, compaction, and WAL recovery
