@@ -24,7 +24,7 @@ namespace DataVo.Core.CompiledQueries;
 /// <summary>
 /// Executes source-generated compiled query plans against a <see cref="DataVoContext"/>.
 /// </summary>
-public static class DataVoCompiledQuery
+public static partial class DataVoCompiledQuery
 {
     private static readonly ConditionalWeakTable<DataVoContext, ConcurrentDictionary<PreparedSelectSingleCacheKey, object>> PreparedSelectSingleCache = new();
     private static readonly ConditionalWeakTable<DataVoContext, ConcurrentDictionary<PreparedSelectManyCacheKey, object>> PreparedSelectManyCache = new();
@@ -335,7 +335,10 @@ public static class DataVoCompiledQuery
         }
 
         context.Engine.AuthorizeDirectAccess(context.SessionId, DatabasePermission.WriteData);
-        ThrowIfActiveTransaction(context);
+        if (InTransaction(context))
+        {
+            return UpdateInTransaction(context, plan, parameters);
+        }
 
         // Zero-allocation byte-patch path for fixed-width, index-resolved single-row updates. Returns false
         // for any shape it cannot handle, falling through to the dictionary path below.
@@ -466,9 +469,7 @@ public static class DataVoCompiledQuery
         }
 
         context.Engine.AuthorizeDirectAccess(context.SessionId, DatabasePermission.WriteData);
-        ThrowIfActiveTransaction(context);
-
-        if (TryUpdateFixedWidthFastPath(context, plan, parameters, out int fastPathAffected))
+        if (!InTransaction(context) && TryUpdateFixedWidthFastPath(context, plan, parameters, out int fastPathAffected))
         {
             return fastPathAffected;
         }
@@ -506,23 +507,12 @@ public static class DataVoCompiledQuery
         }
 
         context.Engine.AuthorizeDirectAccess(context.SessionId, DatabasePermission.WriteData);
-        ThrowIfActiveTransaction(context);
-
-        if (TryUpdateFixedWidthFastPath(context, plan, primaryKeyValue, assignmentValues, out int fastPathAffected))
+        if (!InTransaction(context) && TryUpdateFixedWidthFastPath(context, plan, primaryKeyValue, assignmentValues, out int fastPathAffected))
         {
             return fastPathAffected;
         }
 
-        var boxed = new DataVoCompiledQueryParameter[assignmentValues.Length + 1];
-        int index = 0;
-        foreach ((_, string parameterName) in plan.Assignments)
-        {
-            boxed[index] = new DataVoCompiledQueryParameter(parameterName, assignmentValues[index].ToObject());
-            index++;
-        }
-
-        boxed[index] = new DataVoCompiledQueryParameter(plan.WhereParameterName!, primaryKeyValue.ToObject());
-        return Update(context, plan, boxed);
+        return Update(context, plan, PrimaryKeyUpdateParameters(plan, primaryKeyValue, assignmentValues));
     }
 
     /// <summary>
@@ -545,7 +535,11 @@ public static class DataVoCompiledQuery
 
         DataVoEngine engine = context.Engine;
         engine.AuthorizeDirectAccess(context.SessionId, DatabasePermission.WriteData);
-        ThrowIfActiveTransaction(context);
+        if (InTransaction(context))
+        {
+            return UpdateBatchInTransaction(context, plan, updates);
+        }
+
         if (!engine.Config.EnableZeroAllocCompiledUpdate
             || engine.Config.StorageMode != StorageMode.Lsm
             || engine.Changes.Enabled)
@@ -604,15 +598,6 @@ public static class DataVoCompiledQuery
         finally
         {
             engine.LockManager.ReleaseWriteLock(databaseName, plan.TableName);
-        }
-    }
-
-    /// <summary>Rejects compiled DML on a session with an explicit transaction, which these paths bypass.</summary>
-    private static void ThrowIfActiveTransaction(DataVoContext context)
-    {
-        if (context.Engine.TransactionManager.HasActiveTransaction(context.SessionId))
-        {
-            throw new NotSupportedException("Compiled update plans do not support active transactions.");
         }
     }
 

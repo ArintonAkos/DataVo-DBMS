@@ -604,16 +604,68 @@ public sealed class ApplyBatchTests : IDisposable
         Assert.Throws<InvalidOperationException>(() => context.ApplyBatch(batch, Guid.NewGuid()));
     }
 
-    [Fact]
-    public void OpenTransaction_IsRejected()
+    [Theory]
+    [MemberData(nameof(Modes))]
+    public void OpenTransaction_BatchIsWrittenIntoTheTransaction_AndCommitPublishesIt(StorageMode mode)
     {
-        DataVoContext context = Open(StorageMode.InMemory);
+        DataVoContext context = Open(mode);
+        Ok(context, "INSERT INTO Players VALUES (1, 'Ann', 100), (2, 'Bob', 80), (3, 'Cid', 60)");
+        Guid observer = Guid.NewGuid();
+        context.Engine.Sessions.Set(observer, "B");
         Ok(context, "BEGIN TRANSACTION");
+
+        var batch = new DataVoWriteBatch();
+        batch.Upsert(Players, 1, "Ann", 90);    // update
+        batch.Upsert(Players, 4, "Dee", 50);    // insert
+        batch.Delete(Players, 2, null, null);   // delete
+        batch.Delete(Players, 9, null, null);   // missing: unchanged
+        batch.Upsert(Players, 3, "Cid", 60);    // same values: unchanged
+        batch.Update(PlayerHp, 8, 1);           // update of a missing row: missing
+
+        Assert.Equal(new DataVoBatchResult(Inserted: 1, Updated: 1, Deleted: 1, Unchanged: 2, Missing: 1), context.ApplyBatch(batch));
+        Assert.Equal(["1:Ann:90", "3:Cid:60", "4:Dee:50"], Rows(context)); // the transaction sees its writes
+        Assert.Equal(["1:Ann:100", "2:Bob:80", "3:Cid:60"], RowsAs(context, observer)); // others do not, yet
+
+        Ok(context, "COMMIT");
+        Assert.Equal(["1:Ann:90", "3:Cid:60", "4:Dee:50"], RowsAs(context, observer));
+    }
+
+    [Theory]
+    [MemberData(nameof(Modes))]
+    public void OpenTransaction_RollbackDiscardsTheBatch(StorageMode mode)
+    {
+        DataVoContext context = Open(mode);
+        Ok(context, "INSERT INTO Players VALUES (1, 'Ann', 100)");
+        Ok(context, "BEGIN TRANSACTION");
+
         var batch = new DataVoWriteBatch();
         batch.Upsert(Players, 1, "Ann", 1);
+        batch.Upsert(Players, 2, "Bob", 2);
+        context.ApplyBatch(batch);
+        Assert.Equal(["1:Ann:1", "2:Bob:2"], Rows(context));
 
-        Assert.Throws<InvalidOperationException>(() => context.ApplyBatch(batch));
         Ok(context, "ROLLBACK");
+        Assert.Equal(["1:Ann:100"], Rows(context));
+    }
+
+    [Theory]
+    [MemberData(nameof(Modes))]
+    public void OpenTransaction_FailingBatch_IsUndoneAndTheTransactionStaysUsable(StorageMode mode)
+    {
+        DataVoContext context = OpenWithTeams(mode);
+        Ok(context, "BEGIN TRANSACTION");
+        Ok(context, "INSERT INTO Teams VALUES (3, 'Blue')");
+
+        var batch = new DataVoWriteBatch();
+        batch.Upsert(TeamLayout, 1, "Renamed");  // applied before the failure ...
+        batch.Upsert(MemberLayout, 30, 99);      // ... then a member of a team that does not exist
+        Assert.ThrowsAny<Exception>(() => context.ApplyBatch(batch));
+
+        // The batch is undone as a whole; the transaction's earlier work is kept and still commits.
+        Ok(context, "COMMIT");
+        Assert.Equal("Red", Scalar(context, "SELECT Name FROM Teams WHERE Id = 1"));
+        Assert.Equal("Blue", Scalar(context, "SELECT Name FROM Teams WHERE Id = 3"));
+        Assert.Equal("0", Scalar(context, "SELECT COUNT(*) FROM Members WHERE Id = 30"));
     }
 
     [Fact]
@@ -845,6 +897,10 @@ public sealed class ApplyBatchTests : IDisposable
 
     private static List<string> Rows(DataVoContext context) =>
         [.. context.Execute("SELECT Id, Name, Hp FROM Players ORDER BY Id")[^1].Data
+            .Select(row => $"{row["Id"]}:{row["Name"]}:{row["Hp"]}")];
+
+    private static List<string> RowsAs(DataVoContext context, Guid session) =>
+        [.. context.Execute("SELECT Id, Name, Hp FROM Players ORDER BY Id", session)[^1].Data
             .Select(row => $"{row["Id"]}:{row["Name"]}:{row["Hp"]}")];
 
     private static string Scalar(DataVoContext context, string sql)

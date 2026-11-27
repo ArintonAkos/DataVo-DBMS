@@ -23,7 +23,7 @@ namespace DataVo.Core.Batches;
 /// by primary-key index lookups, never by scanning, so the cost of a batch grows with its size, not with the
 /// size of the tables.
 /// </remarks>
-internal sealed class BatchApplier(DataVoContext context, string databaseName)
+internal sealed partial class BatchApplier(DataVoContext context, string databaseName)
 {
     [ThreadStatic]
     private static HashSet<long>? _fastIntKeyScratch;

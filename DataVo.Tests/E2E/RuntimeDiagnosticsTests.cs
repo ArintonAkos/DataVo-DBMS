@@ -116,23 +116,25 @@ public class RuntimeDiagnosticsTests
     }
 
     [Fact]
-    public void Diagnostics_RecordsBulkInsertTransactionStateErrors()
+    public void Diagnostics_RecordsBulkInsertErrorsInsideATransaction()
     {
         using var context = CreateContext(StorageMode.InMemory);
         context.Diagnostics.Enabled = true;
         context.Execute("CREATE TABLE Events (Id INT PRIMARY KEY, Kind VARCHAR(50))");
         context.Execute("BEGIN TRANSACTION");
+        context.BulkInsert("Events", [new Dictionary<string, object?> { ["Id"] = 1, ["Kind"] = "spawn" }]);
         context.Diagnostics.Clear();
 
-        InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() => context.BulkInsert(
+        // The second row collides with the first one, which is only buffered in the transaction.
+        Assert.ThrowsAny<Exception>(() => context.BulkInsert(
             "Events",
-            [new Dictionary<string, object?> { ["Id"] = 1, ["Kind"] = "spawn" }]));
+            [new Dictionary<string, object?> { ["Id"] = 1, ["Kind"] = "again" }]));
 
         RuntimeQueryStats? stats = context.Diagnostics.LastQuery;
         Assert.NotNull(stats);
         Assert.True(stats.IsError);
-        Assert.Contains("active transaction", ex.Message, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("active transaction", stats.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Primary key", stats.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        context.Execute("ROLLBACK");
     }
 
     [Fact]

@@ -183,7 +183,7 @@ public class GameRuntimeSnapshotTests
     }
 
     [Fact]
-    public void Snapshot_OnDiskStorageThrowsNotSupported()
+    public void Snapshot_OnLsmStorage_IsSupported()
     {
         string path = Path.Combine(Path.GetTempPath(), $"datavo_snapshot_disk_{Guid.NewGuid():N}");
         try
@@ -194,7 +194,10 @@ public class GameRuntimeSnapshotTests
                 DataDirectory = path
             });
 
-            Assert.Throws<NotSupportedException>(() => context.CreateSnapshot());
+            // Durable LSM snapshots are covered in depth by LsmSnapshotTests.
+            context.Execute("CREATE DATABASE SnapDb");
+            context.Execute("USE SnapDb");
+            Assert.Equal(StorageMode.Lsm, context.CreateSnapshot().StorageMode);
         }
         finally
         {

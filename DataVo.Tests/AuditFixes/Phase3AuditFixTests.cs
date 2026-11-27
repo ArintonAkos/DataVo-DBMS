@@ -429,16 +429,20 @@ public class Phase3AuditFixTests
     // ── LE-08: batched fixed-width updates ───────────────────────────────
 
     [Fact]
-    public void UpdateFixedWidthByPrimaryKeyBatch_RejectsAnActiveTransaction()
+    public void UpdateFixedWidthByPrimaryKeyBatch_InsideATransaction_DoesNotBypassIt()
     {
+        // Phase 7 (LE-08): instead of being rejected, the batch runs as statements of the open transaction, so it
+        // never patches committed storage behind the transaction's back: ROLLBACK leaves the row untouched.
         using DataVoContext db = Context(StorageMode.Lsm);
         Ok(db, "CREATE TABLE Records (Id INT PRIMARY KEY, Value INT, Score INT)");
         Ok(db, "INSERT INTO Records VALUES (1, 1, 1)");
         Ok(db, "BEGIN TRANSACTION");
 
-        Assert.Throws<NotSupportedException>(() => DataVoCompiledQuery.UpdateFixedWidthByPrimaryKeyBatch(db, RecordsUpdate, [Entry(1, 5, 5)]));
+        Assert.Equal(1, DataVoCompiledQuery.UpdateFixedWidthByPrimaryKeyBatch(db, RecordsUpdate, [Entry(1, 5, 5)]));
+        Assert.Equal(5, Convert.ToInt32(Rows(db, "SELECT Value FROM Records WHERE Id = 1").Single()["Value"]));
 
         Ok(db, "ROLLBACK");
+        Assert.Equal(1, Convert.ToInt32(Rows(db, "SELECT Value FROM Records WHERE Id = 1").Single()["Value"]));
     }
 
     [Fact]

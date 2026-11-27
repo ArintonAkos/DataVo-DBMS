@@ -425,32 +425,60 @@ public class CompiledQueryRuntimeTests
     }
 
     [Fact]
-    public void CompiledUpdate_RejectsActiveTransactions()
+    public void CompiledUpdates_InsideATransaction_AreBufferedUntilCommit()
     {
         using var context = CreateContext();
         context.Execute("CREATE TABLE Players (Id INT PRIMARY KEY, Level INT)");
-        context.Execute("INSERT INTO Players VALUES (1, 5)");
-        context.Execute("BEGIN TRANSACTION");
-
+        context.Execute("INSERT INTO Players VALUES (1, 5), (2, 6)");
+        Guid observer = Guid.NewGuid();
+        context.Engine.Sessions.Set(observer, context.Engine.Sessions.Get(context.SessionId)!);
         var plan = DataVoCompiledQueryPlan.Update(
             tableName: "Players",
-            assignments: new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-            {
-                ["Level"] = "level"
-            },
+            assignments: new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { ["Level"] = "level" },
             whereColumn: "Id",
             whereParameterName: "id");
 
-        NotSupportedException ex = Assert.Throws<NotSupportedException>(() => DataVoCompiledQuery.Update(
-            context,
-            plan,
-            [
-                new DataVoCompiledQueryParameter("id", 1),
-                new DataVoCompiledQueryParameter("level", 7)
-            ]));
+        context.Execute("BEGIN TRANSACTION");
+        Assert.Equal(1, DataVoCompiledQuery.Update(context, plan, [new DataVoCompiledQueryParameter("id", 1), new DataVoCompiledQueryParameter("level", 7)]));
+        Assert.Equal(1, DataVoCompiledQuery.UpdateFixedWidthByPrimaryKey(context, plan, DataVoFixedWidthValue.From(2), [DataVoFixedWidthValue.From(8)]));
+        Assert.Equal(0, DataVoCompiledQuery.Update(context, plan, [new DataVoCompiledQueryParameter("id", 9), new DataVoCompiledQueryParameter("level", 1)]));
 
-        Assert.Contains("active transactions", ex.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal([(1, 7), (2, 8)], Levels(context, context.SessionId));
+        Assert.Equal([(1, 5), (2, 6)], Levels(context, observer));
+
+        context.Execute("COMMIT");
+        Assert.Equal([(1, 7), (2, 8)], Levels(context, observer));
     }
+
+    [Fact]
+    public void CompiledUpdateBatch_InsideATransaction_RollsBackWithTheTransaction()
+    {
+        using var context = CreateContext();
+        context.Execute("CREATE TABLE Players (Id INT PRIMARY KEY, Level INT)");
+        context.Execute("INSERT INTO Players VALUES (1, 5), (2, 6)");
+        var plan = DataVoCompiledQueryPlan.Update(
+            tableName: "Players",
+            assignments: new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { ["Level"] = "level" },
+            whereColumn: "Id",
+            whereParameterName: "id");
+
+        context.Execute("BEGIN TRANSACTION");
+        int affected = DataVoCompiledQuery.UpdateFixedWidthByPrimaryKeyBatch(context, plan,
+        [
+            new DataVoFixedWidthUpdateBatchEntry(DataVoFixedWidthValue.From(1), DataVoFixedWidthValue.From(50), default),
+            new DataVoFixedWidthUpdateBatchEntry(DataVoFixedWidthValue.From(2), DataVoFixedWidthValue.From(60), default),
+            new DataVoFixedWidthUpdateBatchEntry(DataVoFixedWidthValue.From(3), DataVoFixedWidthValue.From(70), default),
+        ]);
+        Assert.Equal(2, affected);
+        Assert.Equal([(1, 50), (2, 60)], Levels(context, context.SessionId));
+
+        context.Execute("ROLLBACK");
+        Assert.Equal([(1, 5), (2, 6)], Levels(context, context.SessionId));
+    }
+
+    private static (int Id, int Level)[] Levels(DataVoContext context, Guid session) =>
+        [.. context.Execute("SELECT Id, Level FROM Players ORDER BY Id", session)[^1].Data
+            .Select(row => (Convert.ToInt32(row["Id"]), Convert.ToInt32(row["Level"])))];
 
     private static DataVoContext CreateContext()
     {

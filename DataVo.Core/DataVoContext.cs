@@ -41,7 +41,7 @@ namespace DataVo.Core;
 /// List&lt;QueryResult&gt; results = context.Execute("SELECT * FROM Users");
 /// </code>
 /// </example>
-public sealed class DataVoContext : IDisposable
+public sealed partial class DataVoContext : IDisposable
 {
     private InsertRowService? _typedInsertService;
     private int _disposed;
@@ -503,6 +503,11 @@ public sealed class DataVoContext : IDisposable
     /// <summary>
     /// Inserts multiple typed rows into a table using the current <see cref="SessionId"/> database binding.
     /// </summary>
+    /// <remarks>
+    /// Inside an explicit transaction the rows are validated like <c>INSERT</c> and buffered in the transaction:
+    /// COMMIT writes them and ROLLBACK discards them. The returned keys are then provisional handles that identify
+    /// the rows within the transaction only; COMMIT assigns their storage keys.
+    /// </remarks>
     public IReadOnlyList<RowKey> BulkInsert(
         string tableName,
         IEnumerable<IReadOnlyDictionary<string, object?>> rows)
@@ -549,11 +554,19 @@ public sealed class DataVoContext : IDisposable
             throw;
         }
 
-        if (Engine.TransactionManager.HasActiveTransaction(SessionId))
+        if (Engine.TransactionManager.GetContext(SessionId) is { } transaction)
         {
-            const string transactionError = "BulkInsert cannot run while the current session has an active transaction.";
-            diagnosticsBuilder?.RecordError(transactionError);
-            throw new InvalidOperationException(transactionError);
+            try
+            {
+                IReadOnlyList<RowKey> bufferedKeys = BufferInsertsInTransaction(databaseName, tableName, materializedRows, transaction);
+                diagnosticsBuilder?.AddRowsAffected(bufferedKeys.Count);
+                return bufferedKeys;
+            }
+            catch (Exception ex)
+            {
+                diagnosticsBuilder?.RecordError(ex.Message);
+                throw;
+            }
         }
 
         var service = new InsertRowService(
@@ -597,6 +610,11 @@ public sealed class DataVoContext : IDisposable
     /// Inserts one typed row using a strict fast lane. The supplied span is consumed synchronously and
     /// never stored; callers must keep using <see cref="BulkInsert"/> when coercion or partial rows are needed.
     /// </summary>
+    /// <remarks>
+    /// Inside an explicit transaction the rows are validated like <c>INSERT</c> and buffered in the transaction:
+    /// COMMIT writes them and ROLLBACK discards them. The returned keys are then provisional handles that identify
+    /// the rows within the transaction only; COMMIT assigns their storage keys.
+    /// </remarks>
     public RowKey InsertTyped(string tableName, ReactiveRowSchema columns, ReadOnlySpan<CellValue> row)
     {
         DataVo.Core.Compat.ThrowHelper.ThrowIfNull(columns);
@@ -638,11 +656,19 @@ public sealed class DataVoContext : IDisposable
             throw;
         }
 
-        if (Engine.TransactionManager.HasActiveTransaction(SessionId))
+        if (Engine.TransactionManager.GetContext(SessionId) is { } transaction)
         {
-            const string transactionError = "InsertTyped cannot run while the current session has an active transaction.";
-            diagnosticsBuilder?.RecordError(transactionError);
-            throw new InvalidOperationException(transactionError);
+            try
+            {
+                RowKey bufferedKey = BufferInsertsInTransaction(databaseName, tableName, [ToDictionaryRow(columns, row)], transaction)[0];
+                diagnosticsBuilder?.AddRowsAffected(1);
+                return bufferedKey;
+            }
+            catch (Exception ex)
+            {
+                diagnosticsBuilder?.RecordError(ex.Message);
+                throw;
+            }
         }
 
         // InsertRowService holds only engine-scoped deps (no per-call state); reuse one per context
@@ -694,6 +720,12 @@ public sealed class DataVoContext : IDisposable
     /// copies a row only when something actually retains it, which only change capture does: every storage
     /// mode reads the cells during the call and keeps its own form of the row.
     /// </summary>
+    /// <remarks>
+    /// Inside an explicit transaction the rows are validated like <c>INSERT</c> and buffered in the transaction:
+    /// COMMIT writes them and ROLLBACK discards them. The returned keys are then provisional handles that identify
+    /// the rows within the transaction only; COMMIT assigns their storage keys.
+    /// </remarks>
+
     public IReadOnlyList<RowKey> InsertTypedBatch(
         string tableName,
         ReactiveRowSchema columns,
@@ -738,11 +770,19 @@ public sealed class DataVoContext : IDisposable
             throw;
         }
 
-        if (Engine.TransactionManager.HasActiveTransaction(SessionId))
+        if (Engine.TransactionManager.GetContext(SessionId) is { } transaction)
         {
-            const string transactionError = "InsertTypedBatch cannot run while the current session has an active transaction.";
-            diagnosticsBuilder?.RecordError(transactionError);
-            throw new InvalidOperationException(transactionError);
+            try
+            {
+                IReadOnlyList<RowKey> bufferedKeys = BufferInsertsInTransaction(databaseName, tableName, ToDictionaryRows(columns, rows), transaction);
+                diagnosticsBuilder?.AddRowsAffected(bufferedKeys.Count);
+                return bufferedKeys;
+            }
+            catch (Exception ex)
+            {
+                diagnosticsBuilder?.RecordError(ex.Message);
+                throw;
+            }
         }
 
         InsertRowService service = _typedInsertService ??= new InsertRowService(
@@ -823,10 +863,15 @@ public sealed class DataVoContext : IDisposable
     /// <para>
     /// Every table needs a primary key.
     /// </para>
+    /// <para>
+    /// Inside an explicit transaction the batch is written into the transaction instead: rows are found as the
+    /// transaction sees them, deletes and updates run as transactional statements, inserts are buffered, and the
+    /// whole batch is undone if any part fails. COMMIT writes it; ROLLBACK discards it.
+    /// </para>
     /// </remarks>
     /// <param name="batch">The operations to write.</param>
     /// <returns>How many rows were inserted, updated, deleted, or left unchanged.</returns>
-    /// <exception cref="InvalidOperationException">The session has an open transaction, or a table has no primary key.</exception>
+    /// <exception cref="InvalidOperationException">A table has no primary key, or (inside a transaction) a statement failed.</exception>
     /// <exception cref="ArgumentException">A table or column does not exist, a layout lacks a key column, or a key is NULL.</exception>
     /// <example>
     /// <code>
@@ -866,15 +911,17 @@ public sealed class DataVoContext : IDisposable
         }
 
         using IDisposable engineScope = DataVoEngine.PushCurrent(Engine);
-        using SnapshotLockScope runtimeScope = Engine.EnterRuntimeReadScope();
         string databaseName = Engine.Sessions.Get(sessionId)
             ?? throw new InvalidOperationException("ApplyBatch needs a current database: run USE <database> on the session first.");
-        if (Engine.TransactionManager.HasActiveTransaction(sessionId))
+        var applier = new Batches.BatchApplier(this, databaseName);
+        if (Engine.TransactionManager.GetContext(sessionId) is { } transaction)
         {
-            throw new InvalidOperationException("ApplyBatch cannot run while the session has an active transaction.");
+            // Each statement of the transactional path enters the runtime scope itself (it is not re-entrant).
+            applier.Prepare(batch);
+            return applier.ExecuteInTransaction(sessionId, transaction);
         }
 
-        var applier = new Batches.BatchApplier(this, databaseName);
+        using SnapshotLockScope runtimeScope = Engine.EnterRuntimeReadScope();
         applier.Prepare(batch);
         // The batch's tables and every table its deletes can cascade into, locked in a fixed order.
         string[] tables = [.. Batches.BatchIntegrity.TablesToLock(Engine, databaseName, applier.Tables).OrderBy(static table => table, StringComparer.OrdinalIgnoreCase)];

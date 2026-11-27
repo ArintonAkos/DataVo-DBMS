@@ -337,15 +337,19 @@ public sealed partial class DataVoEngine : IDisposable
     }
 
     /// <summary>
-    /// Creates a snapshot of in-memory storage, catalog state, and selected database for a session.
+    /// Creates a snapshot of storage, catalog state, and selected database for a session.
     /// </summary>
+    /// <remarks>
+    /// Supported for <see cref="StorageMode.InMemory"/> (the whole storage image) and <see cref="StorageMode.Lsm"/>
+    /// (every table's rows, held in memory by the snapshot). No session may have an open transaction.
+    /// </remarks>
     /// <param name="session">The logical session identifier.</param>
     /// <returns>A restorable snapshot of the current engine state.</returns>
     public DataVoSnapshot CreateSnapshot(Guid session)
     {
         using SnapshotLockScope _ = EnterRuntimeWriteScope();
 
-        EnsureInMemorySnapshotsSupported();
+        EnsureSnapshotsSupported();
         EnsureNoActiveTransactionsForSnapshot("create");
 
         return CaptureSnapshotNoLock(session);
@@ -354,14 +358,22 @@ public sealed partial class DataVoEngine : IDisposable
     /// <summary>
     /// Restores a previously captured snapshot into this engine for a session.
     /// </summary>
+    /// <remarks>
+    /// An in-memory restore also restores the schema. An LSM restore rewrites every table's rows in one durable
+    /// write and rebuilds the indexes; it requires the schema (tables, columns, keys and indexes) to be unchanged
+    /// since the snapshot was taken. Either way the engine is left at its previous state when the restore fails.
+    /// </remarks>
     /// <param name="session">The logical session identifier.</param>
     /// <param name="snapshot">The snapshot to restore.</param>
+    /// <exception cref="InvalidOperationException">
+    /// The snapshot comes from another storage mode, a transaction is open, or (LSM) the schema changed.
+    /// </exception>
     public void RestoreSnapshot(Guid session, DataVoSnapshot snapshot)
     {
         DataVo.Core.Compat.ThrowHelper.ThrowIfNull(snapshot);
         using SnapshotLockScope _ = EnterRuntimeWriteScope();
 
-        EnsureInMemorySnapshotsSupported();
+        EnsureSnapshotsSupported();
 
         if (snapshot.StorageMode != Config.StorageMode)
         {
@@ -550,6 +562,11 @@ public sealed partial class DataVoEngine : IDisposable
 
     private DataVoSnapshot CaptureSnapshotNoLock(Guid session)
     {
+        if (Config.StorageMode == StorageMode.Lsm)
+        {
+            return new DataVoSnapshot(Config.StorageMode, Catalog.ExportState(), Sessions.Get(session), CaptureTableRowsNoLock());
+        }
+
         return new DataVoSnapshot(
             Config.StorageMode,
             Catalog.ExportState(),
@@ -559,13 +576,98 @@ public sealed partial class DataVoEngine : IDisposable
 
     private void ApplySnapshotNoLock(Guid session, DataVoSnapshot snapshot)
     {
-        StorageContext.RestoreInMemorySnapshot(snapshot.StorageSnapshot);
+        if (snapshot.TableRows is not null)
+        {
+            ApplyTableRowsNoLock(snapshot);
+            RestoreSessionSelectionNoLock(session, snapshot.SelectedDatabase);
+            return;
+        }
+
+        StorageContext.RestoreInMemorySnapshot(snapshot.StorageSnapshot!);
         Catalog.LoadState(snapshot.CatalogState);
         RefreshStorageSchemaScopeNoLock();
         RestoreSessionSelectionNoLock(session, snapshot.SelectedDatabase);
         VersionStorageManager.Clear();
         IndexManager.ClearRuntimeState();
         RebuildAllIndexesFromCatalog();
+    }
+
+    /// <summary>Reads every table's rows, laid out in catalog column order.</summary>
+    private List<SnapshotTableRows> CaptureTableRowsNoLock()
+    {
+        using IDisposable _ = PushCurrent(this);
+        var tables = new List<SnapshotTableRows>();
+        foreach (string databaseName in Catalog.GetDatabases())
+        {
+            foreach (string tableName in Catalog.GetTables(databaseName))
+            {
+                ReactiveRowLayout layout = ReactiveTableLayouts.ForTable(this, tableName, databaseName);
+                var rows = new List<CellValue[]>();
+                foreach (StoredRow row in StorageContext.GetTypedTableContents(tableName, databaseName).Values)
+                {
+                    rows.Add(layout.AdoptOrCopy(TypedRow.FromOwnedCells(row.Schema, row.OwnedCells)));
+                }
+
+                tables.Add(new SnapshotTableRows(databaseName, tableName, layout.Schema, rows));
+            }
+        }
+
+        return tables;
+    }
+
+    /// <summary>
+    /// Replaces every table's rows with the snapshot's in one write unit (one LSM commit batch), then rebuilds the
+    /// indexes from the restored rows. Nothing is written when the schema differs from the snapshot's.
+    /// </summary>
+    private void ApplyTableRowsNoLock(DataVoSnapshot snapshot)
+    {
+        if (!string.Equals(snapshot.CatalogState, Catalog.ExportState(), StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                "The schema changed since this snapshot was created; an LSM snapshot can be restored only into the same tables, columns, keys and indexes.");
+        }
+
+        using IDisposable _ = PushCurrent(this);
+        using (MVCC.CommitClock.UnitScope writeUnit = MVCC.CommitClock.OpenUnit())
+        using (IWriteBatchScope batch = StorageContext.BeginWriteBatch())
+        {
+            foreach (string databaseName in Catalog.GetDatabases())
+            {
+                foreach (string tableName in Catalog.GetTables(databaseName))
+                {
+                    List<RowKey> current = [.. StorageContext.GetTypedTableContents(tableName, databaseName).Keys];
+                    if (current.Count > 0)
+                    {
+                        StorageContext.DeleteFromTable(current, tableName, databaseName);
+                    }
+                }
+            }
+
+            foreach (SnapshotTableRows table in snapshot.TableRows!)
+            {
+                if (table.Rows.Count > 0)
+                {
+                    StorageContext.InsertTypedCellRows(
+                        Catalog.GetTableColumns(table.Table, table.Database),
+                        table.Schema,
+                        table.Rows,
+                        table.Table,
+                        table.Database);
+                }
+            }
+
+            batch.Complete();
+        }
+
+        VersionStorageManager.Clear();
+        IndexManager.ClearRuntimeState();
+        foreach (string databaseName in Catalog.GetDatabases())
+        {
+            foreach (string tableName in Catalog.GetTables(databaseName))
+            {
+                RebuildIndexesFromRows(databaseName, tableName, Catalog.GetTableIndexes(tableName, databaseName));
+            }
+        }
     }
 
     private void RestoreSessionSelectionNoLock(Guid session, string? selectedDatabase)
@@ -579,11 +681,11 @@ public sealed partial class DataVoEngine : IDisposable
         Sessions.Set(session, selectedDatabase);
     }
 
-    private void EnsureInMemorySnapshotsSupported()
+    private void EnsureSnapshotsSupported()
     {
-        if (Config.StorageMode != StorageMode.InMemory)
+        if (Config.StorageMode is not (StorageMode.InMemory or StorageMode.Lsm))
         {
-            throw new NotSupportedException("DataVo snapshots are currently supported only for StorageMode.InMemory.");
+            throw new NotSupportedException("DataVo snapshots are supported for StorageMode.InMemory and StorageMode.Lsm.");
         }
     }
 
