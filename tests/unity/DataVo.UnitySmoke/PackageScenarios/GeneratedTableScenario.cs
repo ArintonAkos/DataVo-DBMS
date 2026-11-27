@@ -41,6 +41,7 @@ namespace DataVo.UnitySmoke.Player
             Require(db.Update(new InventoryItem { Id = 1, Slot = 9, Name = "Axe", Weight = 3f, Owner = owner, Stack = 1, Value = 2 }), "Generated update changed no row.");
             Require(db.GetInventoryItemById(1)!.Slot == 9, "Generated update was lost.");
             Require(db.GetInventoryItemById(2) == null, "A missing row did not return null.");
+            ScenarioCompleted();
         }
     }
 }

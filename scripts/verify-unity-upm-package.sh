@@ -21,7 +21,6 @@ node - "$project/Packages/manifest.json" "$tarball" "$root" <<'NODE'
 const fs = require("node:fs");
 const [manifestPath, tarball, root] = process.argv.slice(2);
 const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
-delete manifest.dependencies["com.datavo.core.candidate"];
 manifest.dependencies["com.datavo.core"] = `file:${tarball}`;
 manifest.dependencies["com.datavo.unity.mathematics"] = `file:${root}/integrations/unity/com.datavo.unity.mathematics`;
 fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + "\n");
@@ -29,6 +28,8 @@ NODE
 
 printf '{"dependencies":{}}\n' > "$project/Packages/packages-lock.json"
 export DATAVO_UNITY_SMOKE_PROJECT="$project"
+# The Player must report the generated-table scenario from PackageScenarios/ as executed.
+export DATAVO_UPM_PACKAGE_SCENARIO=1
 bash "$root/scripts/run-unity-editor-tests.sh"
 bash "$root/scripts/run-unity-macos-il2cpp-player-smoke.sh"
 echo "com.datavo.core passed in the Editor and in a macOS IL2CPP Player: $tarball"

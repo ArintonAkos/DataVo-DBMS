@@ -162,8 +162,10 @@ if (report.scriptingBackend !== 'IL2CPP') {
   throw new Error(`Player was not IL2CPP: ${report.scriptingBackend}`);
 }
 
-if (!Number.isInteger(report.scenarioCount) || report.scenarioCount < 3) {
-  throw new Error(`Player smoke report has too few scenarios: ${report.scenarioCount}`);
+// The UPM package build (verify-unity-upm-package.sh) also runs the source-generated table scenario.
+const minimumScenarios = process.env.DATAVO_UPM_PACKAGE_SCENARIO === '1' ? 4 : 3;
+if (!Number.isInteger(report.scenarioCount) || report.scenarioCount < minimumScenarios) {
+  throw new Error(`Player smoke report has too few scenarios: ${report.scenarioCount} (expected at least ${minimumScenarios})`);
 }
 NODE
 

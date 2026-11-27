@@ -56,8 +56,14 @@ namespace DataVo.UnitySmoke.Player
             Application.Quit(exitCode);
         }
 
+        // Scenarios that ran to completion; the package build adds its generated-table scenario.
+        private static int _completedScenarios;
+
+        private static void ScenarioCompleted() => _completedScenarios++;
+
         private static PlayerSmokeResult RunScenario()
         {
+            _completedScenarios = 0;
             using var context = CreateInMemoryContext();
             context.UseUnityTypes();
             context.Execute(
@@ -97,11 +103,14 @@ namespace DataVo.UnitySmoke.Player
             Vector3 position = context.Get<Vector3>(row, "Position");
 
             AssertEquivalent(source, mapped, position);
+            ScenarioCompleted();
             AssertVectorLengthFailure(context);
+            ScenarioCompleted();
             RunPackageScenarios();
             AssertSaveDataPersists(StorageMode.Lsm);
+            ScenarioCompleted();
 
-            return PlayerSmokeResult.Passed();
+            return PlayerSmokeResult.Passed(_completedScenarios);
         }
 
         // Implemented only when verify-unity-upm-package.sh installs the real package.
@@ -304,17 +313,17 @@ namespace DataVo.UnitySmoke.Player
             public int scenarioCount;
             public string error = string.Empty;
 
-            public static PlayerSmokeResult Passed()
+            public static PlayerSmokeResult Passed(int scenarioCount)
             {
-                return Create("passed", string.Empty);
+                return Create("passed", string.Empty, scenarioCount);
             }
 
             public static PlayerSmokeResult Failed(string error)
             {
-                return Create("failed", error);
+                return Create("failed", error, 0);
             }
 
-            private static PlayerSmokeResult Create(string status, string error)
+            private static PlayerSmokeResult Create(string status, string error, int scenarioCount)
             {
                 return new PlayerSmokeResult
                 {
@@ -323,7 +332,7 @@ namespace DataVo.UnitySmoke.Player
                     unityVersion = Application.unityVersion,
                     platform = Application.platform.ToString(),
                     scriptingBackend = ScriptingBackend,
-                    scenarioCount = status == "passed" ? 3 : 0,
+                    scenarioCount = scenarioCount,
                     error = error
                 };
             }
