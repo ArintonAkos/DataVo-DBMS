@@ -12,11 +12,7 @@ const serverInfo = { name: "datavo-docs", version: "0.1.0" };
 const allowedRoutes = publicManualRoutes();
 const allowedSources = new Set(publicManualPages.map((page) => page.source.toLowerCase()));
 const deniedPathFragments = [
-  "architecture/",
-  "audit/",
-  "datavo.core/",
-  "features/",
-  "superpowers/",
+  "research/",
   ".vitepress/",
   "node_modules/",
   "public/",
@@ -77,6 +73,9 @@ async function handleMessage(message) {
         serverInfo,
       });
       return;
+    case "ping":
+      sendResult(message.id, {});
+      return;
     case "tools/list":
       sendResult(message.id, { tools: toolsList() });
       return;
@@ -116,7 +115,7 @@ function toolsList() {
         properties: {
           path: {
             type: "string",
-            description: "Route such as /quickstart, source path such as quickstart.md, or URI such as datavo-docs://page/quickstart.",
+            description: "Route such as /manual/getting-started/quickstart, source path such as manual/getting-started/quickstart.md, or URI such as datavo-docs://page/manual/getting-started/quickstart.",
           },
         },
         required: ["path"],
@@ -299,11 +298,12 @@ function searchDocs(query, limit) {
     .map((page) => {
       const markdown = readPage(page);
       const lower = markdown.toLowerCase();
-      const index = lower.indexOf(q);
-      if (index < 0) {
+      const textIndex = lower.indexOf(q);
+      if (textIndex < 0 && !page.title.toLowerCase().includes(q)) {
         return null;
       }
 
+      const index = Math.max(textIndex, 0);
       const start = Math.max(0, index - 120);
       const end = Math.min(markdown.length, index + q.length + 180);
       return {
