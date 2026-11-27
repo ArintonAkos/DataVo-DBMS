@@ -1,6 +1,11 @@
-# INSERT Intent + Key Locking (v0.5.1)
+---
+title: INSERT Intent & Key Locking
+description: Why single-row INSERTs take a table intent lock plus per-key locks in v0.5.1, and what the old exclusive table lock protected.
+---
 
-Status: implemented on `fix/insert-intent-row-locks` for v0.5.1. Nothing here changes v0.5.0.
+# INSERT Intent & Key Locking
+
+Status: shipped in 0.5.1. This is an engineering note on the locking change; behavior before 0.5.1 is described only for contrast.
 
 ## Why
 

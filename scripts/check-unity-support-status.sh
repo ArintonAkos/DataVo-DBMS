@@ -25,20 +25,6 @@ reject_text() {
   fi
 }
 
-readonly support_rows=(
-  "| Unity 6000.5.4f1 Editor | Verified (narrow smoke) |"
-  "| macOS IL2CPP (6000.5.4f1) | Verified (narrow smoke) |"
-  "| Windows x64 IL2CPP | Unverified |"
-  "| Direct Burst calls | Unsupported by design |"
-  "| Job-to-managed batch bridge | Planned proof |"
-  "| In-memory mode | Candidate scope |"
-  "| LSM persistence | Verified (narrow smoke) |"
-)
-
-for row in "${support_rows[@]}"; do
-  require_text "$ROOT/docs/features/unity-and-godot.md" "$row"
-done
-
 readonly roadmap_rows=(
   "Unity is an **evaluation target**, not a supported runtime."
   "| Unity 6000.5.4f1 Editor (macOS) | Narrow smoke pass |"
@@ -51,20 +37,14 @@ for row in "${roadmap_rows[@]}"; do
   require_text "$ROOT/docs/manual/getting-started/roadmap.md" "$row"
 done
 require_text \
+  "$ROOT/docs/manual/getting-started/installation.md" \
+  "| \`DataVo.Core\` | \`net8.0\`, \`net9.0\`, \`net10.0\`, \`netstandard2.1\` |"
+require_text \
   "$ROOT/README.md" \
   "**Unity** is an evaluation target, not a supported runtime."
 require_text \
   "$ROOT/README.md" \
   "Unity 6000.5.4f1 macOS Editor and a macOS IL2CPP Player. Windows IL2CPP is unverified and direct Burst calls are unsupported by design."
-require_text \
-  "$ROOT/docs/features/setup-and-packaging.md" \
-  "ship \`net8.0\`, \`net9.0\`, \`net10.0\` and \`netstandard2.1\` assets in one package"
-require_text \
-  "$ROOT/docs/features/roadmap-and-integrations.md" \
-  "Unity is an evaluation target, not an available runtime integration."
-require_text \
-  "$ROOT/docs/features/index.md" \
-  "### I want to evaluate future Unity or Godot support"
 
 reject_text \
   "$ROOT/README.md" \
@@ -75,18 +55,6 @@ reject_text \
 reject_text \
   "$ROOT/README.md" \
   "Reuse the same SQL surface in tools and runtime workflows."
-reject_text \
-  "$ROOT/docs/features/setup-and-packaging.md" \
-  "Unity and Godot teams: use disk mode for persistent save/profile data"
-reject_text \
-  "$ROOT/docs/features/roadmap-and-integrations.md" \
-  "DataVo is suitable for game-development local data workflows"
-reject_text \
-  "$ROOT/docs/features/index.md" \
-  "### I want to ship to Unity or Godot"
-reject_text \
-  "$ROOT/docs/features/unity-and-godot.md" \
-  "StorageMode = StorageMode.Disk"
 # StorageMode.Disk was removed in 0.5.0; the UPM package README must not advertise it.
 reject_text \
   "$ROOT/integrations/unity/com.datavo.core/README.md" \
