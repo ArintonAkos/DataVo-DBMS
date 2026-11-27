@@ -451,7 +451,8 @@ internal sealed partial class InsertRowService(
                 acceptedUniqueValues,
                 messages,
                 out Dictionary<string, object?> normalized,
-                pending))
+                pending,
+                txContext))
             {
                 acceptedRows.Add(normalized);
             }
@@ -1237,7 +1238,8 @@ internal sealed partial class InsertRowService(
         IReadOnlyDictionary<string, HashSet<string>> acceptedUniqueValues,
         List<string> messages,
         out Dictionary<string, object?> normalized,
-        PendingKeys? pending = null)
+        PendingKeys? pending = null,
+        TransactionContext? owner = null)
     {
         normalized = new Dictionary<string, object?>(tableColumns.Count, StringComparer.OrdinalIgnoreCase);
 
@@ -1278,7 +1280,7 @@ internal sealed partial class InsertRowService(
             return false;
         }
 
-        if (!ValidateForeignKeys(databaseName, rowNumber, normalized, foreignKeysByAttribute, messages))
+        if (!ValidateForeignKeys(databaseName, rowNumber, normalized, foreignKeysByAttribute, messages, owner))
         {
             return false;
         }
@@ -1482,12 +1484,13 @@ internal sealed partial class InsertRowService(
         int rowNumber,
         Dictionary<string, object?> row,
         IReadOnlyDictionary<string, ForeignKey> foreignKeysByAttribute,
-        List<string> messages)
+        List<string> messages,
+        TransactionContext? owner)
     {
         foreach ((string columnName, ForeignKey foreignKey) in foreignKeysByAttribute)
         {
             string candidate = IndexKeyEncoder.BuildKeyString(row, [columnName]);
-            if (!ReferenceExists(foreignKey, candidate, databaseName))
+            if (!ReferenceExists(foreignKey, candidate, databaseName, owner))
             {
                 messages.Add($"Foreign key violation in row {rowNumber}!");
                 return false;
@@ -1613,7 +1616,12 @@ internal sealed partial class InsertRowService(
             string.Equals(IndexKeyEncoder.BuildKeyString(existingRow, [columnName]), uniqueValue, StringComparison.Ordinal));
     }
 
-    private bool ReferenceExists(ForeignKey foreignKey, string expectedValue, string databaseName)
+    /// <summary>
+    /// Checks that every reference of <paramref name="foreignKey"/> has a parent row keyed
+    /// <paramref name="expectedValue"/> in committed storage or, inside a transaction, among the rows
+    /// <paramref name="owner"/> buffered. COMMIT re-checks buffered inserts after applying the parents.
+    /// </summary>
+    private bool ReferenceExists(ForeignKey foreignKey, string expectedValue, string databaseName, TransactionContext? owner = null)
     {
         foreach (Reference reference in foreignKey.References)
         {
@@ -1637,10 +1645,38 @@ internal sealed partial class InsertRowService(
                 continue;
             }
 
+            if (owner is not null && BufferedParentExists(owner, reference, expectedValue))
+            {
+                continue;
+            }
+
             return false;
         }
 
         return true;
+    }
+
+    private static bool BufferedParentExists(TransactionContext owner, Reference reference, string expectedValue)
+    {
+        foreach ((string table, List<Dictionary<string, object?>> rows) in owner.InsertedRows)
+        {
+            if (!string.Equals(table, reference.ReferenceTableName, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            foreach (Dictionary<string, object?> row in rows)
+            {
+                if (row.TryGetValue(reference.ReferenceAttributeName, out object? value)
+                    && value is not null
+                    && string.Equals(IndexKeyEncoder.BuildKeyString(row, [reference.ReferenceAttributeName]), expectedValue, StringComparison.Ordinal))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     private void InsertIndexes(
