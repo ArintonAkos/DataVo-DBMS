@@ -39,7 +39,7 @@ const candidate = readJson("candidate-manifest.json");
 const dependencies = readJson("dependency-assets.json");
 const inventory = readJson("assembly-inventory.json");
 
-assert(packageJson.name === "com.datavo.core.candidate", "Fixture package name is incorrect.");
+assert(packageJson.name === "com.datavo.core", "Fixture package name is incorrect.");
 assert(packageJson.unity === "6000.0", "Fixture package must declare Unity 6000.0.");
 assert(exists("Runtime/DataVo.Core.dll"), "Fixture is missing Runtime/DataVo.Core.dll.");
 assert(fs.statSync(path.join(fixture, "Runtime/Dependencies")).isDirectory(), "Fixture is missing Runtime/Dependencies.");

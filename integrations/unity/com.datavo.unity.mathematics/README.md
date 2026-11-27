@@ -37,9 +37,10 @@ The adapters preserve component order (x,y, x,y,z, or x,y,z,w). Conversion from
 a fixed-size Unity value creates one owned DataVo vector; conversion back copies
 through caller-owned stack storage without a temporary managed vector array.
 
-This source package requires the generated portable DataVo.Core candidate owned by
-the future Unity smoke-project preparation flow. It does not supply a Core DLL or
-claim that an arbitrary DataVo package is Unity-compatible.
+The package depends on `com.datavo.core` 0.5.1, which supplies the DataVo.Core
+DLL: install the `com.datavo.core` UPM tarball first. The repository's smoke and
+arena projects satisfy the dependency with a generated local `com.datavo.core`
+package (`scripts/prepare-unity-candidate.sh`). This package ships no Core DLL.
 
 ## Status
 
@@ -48,9 +49,10 @@ narrow automatic type-binding smoke. That result does not establish Windows,
 other Unity versions or targets, Burst, Jobs, Mono, persistence, vector search,
 or reactive-query support.
 
-Do not call DataVo from Burst-compiled code. Native containers and the
-Burst-to-managed drain boundary belong to the separate future
-com.datavo.unity.jobs package.
+Do not call DataVo from Burst-compiled code. Native-container adapters and a
+Burst-to-managed drain boundary are planned for a separate
+`com.datavo.unity.jobs` package. That package is not implemented and does not
+exist in this repository yet.
 
 Quaternion conversion is provided for storage and retrieval only. q and -q
 represent the same rotation but are different ordinary vectors, so ordinary

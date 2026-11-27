@@ -66,13 +66,14 @@ function equalArrays(actual, expected, message) {
 
 const manifest = readJson(manifestPath);
 assert(manifest.name === "com.datavo.unity.mathematics", "UPM package name must be com.datavo.unity.mathematics.");
-assert(manifest.version === "0.1.0-preview.1", "UPM package version must be 0.1.0-preview.1.");
+assert(manifest.version === "0.5.1-preview.1", "UPM package version must be 0.5.1-preview.1.");
 assert(manifest.unity === "6000.0", "UPM package must declare Unity 6000.0.");
 assert(
   manifest.dependencies &&
-    Object.keys(manifest.dependencies).length === 1 &&
+    Object.keys(manifest.dependencies).length === 2 &&
+    manifest.dependencies["com.datavo.core"] === "0.5.1" &&
     manifest.dependencies["com.unity.mathematics"] === "1.4.0",
-  "UPM package must declare only com.unity.mathematics 1.4.0.",
+  "UPM package must declare exactly com.datavo.core 0.5.1 and com.unity.mathematics 1.4.0.",
 );
 
 const mathematicsAsmdef = readJson(mathematicsAsmdefPath);

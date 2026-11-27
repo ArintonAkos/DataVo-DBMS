@@ -55,7 +55,7 @@ const manifest = JSON.parse(fs.readFileSync(path.join(project, 'Packages', 'mani
 const expectedDependencies = {
   'com.unity.mathematics': '1.4.0',
   'com.unity.test-framework': '1.7.0',
-  'com.datavo.core.candidate': 'file:../.generated',
+  'com.datavo.core': 'file:../.generated',
   'com.datavo.unity.mathematics': 'file:../../../../integrations/unity/com.datavo.unity.mathematics'
 };
 
@@ -77,7 +77,7 @@ for (const [name, expectedVersion] of Object.entries({
   }
 }
 
-for (const name of ['com.datavo.core.candidate', 'com.datavo.unity.mathematics']) {
+for (const name of ['com.datavo.core', 'com.datavo.unity.mathematics']) {
   if (lockedDependencies[name]?.source !== 'local') {
     throw new Error(`Lock dependency ${name} must have local source.`);
   }
@@ -98,8 +98,8 @@ if (requireCandidate === 'true') {
   }
 
   const candidatePackage = JSON.parse(fs.readFileSync(path.join(candidateRoot, 'package.json'), 'utf8'));
-  if (candidatePackage.name !== 'com.datavo.core.candidate') {
-    throw new Error(`Generated candidate package name must be com.datavo.core.candidate.`);
+  if (candidatePackage.name !== 'com.datavo.core') {
+    throw new Error(`Generated candidate package name must be com.datavo.core.`);
   }
 }
 NODE

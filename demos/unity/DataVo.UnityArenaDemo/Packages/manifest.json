@@ -37,7 +37,7 @@
     "com.unity.modules.xr": "1.0.0",
     "com.unity.mathematics": "1.4.0",
     "com.unity.test-framework": "1.7.0",
-    "com.datavo.core.candidate": "file:../.generated",
+    "com.datavo.core": "file:../.generated",
     "com.datavo.unity.mathematics": "file:../../../../integrations/unity/com.datavo.unity.mathematics"
   }
 }

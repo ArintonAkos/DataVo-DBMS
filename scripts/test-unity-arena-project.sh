@@ -19,7 +19,7 @@ for file in \
   }
 done
 
-rg -Fq '"com.datavo.core.candidate": "file:../.generated"' "$project/Packages/manifest.json"
+rg -Fq '"com.datavo.core": "file:../.generated"' "$project/Packages/manifest.json"
 rg -Fq '"com.unity.mathematics": "1.4.0"' "$project/Packages/manifest.json"
 rg -Fq 'check-unity-runtime-bcl.sh' "$root/scripts/prepare-unity-arena-candidate.sh"
 rg -Fq 'DataVo.Unity.TypeBinding' "$project/Assets/DataVoArena/Runtime/DataVo.UnityArena.Runtime.asmdef"

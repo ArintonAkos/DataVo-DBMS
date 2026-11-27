@@ -222,7 +222,7 @@ const assemblies = inventory.assemblies.map((assembly) => {
 });
 
 const packageJson = {
-  name: "com.datavo.core.candidate",
+  name: "com.datavo.core",
   displayName: "DataVo Core Candidate (Generated)",
   version: "0.0.0-preview.1",
   unity: "6000.0",

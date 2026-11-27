@@ -38,11 +38,12 @@ The existing `ToDataVoCell()` and `As*()` methods are still available for
 low-level code. Application models and normal DataVo writes do not need to
 mention them.
 
-The package must be paired with an exact portable DataVo.Core candidate produced by
-the repository's later Unity preparation flow. It does not include a Core binary,
-does not use unofficial Unity NuGet mirrors, and does not make DataVo callable
-from Burst. Native container adapters and the explicit Burst-to-managed drain
-bridge are planned for com.datavo.unity.jobs.
+The package depends on `com.datavo.core` 0.5.1, which supplies the DataVo.Core
+DLL; install the `com.datavo.core` UPM tarball first. It does not include a Core
+binary, does not use unofficial Unity NuGet mirrors, and does not make DataVo
+callable from Burst. Native-container adapters and an explicit Burst-to-managed
+drain bridge are planned for a separate `com.datavo.unity.jobs` package, which is
+not implemented and does not exist in this repository yet.
 
 On Unity `6000.5.4f1`, Unity Mathematics `1.4.0` forwards its value types through
 `UnityEngine.MathematicsModule`. The Mathematics assembly therefore retains Unity
@@ -50,7 +51,9 @@ engine-module references while still exposing only Unity Mathematics adapters.
 
 ## Verification status
 
-Pinned Unity 6000.5.4f1 Editor/Mono, Burst, package import, and executed Windows
-x64 IL2CPP verification have not run yet. The repository's static package
-contract checks validate source layout and intended APIs only; they are not a
-Unity support claim.
+The pinned Unity 6000.5.4f1 Editor and macOS IL2CPP Player have passed the
+narrow automatic type-binding smoke (`tests/unity/DataVo.UnitySmoke`). That
+result does not establish Windows, other Unity versions or targets, Burst, Jobs,
+Mono, persistence, vector search, or reactive-query support. The repository's
+static package contract checks (`scripts/test-unity-mathematics-package.sh`)
+validate source layout and intended APIs only.

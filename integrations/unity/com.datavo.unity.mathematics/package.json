@@ -1,10 +1,11 @@
 {
   "name": "com.datavo.unity.mathematics",
   "displayName": "DataVo Unity Mathematics",
-  "version": "0.1.0-preview.1",
+  "version": "0.5.1-preview.1",
   "unity": "6000.0",
-  "description": "Experimental DataVo VECTOR adapters for Unity Mathematics and UnityEngine floating-point value types. Requires a prepared portable DataVo.Core candidate.",
+  "description": "Experimental DataVo VECTOR adapters for Unity Mathematics and UnityEngine floating-point value types. Requires com.datavo.core.",
   "dependencies": {
+    "com.datavo.core": "0.5.1",
     "com.unity.mathematics": "1.4.0"
   }
 }
