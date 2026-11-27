@@ -37,7 +37,6 @@ public sealed class LsmFileSequenceOrderTests : IDisposable
         };
         engine.InsertRow(Db, Table, Payload(0, 0));
 
-        int compared = 0;
         for (int round = 0; round < 6; round++)
         {
             using var stop = new CancellationTokenSource();
@@ -58,13 +57,39 @@ public sealed class LsmFileSequenceOrderTests : IDisposable
             engine.FlushTableForTesting(Db, Table);
             engine.WaitForBackgroundWorkForTesting(Db, Table);
 
-            // A read drops the engine's hold on files that compaction replaced, so only live files remain on disk.
-            _ = engine.ReadAllRows(Db, Table).Count();
-            compared += AssertOrdered();
+            EnsureOverlappingLevel0File(engine);
+            int overlapping = AssertOrdered();
+            Assert.True(overlapping > 0, $"Round {round}: no two live files shared a key range, so the round compared nothing.");
         }
-
-        Assert.True(compared > 0, "No two files ever shared a key range, so the test compared nothing.");
     }
+
+    /// <summary>
+    /// Leaves a Level-0 file whose key range overlaps another live file, whatever the flush and compaction timing:
+    /// it rewrites the smallest live row and flushes that version alone. Its older version stays in the file that
+    /// held it (only compaction rewrites files), so the two files share that key. A flush that tips Level 0 over the
+    /// compaction threshold merges the new file away; then Level 0 is empty and the next flush cannot tip it again.
+    /// </summary>
+    private void EnsureOverlappingLevel0File(LsmStorageEngine engine)
+    {
+        do
+        {
+            RowKey smallest = engine.ReadAllRows(Db, Table).First().RowId;
+            Assert.True(engine.OverwriteRowForTesting(Db, Table, smallest, Payload(-1, 0)));
+            engine.FlushTableForTesting(Db, Table);
+            engine.WaitForBackgroundWorkForTesting(Db, Table);
+        }
+        while (!LiveFiles().Any(static file => file.Level == 0));
+    }
+
+    /// <summary>The table's live SSTables as its manifest lists them; files compaction replaced are excluded.</summary>
+    private LsmTableFileMetadata[] LiveFiles()
+    {
+        var manifest = new LsmManifest(Path.Combine(TableDirectory, "MANIFEST"));
+        return [.. Enumerable.Range(0, LsmTable.DefaultMaxCompactionLevel + 1).SelectMany(manifest.GetLiveFiles)];
+    }
+
+    private string TableDirectory =>
+        Directory.GetFiles(_root, "MANIFEST", SearchOption.AllDirectories).Select(Path.GetDirectoryName).Single(static dir => dir!.EndsWith(Table, StringComparison.Ordinal))!;
 
     private static void Write(LsmStorageEngine engine, int seed, StrongBox<int> written, CancellationToken stop)
     {
@@ -90,17 +115,14 @@ public sealed class LsmFileSequenceOrderTests : IDisposable
         }
     }
 
-    // Returns how many pairs of files shared part of their key range.
+    // Returns how many pairs of live files shared part of their key range.
     private int AssertOrdered()
     {
         var files = new List<(string Name, SsTableV2Properties Properties)>();
-        foreach (string path in Directory.GetFiles(_root, "*.sst", SearchOption.AllDirectories))
+        foreach (LsmTableFileMetadata file in LiveFiles())
         {
-            if (SsTableV2Format.IsV2File(path))
-            {
-                using SsTableV2Reader reader = SsTableV2Reader.Open(path, LsmReadMode.PositionalRead);
-                files.Add((Path.GetFileName(path), reader.Properties));
-            }
+            using SsTableV2Reader reader = SsTableV2Reader.Open(Path.Combine(TableDirectory, file.FileName), LsmReadMode.PositionalRead);
+            files.Add((file.FileName, reader.Properties));
         }
 
         int overlapping = 0;
