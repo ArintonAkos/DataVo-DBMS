@@ -49,30 +49,30 @@ using var db = new DataVoContext(new DataVoConfig
 
 ## Performance at a Glance
 
-All figures below are verified against an independent oracle (0 mismatches) on an Apple M4 Pro (macOS 26.3, .NET 10.0.3, arm64) with warm page cache. Compare only configurations with matching durability (`LSM Production` ↔ SQLite `synchronous=FULL`; `LSM Relaxed` ↔ SQLite WAL `NORMAL`).
+All figures below come from the v0.5.1 benchmark pass (27 November 2026) on an Apple M4 Pro (macOS 26.3, .NET 10.0.3, arm64) with warm page cache; SQL and vector answers are verified against an independent oracle (0 mismatches). Compare only configurations with matching durability (`LSM Production` ↔ SQLite `synchronous=FULL`; `LSM Relaxed` ↔ SQLite WAL `NORMAL`).
 
 | Workload | DataVo | Comparison | Notes |
 | :--- | :--- | :--- | :--- |
-| **PK point lookup (100k rows)** | **44.1 ns** (InMemory, 56 B) · **218.0 ns** (LSM, 144 B) | SQLite: 712 ns / 1,606 ns (608 B) | Compiled LINQ; 8–12× faster on Linux/Windows x64 CI too |
-| **Filtered aggregates (200k rows, `[Columnar]`)** | **27–90 µs** (0 B alloc, InMemory & LSM) | SQLite: 3.7–5.6 ms · DuckDB 1t: 123–701 µs | 55–162× faster than SQLite; 2.6–8.4× faster than 1-thread DuckDB |
-| **1M-row SQL (`GROUP BY`, 2–3 table `JOIN`)** | **2.3–9.7× faster** than SQLite (LSM Relaxed) | `GROUP BY` 4–1k groups: 2.8–3.0× · Columnar agg: 5–14× | 28-query v0.4 matrix vs. SQLite WAL `NORMAL` |
-| **Filtered top-10 vector search (50k × 384d)** | **0.67–3.6 ms** (HNSW) · **2.0–4.3 ms** (Flat) | SQLite + `sqlite-vec`: 9.8–14.4 ms (exact) | 100% Recall@10 across all three, no short results |
-| **Reactive IVM (3-table join, 50k updates)** | **192 ms** (3.1 µs P50) | DuckDB: 34.3 s · SQLite: 126.1 s | Incremental Z-sets vs. recomputing (single-table agg is ~1.1×) |
-| **YCSB 80/20 mixed (12 threads, Relaxed)** | **510,695 ops/s** (0.66 ms write P99) | SQLite WAL `NORMAL`: 261,618 ops/s (3.77 ms P99) | Non-power-loss-durable mode on both engines |
-| **Durable single update (`fsync` per commit)** | **~4.0 ms** (LSM Production) | SQLite WAL `FULL` + `fullfsync`: **~4.0 ms** | Drive flush dominates on macOS/Windows; SQLite leads on fast-flush Linux VM |
+| **PK point lookup (100k rows)** | **43.7 ns** (InMemory, 56 B) · **228.6 ns** (LSM, 144 B) | SQLite: 710 ns / 1,610 ns (608 B) | Compiled LINQ; 7–15× faster on Linux/Windows x64 CI too |
+| **Filtered aggregates (200k rows, `[Columnar]`)** | **27.5–93.7 µs** (0 B alloc, InMemory & LSM) | SQLite: 3.7–5.7 ms · DuckDB 1t: 138–714 µs | 54–165× faster than SQLite; 2.6–8.8× faster than 1-thread DuckDB |
+| **1M-row SQL (`GROUP BY`, 2–3 table `JOIN`)** | **2.3–10.7× faster** than SQLite (LSM Relaxed) | `GROUP BY` 4–1k groups: 3.3–4.7× · Columnar agg: 5–14× | 28-query v0.5.1 matrix vs. SQLite WAL `NORMAL` |
+| **Filtered top-10 vector search (50k × 384d)** | **0.72–3.8 ms** (HNSW) · **2.1–5.1 ms** (Flat) | SQLite + `sqlite-vec`: 10.1–14.7 ms (exact) | Recall@10 100% for exact search, ≥ 99.95% mean for HNSW; no short results |
+| **Reactive IVM (3-table join, 50k updates)** | **238 ms** (4.0 µs P50) | DuckDB: 39.4 s · SQLite: 128.8 s | Incremental Z-sets vs. recomputing (single-table agg is ~1.15×) |
+| **YCSB 80/20 mixed (12 threads, Relaxed)** | **1.06 ms** write P99 (346,866 ops/s) | SQLite WAL `NORMAL`: 3.40 ms P99 (226,278 ops/s) | Write tail 3.2× lower; DataVo throughput varied 182k–1.05M ops/s over four runs (SQLite 226k–240k). Neither mode is power-loss durable |
+| **Durable single update (`fsync` per commit)** | **4.07 ms** P50 (LSM Production) | SQLite WAL `FULL` + `fullfsync`: **4.10 ms** | Drive flush dominates on macOS/Windows; SQLite leads 2.1× on the fast-flush Linux VM (0.079 vs 0.163 ms) |
 
 **Where DataVo loses:**
-- **High-cardinality indexed `GROUP BY` (125k groups):** 2.4× slower than SQLite (SQLite streams in index order).
-- **Unindexed full scans (`OR`, `LIKE`, unindexed aggregates, unindexed `ORDER BY ... LIMIT 10`):** 1.1–2.1× slower than SQLite; `LEFT JOIN` anti-join is 1.2× slower.
+- **Unindexed full scans (`OR`, `LIKE`, unindexed `ORDER BY ... LIMIT 10`):** 1.15–1.3× slower than SQLite on LSM; numeric aggregates without a `[Columnar]` index are 1.5–2.0× slower; the `LEFT JOIN` anti-join is 1.09× slower.
+- **High-cardinality indexed `GROUP BY` (125k groups):** level with SQLite on LSM (1.02×), where SQLite answers from a covering index; `InMemory` is 1.55× faster.
 - **Whole-table analytical scans:** DuckDB (parallel column store) is faster than both DataVo and SQLite on full-table scans, and slower on key lookups and ranges.
-- **Cross-platform scaling:** On x64 GitHub Actions VMs, DataVo's lead over SQLite on row scans is 2–2.8× smaller than on Apple Silicon (point lookups remain **8.4–12.6× faster** and `[Columnar]` `COUNT(*)` remains **491–844× faster**).
+- **Cross-platform scaling:** On x64 GitHub Actions VMs the 1M-row SQL picture holds: on Linux, unindexed scans are 1.1–1.5× slower than SQLite and joins 2.3–9.7× faster; on Windows the join lead widens to 3.4–22×. Point lookups are **7–15× faster** and `[Columnar]` `COUNT(*)` **480–826× faster** than SQLite on both.
 
 ![Filtered aggregates](https://raw.githubusercontent.com/ArintonAkos/DataVo-DBMS/master/docs/public/benchmarks/bdn-filtered-aggregates.png)
 
 ![YCSB write P99 latency](https://raw.githubusercontent.com/ArintonAkos/DataVo-DBMS/master/docs/public/benchmarks/ycsb-write-p99.png)
 
 Full tables, methodology, cross-platform CI runs, and raw outputs:
-- [DataVo vs SQLite (28 SQL shapes + hybrid vector, v0.4)](https://arintonakos.github.io/DataVo-DBMS/manual/performance/datavo-vs-sqlite) · raw logs and reports in [`docs/public/benchmarks/2026-11-16-v04-final/`](docs/public/benchmarks/2026-11-16-v04-final/)
+- [DataVo vs SQLite (28 SQL shapes + hybrid vector, v0.5.1)](https://arintonakos.github.io/DataVo-DBMS/manual/performance/datavo-vs-sqlite) · raw logs and reports in [`docs/public/benchmarks/2026-11-27-v051/`](docs/public/benchmarks/2026-11-27-v051/)
 - [Benchmark Results & Cross-Platform CI](https://arintonakos.github.io/DataVo-DBMS/manual/performance/benchmarks) ([Part III: Platforms](docs/manual/performance/benchmarks.md#part-iii-platforms))
 - Engineering deep-dives: [Part 1: Where It Wins and Where It Loses](https://arintonakos.github.io/DataVo-DBMS/blog/part-1-where-it-wins-and-where-it-loses) · [Part 2: Packed Buffers, Native AOT & Roslyn Codegen](https://arintonakos.github.io/DataVo-DBMS/blog/part-2-packed-buffers-aot-and-roslyn-codegen)
 
@@ -176,7 +176,7 @@ while (reader.Read())
 - **Supported runtimes:** `DataVo.Core` and `DataVo.Data` ship `net8.0`, `net9.0`, `net10.0` and `netstandard2.1` assets; `DataVo.VectorData` ships `net8.0`, `net9.0` and `net10.0`; the EF Core preview bridge is `net10.0` only; `DataVo.Generators` is a `netstandard2.0` analyzer that runs in any modern compiler.
 - **Native AOT:** `DataVo.Core`, `DataVo.Data`, `DataVo.VectorData`, and `DataVo.Generators` output publish cleanly with `PublishAot=true`. The EF Core preview bridge is excluded from AOT.
 - **Unity** is an evaluation target, not a supported runtime. Unity builds use the `netstandard2.1` asset of `DataVo.Core`; a narrow smoke (in-memory and LSM save/reopen) passes in the Unity 6000.5.4f1 macOS Editor and a macOS IL2CPP Player. Windows IL2CPP is unverified and direct Burst calls are unsupported by design.
-- **Browser / WebAssembly:** `DataVo.Browser` powers the documentation site's [SQL playground](https://arintonakos.github.io/DataVo-DBMS/manual/getting-started/playground). It is experimental and not published on npm. To run it locally: `bash ./scripts/deploy-browser-wasm.sh`, then `cd docs && npm install && npm run docs:dev`.
+- **Browser / WebAssembly:** `DataVo.Browser` powers the documentation site's [SQL playground](https://arintonakos.github.io/DataVo-DBMS/manual/getting-started/playground). It is experimental and not published on npm; the trimmed WebAssembly bundle is 7.7 MB. To run it locally: `bash ./scripts/deploy-browser-wasm.sh`, then `cd docs && npm install && npm run docs:dev`.
 
 ## Commercial Add-On: DataVo Sync
 
@@ -199,7 +199,7 @@ The full manual is live at [arintonakos.github.io/DataVo-DBMS](https://arintonak
 
 ## Status
 
-DataVo `0.5.1` is a pre-1.0 release. The documented SQL dialect and C# APIs may still change between minor versions, and the on-disk format does not yet carry a long-term cross-version compatibility guarantee, so keep an export or seed script for important data. Validate your own workload before relying on it in production.
+DataVo `0.5.1` is a pre-1.0 release; its test suite has 3,424 passing tests (`DataVo.Tests`, `DataVo.Generators.Tests`, `DataVo.VectorData.Tests`). The documented SQL dialect and C# APIs may still change between minor versions, and the on-disk format does not yet carry a long-term cross-version compatibility guarantee, so keep an export or seed script for important data. Validate your own workload before relying on it in production.
 
 ## License
 

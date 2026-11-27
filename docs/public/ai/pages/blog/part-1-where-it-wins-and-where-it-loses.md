@@ -15,12 +15,16 @@ This first post is a map of the whole system: why it is structured the way it is
 
 At a glance, the approach pays off in four specific places:
 
-- **In-process reads without an interop boundary:** Using build-time Roslyn code generation, primary-key lookups take **55 ns** in memory and **216 ns** on LSM disk files (**7.7–13× faster** than SQLite on an Apple M4 Pro), allocating **56–144 B** per call.
-- **Continuous views instead of repeated re-queries:** Maintaining a live 3-table `JOIN + GROUP BY` view across 50,000 incoming writes using Z-set incremental view maintenance takes **192 ms**, compared to **34.3 s** in DuckDB (**179×**) and **126.1 s** in SQLite (**658×**).
-- **Filtered vector search inside ordinary SQL:** Top-10 search over 50,000 × 384-dimensional embeddings with SQL `JOIN` and `WHERE` filters runs in **0.26–3.62 ms** at **100% recall@10**, in the same transaction log as the relational tables.
+- **In-process reads without an interop boundary:** Using build-time Roslyn code generation, primary-key lookups take **43.7 ns** in memory and **228.6 ns** on LSM disk files (**7.0–16× faster** than SQLite on an Apple M4 Pro), allocating **56–144 B** per call.
+- **Continuous views instead of repeated re-queries:** Maintaining a live 3-table `JOIN + GROUP BY` view across 50,000 incoming writes using Z-set incremental view maintenance takes **238 ms**, compared to **39.4 s** in DuckDB (**166×**) and **128.8 s** in SQLite (**541×**).
+- **Filtered vector search inside ordinary SQL:** Top-10 search over 50,000 × 384-dimensional embeddings with SQL `JOIN` and `WHERE` filters runs in **0.27–3.83 ms** at **≥ 99.95% mean recall@10**, in the same transaction log as the relational tables.
 - **Compact offline-first Postgres sync:** End-to-end PostgreSQL 17 replication transfers **45.5 bytes per row** over the wire (**8.0× smaller** than ElectricSQL `1.8.1`) with **5.1–6.9× lower** client GC allocations, converging automatically after a burst of 500 offline writes.
 
-It also loses in predictable places: unindexed substring scans (**1.35× slower** than SQLite on `LIKE '%042-%'`), whole-table analytical scans without `[Columnar]` (**3–340× slower** than DuckDB), Linux single-row durable `StrictFsync` latency (**0.241 ms** vs **0.108 ms**, **2.2× slower** than SQLite WAL `FULL`), and sync hub cold-start time (**2.4 s** to load 100k rows). Those losses are reported alongside the wins below, because an embedded database is only useful once you know where its boundaries are.
+It also loses in predictable places: unindexed substring scans (**1.29× slower** than SQLite on `LIKE '%042-%'`), whole-table analytical scans without `[Columnar]` (**6–360× slower** than DuckDB), Linux single-row durable `StrictFsync` latency (**0.163 ms** vs **0.079 ms**, **2.1× slower** than SQLite WAL `FULL`), and sync hub cold-start time (**2.4 s** to load 100k rows). Those losses are reported alongside the wins below, because an embedded database is only useful once you know where its boundaries are.
+
+::: info Refreshed for v0.5.1
+The at-a-glance figures above come from the v0.5.1 benchmark pass (27 November 2026: Apple M4 Pro locally, Linux x64 on GitHub Actions). The sections below keep the dated runs they name. Current tables live in [Benchmark Results](/manual/performance/benchmarks) and [DataVo vs SQLite](/manual/performance/datavo-vs-sqlite).
+:::
 
 ::: tip Try or bookmark DataVo
 Explore or star the MIT-licensed engine at [`ArintonAkos/DataVo-DBMS`](https://github.com/ArintonAkos/DataVo-DBMS), or jump to the self-hosted Postgres sync quickstart at [`ArintonAkos/DataVo-Sync`](https://github.com/ArintonAkos/DataVo-Sync).

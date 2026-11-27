@@ -39,11 +39,11 @@ Each SSTable is written sequentially to a temporary file, fsynced, atomically re
 
   | 200,000-row SSTable, Apple M4 Pro | Point lookup | Full scan | Engine `ReadRow` | Allocated per lookup |
   | --- | ---: | ---: | ---: | ---: |
-  | `Auto` (mmap) | 179 ns | 1.74 ms | 172 ns | 0 B |
-  | `PositionalRead`, no cache | 5,963 ns | 4.47 ms | 6,074 ns | 0 B |
-  | `PositionalRead` + 64 MiB block cache | 204 ns | 1.76 ms | 203 ns | 0 B |
+  | `Auto` (mmap) | 180 ns | 1.85 ms | 186 ns | 0 B |
+  | `PositionalRead`, no cache | 6,402 ns | 4.66 ms | 6,474 ns | 0 B |
+  | `PositionalRead` + 64 MiB block cache | 176 ns | 1.83 ms | 207 ns | 0 B |
 
-  Measured with `benchmarks/DataVo.Benchmarks` (`--filter '*LsmReadMode*' --job short`); `ReadRow` includes its 64 B row copy. Choose `PositionalRead` when you want checksummed reads and clean I/O errors at near-mmap speed (network or removable volumes, files other processes might truncate); keep `Auto` for the last ~15 % of point-read latency.
+  Measured with `benchmarks/DataVo.Benchmarks` (v0.5.1 full job, 27 November 2026); `ReadRow` includes its 64 B row copy. Choose `PositionalRead` when you want checksummed reads and clean I/O errors at mmap speed (network or removable volumes, files other processes might truncate): warm cached lookups and scans match `Auto`, and engine `ReadRow` is about 10 % slower.
 - **Out-of-core columnar segments (v8):** Tables with a `USING COLUMNAR` (`[Columnar]`) index store 4,096-row columnar chunks, NULL/NaN masks, tombstone runs, and per-chunk min/max zone maps inside each `.sst` file.
 
 ## Durability Settings

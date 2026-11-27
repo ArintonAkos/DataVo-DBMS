@@ -90,5 +90,5 @@ Unity is an **evaluation target**, not a supported runtime. The public `DataVo.C
 ## See Also
 
 - [Limits & Unsupported Features](/manual/reference/limits): Exact engine limits and unsupported SQL/API features.
-- [DataVo vs SQLite](/manual/performance/datavo-vs-sqlite): The 28-shape SQL matrix (v0.4 runs plus the v0.5.0 re-run) and correctness notes.
+- [DataVo vs SQLite](/manual/performance/datavo-vs-sqlite): The 28-shape SQL matrix (v0.5.1 run) and correctness notes.
 - [LSM & Durability](/manual/fundamentals/lsm-and-durability): WAL fsync modes and crash recovery guarantees.
