@@ -196,7 +196,7 @@ jobs:
     if: ${{ github.event.inputs.run_benchmarkdotnet != 'false' }}
     name: BenchmarkDotNet suite (DataVo, SQLite, DuckDB) on ${{ matrix.runner }}
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 90
+    timeout-minutes: 150
     strategy:
       fail-fast: false
       matrix:
