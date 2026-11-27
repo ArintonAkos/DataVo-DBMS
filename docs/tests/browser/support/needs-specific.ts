@@ -179,7 +179,7 @@ export function planNeedsSpecificCase(
     return makeExecutionPlan();
   }
 
-  if (/WAL|StorageEngine|Persistence|Vacuum|Disk/i.test(signature)) {
+  if (/WAL|StorageEngine|Persistence|Vacuum/i.test(signature)) {
     return makeStoragePlan();
   }
 

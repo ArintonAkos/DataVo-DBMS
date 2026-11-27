@@ -4,6 +4,7 @@ import {
   loadNeedsSpecificItems,
   writeExecutionSummary,
 } from "./wasm-parity";
+import { DOCS_BASE_PATH } from "./base-path";
 import { runNeedsSpecificCase } from "./needs-specific";
 
 type SuiteOptions = {
@@ -23,7 +24,7 @@ export function registerNeedsSpecificSuite(options: SuiteOptions): void {
     test.describe.configure({ mode: "serial" });
 
     test.beforeEach(async ({ page }) => {
-      await page.goto("/");
+      await page.goto(DOCS_BASE_PATH);
     });
 
     test.afterAll(() => {

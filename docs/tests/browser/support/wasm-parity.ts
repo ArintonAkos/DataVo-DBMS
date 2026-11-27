@@ -1,6 +1,7 @@
 /// <reference types="node" />
 import fs from "fs";
 import path from "path";
+import { DATAVO_CLIENT_MODULE_URL } from "./base-path";
 
 export type QueryResult = {
   Messages: string[];
@@ -109,8 +110,7 @@ export async function executeSqlRaw(
   page: import("@playwright/test").Page,
   sql: string,
 ): Promise<QueryResult> {
-  return await page.evaluate(async (command) => {
-    const moduleUrl = "/src/DataVoClient.ts";
+  return await page.evaluate(async ({ command, moduleUrl }) => {
     const { DataVoClient } = await import(moduleUrl);
     const client = DataVoClient.getInstance();
     await client.initialize();
@@ -122,7 +122,7 @@ export async function executeSqlRaw(
     }
 
     return last;
-  }, sql);
+  }, { command: sql, moduleUrl: DATAVO_CLIENT_MODULE_URL });
 }
 
 export async function executeSql(
@@ -140,26 +140,24 @@ export async function executeSql(
 export async function resetBrowserClient(
   page: import("@playwright/test").Page,
 ): Promise<void> {
-  await page.evaluate(async () => {
-    const moduleUrl = "/src/DataVoClient.ts";
+  await page.evaluate(async (moduleUrl) => {
     const { DataVoClient } = await import(moduleUrl);
     const client = DataVoClient.getInstance();
     await client.initialize();
     await client.reset();
     await client.initialize();
-  });
+  }, DATAVO_CLIENT_MODULE_URL);
 }
 
 export async function getCapabilities(
   page: import("@playwright/test").Page,
 ): Promise<Record<string, any>> {
-  return await page.evaluate(async () => {
-    const moduleUrl = "/src/DataVoClient.ts";
+  return await page.evaluate(async (moduleUrl) => {
     const { DataVoClient } = await import(moduleUrl);
     const client = DataVoClient.getInstance();
     await client.initialize();
     return await client.runtimeCapabilities();
-  });
+  }, DATAVO_CLIENT_MODULE_URL);
 }
 
 export function hasSuspiciousErrorMessage(messages: string[]): boolean {

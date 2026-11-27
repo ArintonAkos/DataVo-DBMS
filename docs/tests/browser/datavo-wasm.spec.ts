@@ -2,6 +2,7 @@
 import { expect, test } from "@playwright/test";
 import fs from "fs";
 import path from "path";
+import { DATAVO_CLIENT_MODULE_URL, DOCS_BASE_PATH } from "./support/base-path";
 
 /** Enables stricter browser parity assertions when set to 1. */
 const strictBrowserParityGate =
@@ -336,8 +337,7 @@ async function executeSqlRaw(
   page: import("@playwright/test").Page,
   sql: string,
 ): Promise<QueryResult> {
-  return await page.evaluate(async (command) => {
-    const moduleUrl = "/src/DataVoClient.ts";
+  return await page.evaluate(async ({ command, moduleUrl }) => {
     const { DataVoClient } = await import(moduleUrl);
     const client = DataVoClient.getInstance();
     await client.initialize();
@@ -349,7 +349,7 @@ async function executeSqlRaw(
     }
 
     return last;
-  }, sql);
+  }, { command: sql, moduleUrl: DATAVO_CLIENT_MODULE_URL });
 }
 
 /**
@@ -361,13 +361,12 @@ async function executeSqlRaw(
 async function getCapabilities(
   page: import("@playwright/test").Page,
 ): Promise<Record<string, any>> {
-  return await page.evaluate(async () => {
-    const moduleUrl = "/src/DataVoClient.ts";
+  return await page.evaluate(async (moduleUrl) => {
     const { DataVoClient } = await import(moduleUrl);
     const client = DataVoClient.getInstance();
     await client.initialize();
     return await client.runtimeCapabilities();
-  });
+  }, DATAVO_CLIENT_MODULE_URL);
 }
 
 /**
@@ -378,14 +377,13 @@ async function getCapabilities(
 async function resetBrowserClient(
   page: import("@playwright/test").Page,
 ): Promise<void> {
-  await page.evaluate(async () => {
-    const moduleUrl = "/src/DataVoClient.ts";
+  await page.evaluate(async (moduleUrl) => {
     const { DataVoClient } = await import(moduleUrl);
     const client = DataVoClient.getInstance();
     await client.initialize();
     await client.reset();
     await client.initialize();
-  });
+  }, DATAVO_CLIENT_MODULE_URL);
 }
 
 /**
@@ -460,16 +458,15 @@ test.describe("DataVo WASM browser runtime", () => {
   test.describe.configure({ mode: "serial" });
 
   test.beforeEach(async ({ page }) => {
-    await page.goto("/");
+    await page.goto(DOCS_BASE_PATH);
 
-    await page.evaluate(async () => {
-      const moduleUrl = "/src/DataVoClient.ts";
+    await page.evaluate(async (moduleUrl) => {
       const { DataVoClient } = await import(moduleUrl);
       const client = DataVoClient.getInstance();
       await client.initialize();
       await client.reset();
       await client.initialize();
-    });
+    }, DATAVO_CLIENT_MODULE_URL);
   });
 
   test("reports runtime capabilities", async ({ page }) => {
@@ -533,16 +530,15 @@ test.describe("DataVo WASM browser runtime", () => {
 
     for (let i = 0; i < matrix.length; i++) {
       const row = matrix[i];
-      await page.goto(`/${row.query}`);
+      await page.goto(`${DOCS_BASE_PATH}${row.query}`);
 
-      await page.evaluate(async () => {
-        const moduleUrl = "/src/DataVoClient.ts";
+      await page.evaluate(async (moduleUrl) => {
         const { DataVoClient } = await import(moduleUrl);
         const client = DataVoClient.getInstance();
         await client.initialize();
         await client.reset();
         await client.initialize();
-      });
+      }, DATAVO_CLIENT_MODULE_URL);
 
       const dbName = `BrowserDbMatrix_${Date.now()}_${i}`;
       const parity = await runStrictCrudParity(page, dbName);

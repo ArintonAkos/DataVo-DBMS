@@ -1,3 +1,5 @@
+import { resolveDataVoWasmBaseUrl } from "./datavoWasmPaths";
+
 /** Request envelope sent from the main thread to the runtime worker. */
 type RuntimeRequest = {
   id: number;
@@ -49,12 +51,12 @@ async function initializeRuntime(): Promise<void> {
 
   initPromise = (async () => {
     const debugEnabled = isDebugEnabled();
-    const storageModuleUrl = `${self.location.origin}/datavo-wasm/datavo.interop.js`;
+    const wasmBase = resolveDataVoWasmBaseUrl(self.location.origin);
+    const storageModuleUrl = `${wasmBase}datavo.interop.js`;
     const storageModule = await import(/* @vite-ignore */ storageModuleUrl);
     (globalThis as any).DataVoStorage = storageModule;
 
-    const frameworkBase = `${self.location.origin}/datavo-wasm/_framework`;
-    const dotnetUrl = `${frameworkBase}/dotnet.js`;
+    const dotnetUrl = `${wasmBase}_framework/dotnet.js`;
     const { dotnet } = await import(/* @vite-ignore */ dotnetUrl);
 
     const { getAssemblyExports, getConfig } = await dotnet
