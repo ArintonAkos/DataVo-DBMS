@@ -5,6 +5,9 @@
   <PropertyGroup>
     <IsPackable>false</IsPackable>
     <EnablePackageValidation>true</EnablePackageValidation>
+    <!-- The one DataVo release version: NuGet packages, the browser runtime and the Unity UPM packaging
+         script (scripts/package-unity-upm.sh) all read it from here. -->
+    <DataVoVersion>0.5.1</DataVoVersion>
   </PropertyGroup>
 
   <!-- The runtimes the test projects (and the crash harness they launch) are built for. Local runs default to
@@ -26,7 +29,7 @@
        description, tags and release notes. Libraries also ship symbols and XML docs. -->
   <PropertyGroup Condition="'$(MSBuildProjectName)' == 'DataVo.Core' Or '$(MSBuildProjectName)' == 'DataVo.Data' Or '$(MSBuildProjectName)' == 'DataVo.EntityFrameworkCore' Or '$(MSBuildProjectName)' == 'DataVo.VectorData' Or '$(MSBuildProjectName)' == 'DataVo.Generators'">
     <IsPackable>true</IsPackable>
-    <Version>0.5.1</Version>
+    <Version>$(DataVoVersion)</Version>
     <Authors>Arinton Akos</Authors>
     <Company>DataVo</Company>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
