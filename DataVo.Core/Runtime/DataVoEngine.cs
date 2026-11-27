@@ -405,6 +405,13 @@ public sealed partial class DataVoEngine : IDisposable
         return new SnapshotLockScope(_snapshotLock, isWrite: true);
     }
 
+    /// <summary>
+    /// Rebuilds every catalog index from the stored rows, with the same rules as engine open (NULL keys
+    /// get no scalar entry, vector indexes keep their kind and options). For hosts that load catalog state
+    /// into a <see cref="StorageMode.Custom"/> engine themselves, such as the browser runtime.
+    /// </summary>
+    public void RebuildIndexesFromStorage() => RebuildAllIndexesFromCatalog();
+
     private void RebuildAllIndexesFromCatalog()
     {
         using IDisposable _ = PushCurrent(this);
