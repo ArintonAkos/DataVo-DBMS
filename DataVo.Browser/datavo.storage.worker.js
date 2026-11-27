@@ -5,9 +5,19 @@ const SELECTED_DATABASE_KEY = "datavo:selectedDatabase";
 const TXN_MARKER_PREFIX = "datavo:txn:pending:";
 const TXN_TEMP_PREFIX = "datavo:txn:temp:";
 
+const MEMORY_FALLBACK_WARNING =
+    "DataVo storage worker has no OPFS access and is keeping data in memory only (worker-memory-fallback). " +
+    "Data will be lost on reload.";
+
 let rootDirectoryPromise = null;
 let recoveryPromise = null;
+let memoryFallbackWarned = false;
 const memoryFallback = new Map();
+
+// Shared with datavo.interop.js once (attach message) and reused for every response.
+let control = null;
+let responseBytes = null;
+const encoder = new TextEncoder();
 
 function toFileName(key) {
     return encodeURIComponent(key);
@@ -24,12 +34,22 @@ async function getRootDirectory() {
 
     rootDirectoryPromise = (async () => {
         if (typeof navigator === "undefined" || !navigator.storage || typeof navigator.storage.getDirectory !== "function") {
+            if (!memoryFallbackWarned) {
+                memoryFallbackWarned = true;
+                console.warn(MEMORY_FALLBACK_WARNING);
+            }
+
             return null;
         }
 
         const opfsRoot = await navigator.storage.getDirectory();
         return await opfsRoot.getDirectoryHandle("datavo", { create: true });
     })();
+
+    // A transient failure (e.g. storage access denied mid-startup) must not be cached forever.
+    rootDirectoryPromise.catch(() => {
+        rootDirectoryPromise = null;
+    });
 
     return rootDirectoryPromise;
 }
@@ -166,7 +186,7 @@ async function clearAllDataVoKeys() {
     const root = await getRootDirectory();
     if (!root) {
         for (const key of [...memoryFallback.keys()]) {
-            if (key.startsWith(STORAGE_PREFIX) || key.startsWith(TXN_MARKER_PREFIX) || key.startsWith(TXN_TEMP_PREFIX)) {
+            if (key.startsWith(STORAGE_PREFIX)) {
                 memoryFallback.delete(key);
             }
         }
@@ -177,7 +197,8 @@ async function clearAllDataVoKeys() {
     const removals = [];
     for await (const [name] of root.entries()) {
         const key = fromFileName(name);
-        if (key.startsWith(STORAGE_PREFIX) || key.startsWith(TXN_MARKER_PREFIX) || key.startsWith(TXN_TEMP_PREFIX)) {
+        // Transaction markers and temp payloads share the "datavo:" prefix.
+        if (key.startsWith(STORAGE_PREFIX)) {
             removals.push(root.removeEntry(name));
         }
     }
@@ -201,6 +222,8 @@ async function getCapabilities() {
     return {
         storageBackend: opfsRoot ? "worker-opfs" : "worker-memory-fallback",
         mode: "worker",
+        persistent: !!opfsRoot,
+        warning: opfsRoot ? null : MEMORY_FALLBACK_WARNING,
         isWorkerThread: true,
         hasWorker: true,
         hasSharedArrayBuffer: typeof SharedArrayBuffer !== "undefined",
@@ -284,12 +307,27 @@ async function handleCommand(command, payload) {
     }
 }
 
-const encoder = new TextEncoder();
+function publishResponse(status, text) {
+    // encodeInto writes straight into the shared buffer: no per-call allocation or zero-fill.
+    let { read, written } = encoder.encodeInto(text, responseBytes);
+    if (read < text.length) {
+        status = 1;
+        ({ written } = encoder.encodeInto("Storage worker response exceeds shared buffer capacity.", responseBytes));
+    }
+
+    Atomics.store(control, 1, status);
+    Atomics.store(control, 2, written);
+    Atomics.store(control, 0, 1);
+    Atomics.notify(control, 0, 1);
+}
 
 self.onmessage = async (event) => {
-    const { command, payload, controlBuffer, responseBuffer } = event.data;
-    const control = new Int32Array(controlBuffer);
-    const responseBytes = new Uint8Array(responseBuffer);
+    const { attach, command, payload, controlBuffer, responseBuffer } = event.data;
+    if (attach) {
+        control = new Int32Array(controlBuffer);
+        responseBytes = new Uint8Array(responseBuffer);
+        return;
+    }
 
     let status = 0;
     let response = "";
@@ -302,24 +340,5 @@ self.onmessage = async (event) => {
         response = error && error.message ? error.message : String(error);
     }
 
-    const encoded = encoder.encode(response);
-    if (encoded.length > responseBytes.byteLength) {
-        status = 1;
-        const overflow = encoder.encode("Storage worker response exceeds shared buffer capacity.");
-        responseBytes.fill(0);
-        responseBytes.set(overflow.subarray(0, responseBytes.byteLength));
-        Atomics.store(control, 1, status);
-        Atomics.store(control, 2, Math.min(overflow.length, responseBytes.byteLength));
-        Atomics.store(control, 0, 1);
-        Atomics.notify(control, 0, 1);
-        return;
-    }
-
-    responseBytes.fill(0);
-    responseBytes.set(encoded);
-
-    Atomics.store(control, 1, status);
-    Atomics.store(control, 2, encoded.length);
-    Atomics.store(control, 0, 1);
-    Atomics.notify(control, 0, 1);
+    publishResponse(status, response);
 };
