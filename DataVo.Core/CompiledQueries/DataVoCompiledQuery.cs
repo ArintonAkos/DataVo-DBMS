@@ -30,53 +30,8 @@ public static class DataVoCompiledQuery
     private static readonly ConditionalWeakTable<DataVoContext, ConcurrentDictionary<PreparedSelectManyCacheKey, object>> PreparedSelectManyCache = new();
 
     /// <summary>
-    /// Executes a select plan and returns the first mapped row, or <c>default</c> when no row matches.
-    /// </summary>
-    public static TResult? SelectSingle<TResult>(
-        DataVoContext context,
-        DataVoCompiledQueryPlan plan,
-        IReadOnlyList<DataVoCompiledQueryParameter> parameters,
-        Func<Dictionary<string, object?>, TResult> mapper)
-    {
-        DataVo.Core.Compat.ThrowHelper.ThrowIfNull(context);
-        DataVo.Core.Compat.ThrowHelper.ThrowIfNull(plan);
-        DataVo.Core.Compat.ThrowHelper.ThrowIfNull(parameters);
-        DataVo.Core.Compat.ThrowHelper.ThrowIfNull(mapper);
-
-        if (plan.Kind != DataVoCompiledQueryKind.SelectSingle)
-        {
-            throw new InvalidOperationException($"Plan kind '{plan.Kind}' cannot be executed as SelectSingle.");
-        }
-
-        IReadOnlyList<TResult> rows = ExecuteSelect(context, plan, parameters, mapper);
-        return rows.Count == 0 ? default : rows[0];
-    }
-
-    /// <summary>
-    /// Executes a select plan and returns every mapped row that matches the plan predicate.
-    /// </summary>
-    public static IReadOnlyList<TResult> SelectMany<TResult>(
-        DataVoContext context,
-        DataVoCompiledQueryPlan plan,
-        IReadOnlyList<DataVoCompiledQueryParameter> parameters,
-        Func<Dictionary<string, object?>, TResult> mapper)
-    {
-        DataVo.Core.Compat.ThrowHelper.ThrowIfNull(context);
-        DataVo.Core.Compat.ThrowHelper.ThrowIfNull(plan);
-        DataVo.Core.Compat.ThrowHelper.ThrowIfNull(parameters);
-        DataVo.Core.Compat.ThrowHelper.ThrowIfNull(mapper);
-
-        if (plan.Kind != DataVoCompiledQueryKind.SelectMany && plan.Kind != DataVoCompiledQueryKind.SelectSingle)
-        {
-            throw new InvalidOperationException($"Plan kind '{plan.Kind}' cannot be executed as SelectMany.");
-        }
-
-        return ExecuteSelect(context, plan, parameters, mapper);
-    }
-
-    /// <summary>
     /// Executes a select plan and returns every row projected by <paramref name="mapper"/> directly from typed
-    /// cells — no dictionary materialization, no boxing. Behavior matches <see cref="SelectMany{TResult}"/>.
+    /// cells — no dictionary materialization, no boxing.
     /// </summary>
     public static IReadOnlyList<T> SelectManyTyped<T>(
         DataVoContext context,
@@ -1285,57 +1240,6 @@ public static class DataVoCompiledQuery
         public int[] AssignOrdinals { get; init; } = [];
 
         public string[] AssignParameterNames { get; init; } = [];
-    }
-
-    private static IReadOnlyList<TResult> ExecuteSelect<TResult>(
-        DataVoContext context,
-        DataVoCompiledQueryPlan plan,
-        IReadOnlyList<DataVoCompiledQueryParameter> parameters,
-        Func<Dictionary<string, object?>, TResult> mapper)
-    {
-        context.Engine.AuthorizeDirectAccess(context.SessionId, DatabasePermission.ReadData);
-        TransactionManager txManager = context.Engine.TransactionManager;
-        TransactionContext? transactionContext = txManager.HasAnyActiveTransaction()
-            ? txManager.GetContext(context.SessionId) ?? MvccExecutionScope.CurrentTransaction
-            : MvccExecutionScope.CurrentTransaction;
-        bool hasActiveSnapshot = transactionContext is not null || MvccExecutionScope.CurrentSnapshot is not null;
-
-        using IDisposable? engineScope = hasActiveSnapshot ? DataVoEngine.PushCurrent(context.Engine) : null;
-        using IDisposable? txScope = transactionContext is not null
-            && !ReferenceEquals(MvccExecutionScope.CurrentTransaction, transactionContext)
-            ? MvccExecutionScope.PushTransaction(transactionContext)
-            : null;
-
-        string databaseName = ResolveCurrentDatabase(context);
-        plan = StoredTablePlan(context.Engine, plan, databaseName);
-        Dictionary<string, object?> parameterDictionary = ToParameterDictionary(parameters);
-        object? expected = RequiredParameter(parameterDictionary, plan.WhereParameterName!);
-        string expectedKey = BuildComparisonKey(plan.WhereColumn!, expected);
-
-        List<Dictionary<string, object?>> rows = TryReadMatchingRowEntries(context, plan, databaseName, expectedKey)
-            .Select(static pair => pair.Value)
-            .ToList();
-
-        return rows
-            .Select(ProjectRowIfNeeded)
-            .Select(mapper)
-            .ToArray();
-
-        Dictionary<string, object?> ProjectRowIfNeeded(Dictionary<string, object?> row)
-        {
-            if (plan.ProjectedColumns.Count == 0)
-            {
-                return row;
-            }
-
-            var projected = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
-            foreach (string column in plan.ProjectedColumns)
-            {
-                projected[column] = row.TryGetValue(column, out object? value) ? value : null;
-            }
-
-            return projected;
-        }
     }
 
     private static List<KeyValuePair<RowKey, Dictionary<string, object?>>> TryReadMatchingRowEntries(

@@ -218,13 +218,13 @@ public class Phase3AuditFixTests
 
         using (LogIn(db, "reader", "pw"))
         {
-            Assert.NotNull(DataVoCompiledQuery.SelectSingle(db, select, args, row => row["Balance"]));
+            Assert.Equal(10, DataVoCompiledQuery.SelectSingleTyped<int?>(db, select, args, static row => row.GetInt32("Balance")));
             Assert.Throws<AuthorizationException>(() => DataVoCompiledQuery.Update(db, update, args));
             Assert.Throws<AuthorizationException>(() => DataVoCompiledQuery.UpdateFixedWidthByPrimaryKey(
                 db, update, DataVoFixedWidthValue.From(1), [DataVoFixedWidthValue.From(20)]));
 
             db.Logout();
-            Assert.Throws<AuthorizationException>(() => DataVoCompiledQuery.SelectSingle(db, select, args, row => row["Balance"]));
+            Assert.Throws<AuthorizationException>(() => DataVoCompiledQuery.SelectSingleTyped<int?>(db, select, args, static row => row.GetInt32("Balance")));
         }
 
         Assert.Equal(1, DataVoCompiledQuery.Update(db, update, args)); // the admin may write

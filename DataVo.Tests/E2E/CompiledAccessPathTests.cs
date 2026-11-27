@@ -10,6 +10,10 @@ namespace DataVo.Tests.E2E;
 
 public class CompiledAccessPathTests
 {
+    // Typed per-row allocation of the streaming projected read: measured 80 B/row (the projected string and the result
+    // record), plus headroom.
+    private const double StreamingTypedPerRowCeilingBytes = 128;
+
     private readonly ITestOutputHelper _output;
 
     public CompiledAccessPathTests(ITestOutputHelper output) => _output = output;
@@ -234,9 +238,9 @@ public class CompiledAccessPathTests
     }
 
     private static PlayerProjection? QuerySingleByName(DataVoContext context, DataVoCompiledQueryPlan plan, string name)
-        => DataVoCompiledQuery.SelectSingle(
+        => DataVoCompiledQuery.SelectSingleTyped(
             context, plan, [new DataVoCompiledQueryParameter("name", name)],
-            static row => new PlayerProjection((int)row["Id"]!, (string)row["Name"]!, (int)row["Level"]!));
+            static row => new PlayerProjection(row.GetInt32("Id"), row.GetString("Name")!, row.GetInt32("Level")));
 
     public sealed record Hit(int Id, string Name, double Score);
 
@@ -273,13 +277,13 @@ public class CompiledAccessPathTests
         IReadOnlyList<Hit> typed = DataVoCompiledQuery.SelectManyTyped<Hit>(
             context, plan, [new DataVoCompiledQueryParameter("name", "Ada")], MapHit);
 
-        IReadOnlyList<Hit> dict = DataVoCompiledQuery.SelectMany<Hit>(
+        IReadOnlyList<Hit> runtimeResolved = DataVoCompiledQuery.SelectManyTyped<Hit>(
             context,
             DataVoCompiledQueryPlan.SelectMany("Hits", ["Id", "Name", "Score"], "Name", "name"),
             [new DataVoCompiledQueryParameter("name", "Ada")],
-            static row => new Hit((int)row["Id"]!, (string)row["Name"]!, (double)row["Score"]!));
+            static row => new Hit(row.GetInt32("Id"), row.GetString("Name")!, row.GetDouble("Score")));
 
-        Assert.Equal(dict.OrderBy(h => h.Id), typed.OrderBy(h => h.Id));
+        Assert.Equal(runtimeResolved.OrderBy(h => h.Id), typed.OrderBy(h => h.Id));
         Assert.Equal(new[] { new Hit(1, "Ada", 1.5), new Hit(3, "Ada", 3.5) }, typed.OrderBy(h => h.Id));
     }
 
@@ -419,16 +423,13 @@ public class CompiledAccessPathTests
     }
 
     [Fact]
-    public void SelectManyTyped_ReclaimsMaterializationLayer_ScalingWithColumnCount()
+    public void SelectManyTyped_PerRowCost_DoesNotGrowWithUnprojectedColumns()
     {
         const int iterations = 2_000;
         using var context = CreateContext();
 
-        // Narrow (3 cols) and wide (8 cols) tables, both with the SAME narrow 3-column projection. The dict
-        // path materializes the full row and boxes every cell, so its reclaimable cost grows with total
-        // columns; the typed path reads only the 3 projected columns. Reclaim therefore scales with column
-        // count — proving the win is exactly the materialization + boxing layer. The shared row-fetch plumbing
-        // remains in BOTH paths (the next track), so this test deliberately does NOT assert near-zero.
+        // Narrow (3 cols) and wide (8 cols) tables, both read with the SAME 3-column projection. Projection pushdown
+        // decodes only the projected cells, so the five extra unprojected columns must add (almost) nothing per row.
         context.Execute("CREATE TABLE Narrow (Id INT PRIMARY KEY, Tag VARCHAR(20), Score FLOAT)");
         context.Execute("CREATE TABLE Wide (Id INT PRIMARY KEY, Tag VARCHAR(20), Score FLOAT, C1 VARCHAR(20), C2 VARCHAR(20), C3 VARCHAR(20), C4 VARCHAR(20), C5 VARCHAR(20))");
 
@@ -450,40 +451,26 @@ public class CompiledAccessPathTests
         context.Execute("CREATE INDEX ix_narrow_tag ON Narrow (Tag)");
         context.Execute("CREATE INDEX ix_wide_tag ON Wide (Tag)");
 
-        double narrowReclaim = MaterializationReclaimPerRow(context, "Narrow", "ix_narrow_tag", iterations);
-        double wideReclaim = MaterializationReclaimPerRow(context, "Wide", "ix_wide_tag", iterations);
+        double narrow = TypedPerRow(context, "Narrow", "ix_narrow_tag", iterations);
+        double wide = TypedPerRow(context, "Wide", "ix_wide_tag", iterations);
+        _output.WriteLine($"narrow (3 col) typed : {narrow:F0} B/row");
+        _output.WriteLine($"wide   (8 col) typed : {wide:F0} B/row");
 
-        _output.WriteLine($"narrow (3 col) reclaim : {narrowReclaim:F0} B/row");
-        _output.WriteLine($"wide   (8 col) reclaim : {wideReclaim:F0} B/row");
-
-        Assert.True(narrowReclaim > 0, $"Typed must allocate strictly less than dict (narrow); reclaim={narrowReclaim:F0}.");
-        Assert.True(
-            wideReclaim > narrowReclaim,
-            $"Reclaim must scale with column count (it is the materialization+boxing layer); narrow={narrowReclaim:F0}, wide={wideReclaim:F0}.");
+        Assert.True(wide - narrow <= 32, $"Unprojected columns must not be materialized; narrow={narrow:F0}, wide={wide:F0}.");
     }
 
-    // Per-row bytes the dict path allocates that the typed path does not — i.e. the materialization + boxing
-    // layer reclaimed by typed projection. Both paths share the row-fetch plumbing, which cancels in the diff.
-    private double MaterializationReclaimPerRow(DataVoContext context, string table, string indexName, int iterations)
+    // Per-row bytes of a typed 3-column projection (the slope between a 1-row and an 8-row lookup).
+    private static double TypedPerRow(DataVoContext context, string table, string indexName, int iterations)
     {
-        var typedPlan = DataVoCompiledQueryPlan.SelectMany(
-            table, ["Id", "Tag", "Score"], "Tag", "tag",
-            accessPath: CompiledAccessPath.SingleColumnIndex, resolvedIndexName: indexName);
-        var dictPlan = DataVoCompiledQueryPlan.SelectMany(
+        var plan = DataVoCompiledQueryPlan.SelectMany(
             table, ["Id", "Tag", "Score"], "Tag", "tag",
             accessPath: CompiledAccessPath.SingleColumnIndex, resolvedIndexName: indexName);
 
         IReadOnlyList<Hit> Typed(string tag)
-            => DataVoCompiledQuery.SelectManyTyped<Hit>(context, typedPlan, [new DataVoCompiledQueryParameter("tag", tag)],
+            => DataVoCompiledQuery.SelectManyTyped<Hit>(context, plan, [new DataVoCompiledQueryParameter("tag", tag)],
                 static r => new Hit(r.GetInt32("Id"), r.GetString("Tag")!, r.GetDouble("Score")));
-        IReadOnlyList<Hit> Dict(string tag)
-            => DataVoCompiledQuery.SelectMany<Hit>(context, dictPlan, [new DataVoCompiledQueryParameter("tag", tag)],
-                static row => new Hit((int)row["Id"]!, (string)row["Tag"]!, (double)row["Score"]!));
 
-        double typedPerRow = PerRow(() => Typed("m1"), () => Typed("m8"), iterations);
-        double dictPerRow = PerRow(() => Dict("m1"), () => Dict("m8"), iterations);
-        _output.WriteLine($"{table}: typed={typedPerRow:F0} B/row, dict={dictPerRow:F0} B/row");
-        return dictPerRow - typedPerRow;
+        return PerRow(() => Typed("m1"), () => Typed("m8"), iterations);
     }
 
     private static double PerRow(Func<object> at1, Func<object> at8, int iterations)
@@ -585,7 +572,7 @@ public class CompiledAccessPathTests
         SeedHits(context);
         context.Execute("CREATE INDEX ix_hits_name ON Hits (Name)");
 
-        // A read snapshot in an open transaction sees the committed rows; typed (streaming) must match dict.
+        // A read snapshot in an open transaction sees the committed rows; the index path must match the runtime-resolved path.
         context.Execute("BEGIN TRANSACTION");
         try
         {
@@ -596,13 +583,13 @@ public class CompiledAccessPathTests
                 [new DataVoCompiledQueryParameter("name", "Ada")],
                 MapHit);
 
-            IReadOnlyList<Hit> dict = DataVoCompiledQuery.SelectMany<Hit>(
+            IReadOnlyList<Hit> runtimeResolved = DataVoCompiledQuery.SelectManyTyped<Hit>(
                 context,
                 DataVoCompiledQueryPlan.SelectMany("Hits", ["Id", "Name", "Score"], "Name", "name"),
                 [new DataVoCompiledQueryParameter("name", "Ada")],
-                static row => new Hit((int)row["Id"]!, (string)row["Name"]!, (double)row["Score"]!));
+                static row => new Hit(row.GetInt32("Id"), row.GetString("Name")!, row.GetDouble("Score")));
 
-            Assert.Equal(dict.OrderBy(h => h.Id), typed.OrderBy(h => h.Id));
+            Assert.Equal(runtimeResolved.OrderBy(h => h.Id), typed.OrderBy(h => h.Id));
         }
         finally
         {
@@ -638,24 +625,14 @@ public class CompiledAccessPathTests
         IReadOnlyList<Hit> Typed(string tag)
             => DataVoCompiledQuery.SelectManyTyped<Hit>(context, plan, [new DataVoCompiledQueryParameter("tag", tag)],
                 static r => new Hit(r.GetInt32("Id"), r.GetString("Tag")!, r.GetDouble("Score")));
-        IReadOnlyList<Hit> Dict(string tag)
-            => DataVoCompiledQuery.SelectMany<Hit>(context, plan, [new DataVoCompiledQueryParameter("tag", tag)],
-                static row => new Hit((int)row["Id"]!, (string)row["Tag"]!, (double)row["Score"]!));
-
         double typedPerRow = PerRow(() => Typed("m1"), () => Typed("m8"), iterations);
-        double dictPerRow = PerRow(() => Dict("m1"), () => Dict("m8"), iterations);
-
         _output.WriteLine($"streaming typed per-row : {typedPerRow:F0} B/row");
-        _output.WriteLine($"dict           per-row : {dictPerRow:F0} B/row");
-        _output.WriteLine($"reclaimed (deserialization slice) : {dictPerRow - typedPerRow:F0} B/row");
 
-        // Projection pushdown eliminates the per-row deserialization slice (full-row decode + boxing + StoredRow
-        // + dict). The residual typed cost is the index-lookup phase (FilterUsingIndex) + per-row MVCC + the
-        // projected string + the result record — separate phases this feature did not target. The honest,
-        // robust proof is that typed reclaims the large deserialization slice vs the dict path.
+        // Projection pushdown leaves only the index-lookup phase, per-row MVCC, the projected string and the result
+        // record; the full-row decode (~1,456 B/row before pushdown) must stay gone.
         Assert.True(
-            dictPerRow - typedPerRow > 1_000,
-            $"Expected >1,000 B/row reclaimed (deserialization eliminated); typed={typedPerRow:F0}, dict={dictPerRow:F0}.");
+            typedPerRow <= StreamingTypedPerRowCeilingBytes,
+            $"Typed per-row allocation regressed: {typedPerRow:F0} B/row (ceiling {StreamingTypedPerRowCeilingBytes}).");
     }
 
     private sealed class ThrowingIndex : IIndex
@@ -672,11 +649,11 @@ public class CompiledAccessPathTests
         DataVoCompiledQueryPlan plan,
         string name)
     {
-        return DataVoCompiledQuery.SelectMany(
+        return DataVoCompiledQuery.SelectManyTyped(
             context,
             plan,
             [new DataVoCompiledQueryParameter("name", name)],
-            static row => new PlayerProjection((int)row["Id"]!, (string)row["Name"]!, (int)row["Level"]!));
+            static row => new PlayerProjection(row.GetInt32("Id"), row.GetString("Name")!, row.GetInt32("Level")));
     }
 
     private static void SeedPlayers(DataVoContext context)

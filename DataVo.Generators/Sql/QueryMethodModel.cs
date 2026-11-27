@@ -24,8 +24,7 @@ internal enum QueryExecutionShape
 /// <param name="SqlParameters">The SQL parameter names, in binding order.</param>
 /// <param name="MethodArguments">The method parameters bound to <paramref name="SqlParameters"/>, in the same order.</param>
 /// <param name="RowType">The fully qualified row type of a SELECT; null otherwise.</param>
-/// <param name="TypedGetters">The <c>CompiledRowReader</c> getter per constructor argument, when every argument has one.</param>
-/// <param name="DictionaryArguments">The constructor arguments read from a result dictionary (the fallback mapper).</param>
+/// <param name="TypedGetters">The <c>CompiledRowReader</c> read per constructor argument of a SELECT's row type.</param>
 internal sealed record QueryMethodModel(
     string HintName,
     string? Namespace,
@@ -45,12 +44,7 @@ internal sealed record QueryMethodModel(
     EquatableArray<string> SqlParameters,
     EquatableArray<string> MethodArguments,
     string? RowType,
-    EquatableArray<string> TypedGetters,
-    EquatableArray<string> DictionaryArguments)
-{
-    /// <summary>Gets whether every constructor argument has a typed getter.</summary>
-    public bool HasTypedGetters => RowType is not null && TypedGetters.Count > 0;
-}
+    EquatableArray<string> TypedGetters);
 
 /// <summary>The outcome of inspecting one method: a model to emit, or a diagnostic.</summary>
 internal sealed record QueryMethodInspection(QueryMethodModel? Model, DiagnosticInfo? Diagnostic);

@@ -44,11 +44,11 @@ public class CompiledQueryRuntimeTests
             whereColumn: "Id",
             parameterName: "id");
 
-        PlayerProjection? player = DataVoCompiledQuery.SelectSingle(
+        PlayerProjection? player = DataVoCompiledQuery.SelectSingleTyped(
             context,
             plan,
             [new DataVoCompiledQueryParameter("id", 1)],
-            static row => new PlayerProjection((int)row["Id"]!, (string)row["Name"]!, (int)row["Level"]!));
+            static row => new PlayerProjection(row.GetInt32("Id"), row.GetString("Name")!, row.GetInt32("Level")));
 
         Assert.Equal(new PlayerProjection(1, "Ada", 5), player);
     }
@@ -66,7 +66,7 @@ public class CompiledQueryRuntimeTests
                 new Dictionary<string, object?> { ["Id"] = 3, ["Name"] = "Ada", ["Level"] = 9 }
             ]);
 
-        IReadOnlyList<PlayerProjection> players = DataVoCompiledQuery.SelectMany(
+        IReadOnlyList<PlayerProjection> players = DataVoCompiledQuery.SelectManyTyped(
             context,
             DataVoCompiledQueryPlan.SelectMany(
                 tableName: "Players",
@@ -74,7 +74,7 @@ public class CompiledQueryRuntimeTests
                 whereColumn: "Name",
                 parameterName: "name"),
             [new DataVoCompiledQueryParameter("name", "Ada")],
-            static row => new PlayerProjection((int)row["Id"]!, (string)row["Name"]!, (int)row["Level"]!));
+            static row => new PlayerProjection(row.GetInt32("Id"), row.GetString("Name")!, row.GetInt32("Level")));
 
         Assert.Equal(
             [new PlayerProjection(1, "Ada", 5), new PlayerProjection(3, "Ada", 9)],
@@ -93,7 +93,7 @@ public class CompiledQueryRuntimeTests
                 new Dictionary<string, object?> { ["Id"] = 2, ["Name"] = "1", ["Level"] = 8 }
             ]);
 
-        IReadOnlyList<PlayerProjection> players = DataVoCompiledQuery.SelectMany(
+        IReadOnlyList<PlayerProjection> players = DataVoCompiledQuery.SelectManyTyped(
             context,
             DataVoCompiledQueryPlan.SelectMany(
                 tableName: "Players",
@@ -101,7 +101,7 @@ public class CompiledQueryRuntimeTests
                 whereColumn: "Name",
                 parameterName: "name"),
             [new DataVoCompiledQueryParameter("name", "1")],
-            static row => new PlayerProjection((int)row["Id"]!, (string)row["Name"]!, (int)row["Level"]!));
+            static row => new PlayerProjection(row.GetInt32("Id"), row.GetString("Name")!, row.GetInt32("Level")));
 
         Assert.Equal(
             [new PlayerProjection(2, "1", 8)],
@@ -127,7 +127,7 @@ public class CompiledQueryRuntimeTests
         ReplaceIndexWithThrowingIndex(context, "Players", "ix_players_name");
 
         InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() =>
-            DataVoCompiledQuery.SelectMany(
+            DataVoCompiledQuery.SelectManyTyped(
                 context,
                 DataVoCompiledQueryPlan.SelectMany(
                     tableName: "Players",
@@ -135,7 +135,7 @@ public class CompiledQueryRuntimeTests
                     whereColumn: "Name",
                     parameterName: "name"),
                 [new DataVoCompiledQueryParameter("name", "Ada")],
-                static row => new PlayerProjection((int)row["Id"]!, (string)row["Name"]!, (int)row["Level"]!)));
+                static row => new PlayerProjection(row.GetInt32("Id"), row.GetString("Name")!, row.GetInt32("Level"))));
 
         Assert.Equal("boom", ex.Message);
     }
@@ -154,7 +154,7 @@ public class CompiledQueryRuntimeTests
             ]);
         context.Execute("CREATE INDEX ix_players_name ON Players (Name)");
 
-        IReadOnlyList<PlayerProjection> players = DataVoCompiledQuery.SelectMany(
+        IReadOnlyList<PlayerProjection> players = DataVoCompiledQuery.SelectManyTyped(
             context,
             DataVoCompiledQueryPlan.SelectMany(
                 tableName: "Players",
@@ -162,7 +162,7 @@ public class CompiledQueryRuntimeTests
                 whereColumn: "Name",
                 parameterName: "name"),
             [new DataVoCompiledQueryParameter("name", "Ada")],
-            static row => new PlayerProjection((int)row["Id"]!, (string)row["Name"]!, (int)row["Level"]!));
+            static row => new PlayerProjection(row.GetInt32("Id"), row.GetString("Name")!, row.GetInt32("Level")));
 
         // Index lookup returns the same rows the equivalent unindexed scan returns
         // (CompiledSelectMany_ByNonPrimaryKeyColumn_FallsBackToScanAndReturnsTypedResults), order-independent.
@@ -183,7 +183,7 @@ public class CompiledQueryRuntimeTests
             ]);
         context.Execute("CREATE INDEX ix_players_name ON Players (Name)");
 
-        IReadOnlyList<PlayerProjection> players = DataVoCompiledQuery.SelectMany(
+        IReadOnlyList<PlayerProjection> players = DataVoCompiledQuery.SelectManyTyped(
             context,
             DataVoCompiledQueryPlan.SelectMany(
                 tableName: "Players",
@@ -191,7 +191,7 @@ public class CompiledQueryRuntimeTests
                 whereColumn: "Name",
                 parameterName: "name"),
             [new DataVoCompiledQueryParameter("name", "Nobody")],
-            static row => new PlayerProjection((int)row["Id"]!, (string)row["Name"]!, (int)row["Level"]!));
+            static row => new PlayerProjection(row.GetInt32("Id"), row.GetString("Name")!, row.GetInt32("Level")));
 
         Assert.Empty(players);
     }
@@ -208,7 +208,7 @@ public class CompiledQueryRuntimeTests
             ]);
         context.Engine.IndexManager.DropIndex("_PK_Players", "Players", CurrentDatabase(context));
 
-        PlayerProjection? player = DataVoCompiledQuery.SelectSingle(
+        PlayerProjection? player = DataVoCompiledQuery.SelectSingleTyped(
             context,
             DataVoCompiledQueryPlan.SelectSingle(
                 tableName: "Players",
@@ -216,7 +216,7 @@ public class CompiledQueryRuntimeTests
                 whereColumn: "Id",
                 parameterName: "id"),
             [new DataVoCompiledQueryParameter("id", 1)],
-            static row => new PlayerProjection((int)row["Id"]!, (string)row["Name"]!, (int)row["Level"]!));
+            static row => new PlayerProjection(row.GetInt32("Id"), row.GetString("Name")!, row.GetInt32("Level")));
 
         Assert.Equal(new PlayerProjection(1, "Ada", 5), player);
     }
@@ -224,8 +224,10 @@ public class CompiledQueryRuntimeTests
     [Fact]
     public void CompiledSelectSingle_UnexpectedIndexFailure_IsNotSwallowed()
     {
+        // A text primary key is resolved through the primary-key index (integer keys use a separate fast lane), so the
+        // injected index failure is on the read path and must surface unchanged.
         using var context = CreateContext();
-        context.Execute("CREATE TABLE Players (Id INT PRIMARY KEY, Name VARCHAR(50), Level INT)");
+        context.Execute("CREATE TABLE Players (Name VARCHAR(50) PRIMARY KEY, Id INT, Level INT)");
         context.BulkInsert(
             "Players",
             [
@@ -234,15 +236,15 @@ public class CompiledQueryRuntimeTests
         ReplacePrimaryKeyIndexWithThrowingIndex(context, "Players");
 
         InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() =>
-            DataVoCompiledQuery.SelectSingle(
+            DataVoCompiledQuery.SelectSingleTyped(
                 context,
                 DataVoCompiledQueryPlan.SelectSingle(
                     tableName: "Players",
                     projectedColumns: ["Id", "Name", "Level"],
-                    whereColumn: "Id",
-                    parameterName: "id"),
-                [new DataVoCompiledQueryParameter("id", 1)],
-                static row => new PlayerProjection((int)row["Id"]!, (string)row["Name"]!, (int)row["Level"]!)));
+                    whereColumn: "Name",
+                    parameterName: "name"),
+                [new DataVoCompiledQueryParameter("name", "Ada")],
+                static row => new PlayerProjection(row.GetInt32("Id"), row.GetString("Name")!, row.GetInt32("Level"))));
 
         Assert.Equal("boom", ex.Message);
     }

@@ -60,8 +60,6 @@ public sealed class CompiledQueryReadAllocationSpikeTests
         bool[] cachedIsProjected = [true, true, true, true];
         var cachedProjectedSchema = new ReactiveRowSchema("Id", "Name", "Value", "Score");
         var cachedProjectionBuffer = new CellValue[4];
-        var runtimeParameterBuffer = new DataVoCompiledQueryParameter[1];
-        var taggedParameterBuffer = new DataVoCompiledQueryParameter[1];
         var typedRuntimeParameterBuffer = new DataVoCompiledQueryParameter[1];
         var typedTaggedParameterBuffer = new DataVoCompiledQueryParameter[1];
 
@@ -90,26 +88,6 @@ public sealed class CompiledQueryReadAllocationSpikeTests
             cachedIsProjected,
             cachedProjectedSchema,
             cachedProjectionBuffer));
-        AllocationSample selectSingleRuntime = Measure(id => DataVoCompiledQuery.SelectSingle(
-            context,
-            RuntimePlan,
-            [new DataVoCompiledQueryParameter("id", id)],
-            MapDictionary));
-        AllocationSample selectSingleTagged = Measure(id => DataVoCompiledQuery.SelectSingle(
-            context,
-            TaggedPrimaryKeyPlan,
-            [new DataVoCompiledQueryParameter("id", id)],
-            MapDictionary));
-        AllocationSample selectSingleRuntimeReusedParameterArray = Measure(id =>
-        {
-            runtimeParameterBuffer[0] = new DataVoCompiledQueryParameter("id", id);
-            return DataVoCompiledQuery.SelectSingle(context, RuntimePlan, runtimeParameterBuffer, MapDictionary);
-        });
-        AllocationSample selectSingleTaggedReusedParameterArray = Measure(id =>
-        {
-            taggedParameterBuffer[0] = new DataVoCompiledQueryParameter("id", id);
-            return DataVoCompiledQuery.SelectSingle(context, TaggedPrimaryKeyPlan, taggedParameterBuffer, MapDictionary);
-        });
         AllocationSample typedRuntime = Measure(id => DataVoCompiledQuery.SelectSingleTyped(
             context,
             RuntimePlan,
@@ -141,10 +119,6 @@ public sealed class CompiledQueryReadAllocationSpikeTests
             Format("legacy post-storage materialize+project+map", legacyPostStorage),
             Format("typed post-index fresh projection setup", typedPostIndexFreshSetup),
             Format("typed post-index cached projection setup", typedPostIndexCachedSetup),
-            Format("SelectSingle runtime legacy dictionary", selectSingleRuntime),
-            Format("SelectSingle tagged legacy dictionary", selectSingleTagged),
-            Format("SelectSingle runtime reused parameter array", selectSingleRuntimeReusedParameterArray),
-            Format("SelectSingle tagged reused parameter array", selectSingleTaggedReusedParameterArray),
             Format("SelectSingleTyped runtime", typedRuntime),
             Format("SelectSingleTyped tagged", typedTagged),
             Format("SelectSingleTyped runtime reused parameter array", typedRuntimeReusedParameterArray),

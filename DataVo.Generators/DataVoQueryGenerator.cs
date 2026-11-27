@@ -121,7 +121,6 @@ public sealed class DataVoQueryGenerator : IIncrementalGenerator
         cancellationToken.ThrowIfCancellationRequested();
         string? rowType = null;
         string[] typedGetters = [];
-        string[] dictionaryArguments = [];
         if (shape is QueryExecutionShape.SelectSingle or QueryExecutionShape.SelectMany)
         {
             var row = (INamedTypeSymbol)GetSelectRowType(method)!;
@@ -131,10 +130,7 @@ public sealed class DataVoQueryGenerator : IIncrementalGenerator
             }
 
             rowType = row.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
-            dictionaryArguments = [.. arguments.Select((argument, i) =>
-                $"({argument.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)})row[\"{columns[i]}\"]!")];
-            string?[] getters = [.. arguments.Select((argument, i) => TypedGetter(argument.Type, columns[i]))];
-            typedGetters = getters.All(static getter => getter is not null) ? [.. getters.Select(static getter => getter!)] : [];
+            typedGetters = [.. arguments.Select((argument, i) => TypedGetter(argument.Type, columns[i]))];
         }
 
         var model = new QueryMethodModel(
@@ -156,8 +152,7 @@ public sealed class DataVoQueryGenerator : IIncrementalGenerator
             Equatable(sqlParameters),
             Equatable(methodArguments),
             rowType,
-            Equatable(typedGetters),
-            Equatable(dictionaryArguments));
+            Equatable(typedGetters));
         return new QueryMethodInspection(model, null);
     }
 
@@ -278,7 +273,15 @@ public sealed class DataVoQueryGenerator : IIncrementalGenerator
         return false;
     }
 
-    private static string? TypedGetter(ITypeSymbol type, string column)
+    /// <summary>
+    /// The <c>CompiledRowReader</c> read for one constructor argument: a typed getter where one exists, otherwise the
+    /// boxed <c>GetValue</c> cast to the parameter's type.
+    /// </summary>
+    private static string TypedGetter(ITypeSymbol type, string column) =>
+        SpecificGetter(type, column)
+        ?? $"({type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)})reader.GetValue(\"{column}\")!";
+
+    private static string? SpecificGetter(ITypeSymbol type, string column)
     {
         if (type is INamedTypeSymbol nullable &&
             nullable.OriginalDefinition.SpecialType == SpecialType.System_Nullable_T &&
@@ -483,7 +486,7 @@ public sealed class DataVoQueryGenerator : IIncrementalGenerator
         builder.AppendLine($"{indent}private static readonly {Plan} {planName} = {EmitPlan(model, catalog)};");
 
         string invocation;
-        if (model.HasTypedGetters)
+        if (model.Shape is QueryExecutionShape.SelectSingle or QueryExecutionShape.SelectMany)
         {
             string mapName = $"__DataVoMap_{model.MemberSuffix}";
             string mapperName = $"__DataVoMapper_{model.MemberSuffix}";
@@ -494,13 +497,9 @@ public sealed class DataVoQueryGenerator : IIncrementalGenerator
         }
         else
         {
-            invocation = model.Shape switch
-            {
-                QueryExecutionShape.SelectSingle or QueryExecutionShape.SelectMany =>
-                    $"{Query}.{model.Shape}<{model.RowType}>({model.DbParameter}, {planName}, {EmitParameters(model)}, static row => new {model.RowType}({string.Join(", ", model.DictionaryArguments)}))",
-                QueryExecutionShape.Insert => $"{Query}.Insert({model.DbParameter}, {planName}, {EmitParameters(model)})",
-                _ => $"{Query}.Update({model.DbParameter}, {planName}, {EmitParameters(model)})",
-            };
+            invocation = model.Shape == QueryExecutionShape.Insert
+                ? $"{Query}.Insert({model.DbParameter}, {planName}, {EmitParameters(model)})"
+                : $"{Query}.Update({model.DbParameter}, {planName}, {EmitParameters(model)})";
         }
 
         builder.AppendLine($"{indent}[global::System.CodeDom.Compiler.GeneratedCode(\"DataVo.Generators\", \"{GeneratorInfo.Version}\")]");

@@ -210,19 +210,19 @@ public sealed class TransactionIndexedLookupTests : IDisposable
         Assert.Equal([(5, "C005_UPD", 555)], preparedManyByCode.Execute("C005_UPD"));
         Assert.Equal([(90, "C090", 900)], preparedManyByCode.Execute("C090"));
 
-        // Dictionary-mapped DataVoCompiledQuery.SelectSingle and SelectMany also observe transaction overlay.
-        (int Id, int Balance) dictHit = DataVoCompiledQuery.SelectSingle(
+        // Typed DataVoCompiledQuery.SelectSingleTyped and SelectManyTyped also observe transaction overlay.
+        (int Id, int Balance) dictHit = DataVoCompiledQuery.SelectSingleTyped(
             db,
             singleByIdPlan,
             [new DataVoCompiledQueryParameter("id", 90)],
-            static row => ((int)row["Id"]!, (int)row["Balance"]!));
+            static row => (row.GetInt32("Id"), row.GetInt32("Balance")));
         Assert.Equal((90, 900), dictHit);
 
-        IReadOnlyList<(int Id, int Balance)> dictDeleted = DataVoCompiledQuery.SelectMany(
+        IReadOnlyList<(int Id, int Balance)> dictDeleted = DataVoCompiledQuery.SelectManyTyped(
             db,
             manyByCodePlan,
             [new DataVoCompiledQueryParameter("code", "C006")],
-            static row => ((int)row["Id"]!, (int)row["Balance"]!));
+            static row => (row.GetInt32("Id"), row.GetInt32("Balance")));
         Assert.Empty(dictDeleted);
 
         Run(db, "COMMIT");

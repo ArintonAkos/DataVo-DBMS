@@ -17,6 +17,12 @@ public readonly ref partial struct CompiledRowReader
 
     internal CompiledRowReader(StoredRowView view) => _view = view;
 
+    /// <summary>
+    /// Reads a column as a boxed value (<c>null</c> for SQL NULL; a VECTOR is copied). Generated mappers use it only
+    /// for constructor parameter types that have no typed getter.
+    /// </summary>
+    public object? GetValue(string column) => _view[column].ToObject();
+
     /// <summary>Whether the named column holds SQL NULL.</summary>
     public bool IsNull(string column) => _view[column].IsNull;
 

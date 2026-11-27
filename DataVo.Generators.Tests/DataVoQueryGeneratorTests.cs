@@ -322,8 +322,8 @@ public class DataVoQueryGeneratorTests
     [Fact]
     public void Generator_PositionalCtorWithUnsupportedType_CastsByParameterType()
     {
-        // A parameter type without a typed getter falls back to the dictionary mapper, cast to the parameter's type
-        // (previously a column named Score was cast to string).
+        // A parameter type without a typed getter reads the boxed cell through CompiledRowReader.GetValue and casts it to
+        // the parameter's type; the other arguments keep their typed getters (no dictionary mapper exists any more).
         string source = """
             using System.Collections.Generic;
             using DataVo.Core;
@@ -340,12 +340,11 @@ public class DataVoQueryGeneratorTests
 
         string generated = Assert.Single(RunGenerator(source).Results.Single().GeneratedSources).SourceText.ToString();
 
-        Assert.Contains("DataVoCompiledQuery.SelectMany<global::Scored>", generated);
-        Assert.Contains("(long)row[\"PlayerId\"]!", generated);
-        Assert.Contains("(object)row[\"Payload\"]!", generated);
-        Assert.Contains("(double)row[\"Score\"]!", generated);
-        Assert.DoesNotContain("(int)row", generated);
-        Assert.DoesNotContain("(string)row", generated);
+        Assert.Contains("DataVoCompiledQuery.SelectManyTyped<global::Scored>", generated);
+        Assert.Contains("reader.GetInt64(\"PlayerId\")", generated);
+        Assert.Contains("(object)reader.GetValue(\"Payload\")!", generated);
+        Assert.Contains("reader.GetDouble(\"Score\")", generated);
+        Assert.DoesNotContain("row[", generated);
     }
 
     [Fact]
