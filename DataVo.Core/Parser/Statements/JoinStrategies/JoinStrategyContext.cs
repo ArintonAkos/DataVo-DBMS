@@ -3,6 +3,7 @@ using DataVo.Core.Exceptions;
 using DataVo.Core.Parser.Types;
 using DataVo.Core.Services;
 using DataVo.Core.Models.Statement.Utils;
+using DataVo.Core.Utils;
 
 namespace DataVo.Core.Parser.Statements.JoinStrategies;
 
@@ -128,5 +129,94 @@ public class JoinStrategyContext
         dict[rightTable] = TableService.GetNullRowForTable(rightTable);
         
         return new JoinedRow(dict);
+    }
+
+    /// <summary>
+    /// Indexes non-null right-table rows by join key for hash-join probing.
+    /// </summary>
+    /// <param name="rightTableData">The right-hand table records.</param>
+    /// <param name="rightColumn">The join column name on the right-hand table.</param>
+    /// <returns>A lookup table grouping right-hand records by their join key value.</returns>
+    internal static JoinLookupTable BuildRightLookup(TableData rightTableData, string rightColumn)
+    {
+        JoinLookupTable lookup = [];
+
+        foreach (var rightRowEntry in rightTableData)
+        {
+            if (!rightRowEntry.Value.ContainsKey(rightColumn))
+            {
+                continue;
+            }
+
+            object? keyValue = rightRowEntry.Value[rightColumn];
+            if (keyValue == null)
+            {
+                continue;
+            }
+
+            lookup.AddRecord(keyValue, rightRowEntry.Value);
+        }
+
+        return lookup;
+    }
+
+    /// <summary>
+    /// Appends null-padded joined rows for every right-table row that did not match any left-side row.
+    /// Shared by <c>RIGHT JOIN</c> and <c>FULL OUTER JOIN</c>.
+    /// </summary>
+    /// <param name="leftRows">The accumulated left-side rows, used to infer left-side table keys when non-empty.</param>
+    /// <param name="rightTableData">All candidate rows from the right-hand table.</param>
+    /// <param name="leftTable">The primary left table name for empty-left fallback padding.</param>
+    /// <param name="rightTable">The right-hand table name.</param>
+    /// <param name="matchedRightKeys">The set of right-hand row keys already matched during join execution.</param>
+    /// <param name="result">The target joined result table to append unmatched right rows into.</param>
+    internal void ProcessUnmatchedRightRows(
+        HashedTable leftRows,
+        TableData rightTableData,
+        string leftTable,
+        string rightTable,
+        HashSet<RowKey> matchedRightKeys,
+        HashedTable result)
+    {
+        if (matchedRightKeys.Count >= rightTableData.Count)
+        {
+            return;
+        }
+
+        JoinedRow? existingLeftRow = leftRows.FirstOrDefault().Value;
+
+        foreach (var rightTableRow in rightTableData)
+        {
+            if (!matchedRightKeys.Contains(rightTableRow.Key))
+            {
+                var dict = new Dictionary<string, Row>();
+
+                if (existingLeftRow != null)
+                {
+                    foreach (var key in existingLeftRow.Keys)
+                    {
+                        dict[key] = TableService.GetNullRowForTable(key);
+                    }
+                }
+                else
+                {
+                    dict[leftTable] = TableService.GetNullRowForTable(leftTable);
+
+                    foreach (var joinTableDetail in JoinModel.JoinTableDetails.Values)
+                    {
+                        if (joinTableDetail.TableName != rightTable)
+                        {
+                            dict[joinTableDetail.TableName] = TableService.GetNullRowForTable(joinTableDetail.TableName);
+                        }
+                    }
+                }
+
+                dict[rightTable] = rightTableRow.Value.ToRow();
+                JoinedRow nullPaddedRow = new(dict);
+
+                JoinedRowId hash = BuildUnmatchedRightHash(rightTableRow.Key);
+                result.Add(hash, nullPaddedRow);
+            }
+        }
     }
 }

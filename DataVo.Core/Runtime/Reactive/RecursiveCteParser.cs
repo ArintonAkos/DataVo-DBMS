@@ -191,7 +191,7 @@ internal static class RecursiveCteParser
         var baseSourceColumns = new List<string>();
         foreach (SelectColumnNode column in baseSelect.Columns)
         {
-            if (!TryColumn(column.Expression, out _, out string source))
+            if (!ReactiveQueryParser.TryResolveColumn(column.Expression, out _, out string source))
             {
                 throw new NotSupportedException("Reactive recursive CTE base arm must project plain columns.");
             }
@@ -265,7 +265,7 @@ internal static class RecursiveCteParser
         var recursiveColumns = new List<RecursiveColumnSource>();
         foreach (SelectColumnNode column in recursiveSelect.Columns)
         {
-            if (!TryColumn(column.Expression, out string? qualifier, out string source) || qualifier is null)
+            if (!ReactiveQueryParser.TryResolveColumn(column.Expression, out string? qualifier, out string source) || qualifier is null)
             {
                 throw new NotSupportedException("Reactive recursive CTE recursive arm must project qualified plain columns (e.g. r.Src, e.Dst).");
             }
@@ -347,25 +347,6 @@ internal static class RecursiveCteParser
         return qualifier is not null
             && (qualifier.Equals(alias, StringComparison.OrdinalIgnoreCase)
                 || qualifier.Equals(table, StringComparison.OrdinalIgnoreCase));
-    }
-
-    private static bool TryColumn(ExpressionNode? expression, out string? qualifier, out string column)
-    {
-        qualifier = null;
-        column = string.Empty;
-        switch (expression)
-        {
-            case ColumnRefNode columnRef:
-                qualifier = string.IsNullOrWhiteSpace(columnRef.TableOrAlias) ? null : columnRef.TableOrAlias;
-                column = columnRef.Column;
-                return true;
-            case ResolvedColumnRefNode resolved:
-                qualifier = string.IsNullOrWhiteSpace(resolved.TableName) ? null : resolved.TableName;
-                column = resolved.Column;
-                return true;
-            default:
-                return false;
-        }
     }
 
     private static SelectStatement ParseSelect(List<SqlToken> tokens, string context)

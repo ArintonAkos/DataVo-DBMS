@@ -1,3 +1,4 @@
+using DataVo.Core.Contracts.Results;
 using DataVo.Core.StorageEngine.Config;
 
 namespace DataVo.Core.Runtime.Diagnostics;
@@ -68,6 +69,65 @@ internal sealed class RuntimeQueryStatsBuilder
     {
         IsError = true;
         ErrorMessage = message;
+    }
+
+    /// <summary>
+    /// Infers the uppercase leading SQL operation keyword from a raw statement string.
+    /// </summary>
+    /// <param name="sql">The raw SQL query text.</param>
+    /// <returns>The leading SQL verb in uppercase, or <c>"UNKNOWN"</c> when the input is blank.</returns>
+    public static string InferOperation(string sql)
+    {
+        string trimmed = sql.TrimStart();
+        if (trimmed.Length == 0)
+        {
+            return "UNKNOWN";
+        }
+
+        int end = 0;
+        while (end < trimmed.Length && !char.IsWhiteSpace(trimmed[end]) && trimmed[end] != ';')
+        {
+            end++;
+        }
+
+        return trimmed[..end].ToUpperInvariant();
+    }
+
+    /// <summary>
+    /// Aggregates row counts and error details from a completed <see cref="QueryResult"/> into this builder.
+    /// </summary>
+    /// <param name="result">The executed statement result.</param>
+    public void RecordResultMetrics(QueryResult result)
+    {
+        if (result.IsError)
+        {
+            RecordError(string.Join(" | ", result.Messages));
+        }
+
+        if (result.Data.Count > 0)
+        {
+            AddRowsReturned(result.Data.Count);
+        }
+
+        if (result.RowsAffected > 0)
+        {
+            AddRowsAffected(result.RowsAffected);
+        }
+
+        foreach (string message in result.Messages)
+        {
+            if (result.Data.Count == 0 && TryReadMessageCount(message, "Rows selected:", out int selected))
+            {
+                AddRowsReturned(selected);
+            }
+        }
+    }
+
+    private static bool TryReadMessageCount(string message, string prefix, out int count)
+    {
+        count = 0;
+        return message.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
+            && int.TryParse(message[prefix.Length..].Trim(), out count);
     }
 
     public RuntimeQueryStats Build(TimeSpan elapsed)

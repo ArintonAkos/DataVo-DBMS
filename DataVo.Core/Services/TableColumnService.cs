@@ -23,13 +23,6 @@ namespace DataVo.Core.Services
             return type is "float" or "double";
         }
 
-        public static bool IsBoolean(IColumn column)
-        {
-            string type = column.RawType().ToLower();
-
-            return (type == "bit");
-        }
-
         public static bool IsString(IColumn column)
         {
             string type = column.RawType().ToLower();

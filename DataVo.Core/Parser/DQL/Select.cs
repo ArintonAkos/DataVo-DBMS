@@ -773,7 +773,7 @@ internal partial class Select(SelectStatement ast) : BaseDbAction
         {
             if (rows.TryGetValue(rowId, out StoredRow? rowValues))
             {
-                seedRows[rowId] = new Record(rowId, MaterializeStoredRow(rowValues));
+                seedRows[rowId] = new Record(rowId, rowValues.ToDictionary());
             }
         }
 
@@ -1020,18 +1020,6 @@ internal partial class Select(SelectStatement ast) : BaseDbAction
         Logger.Info($"Planner(hybrid-route): {outcome}; requestedTopK={requestedTopK}; initialTopK={initialTopK}; seedSelectivity={selectivity:F3}");
     }
 
-    private static Dictionary<string, object?> MaterializeStoredRow(StoredRow row)
-    {
-        StoredRowView view = row.AsView();
-        var result = new Dictionary<string, object?>(view.Count, StringComparer.OrdinalIgnoreCase);
-        for (int i = 0; i < view.Count; i++)
-        {
-            result[view.Schema.ColumnAt(i)] = view[i].ToObject();
-        }
-
-        return result;
-    }
-
     private int EstimatePostFilterCandidateMatches(List<RowKey> candidateRowIds, string tableName, ExpressionNode whereExpression)
     {
         Dictionary<RowKey, StoredRow> rows = Context.GetTypedTableContents(candidateRowIds, tableName, _model.Database!);
@@ -1044,7 +1032,7 @@ internal partial class Select(SelectStatement ast) : BaseDbAction
                 continue;
             }
 
-            var joinedRow = new JoinedRow(_model.FromTable.TableName, new Row(MaterializeStoredRow(rowValues)));
+            var joinedRow = new JoinedRow(_model.FromTable.TableName, new Row(rowValues.ToDictionary()));
             if (EvaluatePredicate(whereExpression, joinedRow))
             {
                 count++;
@@ -1587,7 +1575,7 @@ internal partial class Select(SelectStatement ast) : BaseDbAction
             return new ListedTable([.. rowIds
                 .OrderBy(static id => id)
                 .Where(rows.ContainsKey)
-                .Select(id => new JoinedRow(tableName, new Row(MaterializeStoredRow(rows[id]))))]);
+                .Select(id => new JoinedRow(tableName, new Row(rows[id].ToDictionary())))]);
         }
 
         ListedTable source = _model.JoinStatement.ContainsJoin()

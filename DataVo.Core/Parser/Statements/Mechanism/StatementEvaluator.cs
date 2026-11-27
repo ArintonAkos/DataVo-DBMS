@@ -305,7 +305,9 @@ public class StatementEvaluator : ExpressionEvaluatorCore<HashedTable>
                 return false;
             }
 
-            double distance = cosine ? ComputeCosineDistance(queryVector, rowVector) : ComputeEuclideanDistance(queryVector, rowVector);
+            double distance = cosine
+                ? SimdDistanceKernels.CosineDistanceDouble(queryVector, rowVector)
+                : SimdDistanceKernels.EuclideanDistanceDouble(queryVector, rowVector);
             return EvaluateDistanceComparison(distance, threshold, comparisonOperator);
         });
     }
@@ -366,32 +368,6 @@ public class StatementEvaluator : ExpressionEvaluatorCore<HashedTable>
             Operators.GREATER_THAN_OR_EQUAL_TO => (left, right) => CompareDynamics(left, right) >= 0,
             Operators.LIKE => (left, right) => ExpressionValueComparer.MatchesLike(left, right, trimQuotedStrings: true),
             Operators.NOT_LIKE => (left, right) => ExpressionValueComparer.MatchesNotLike(left, right, trimQuotedStrings: true),
-            _ => throw new SecurityException("Invalid operator")
-        };
-    }
-
-    /// <summary>
-    /// Determines the truth value of a constant condition by evaluating the operator against the literal values.
-    /// </summary>
-    /// <param name="op">The specific relational operator to evaluate.</param>
-    /// <param name="leftVal">The left literal value to compare.</param>
-    /// <param name="rightVal">The right literal value to compare.</param>
-    /// <returns>True if the condition holds based on the operator and values; otherwise, false.</returns>
-    /// <exception cref="SecurityException">Thrown when an invalid operator is provided.</exception>
-    private static bool DetermineConstantCondition(string op, object? leftVal, object? rightVal)
-    {
-        return op switch
-        {
-            Operators.EQUALS => EvaluateEquality(leftVal, rightVal),
-            Operators.NOT_EQUALS => ExpressionValueComparer.SqlNotEquals(leftVal, rightVal, trimQuotedStrings: true),
-            Operators.LESS_THAN => CompareDynamics(leftVal, rightVal) < 0,
-            Operators.GREATER_THAN => CompareDynamics(leftVal, rightVal) > 0,
-            Operators.LESS_THAN_OR_EQUAL_TO => CompareDynamics(leftVal, rightVal) <= 0,
-            Operators.GREATER_THAN_OR_EQUAL_TO => CompareDynamics(leftVal, rightVal) >= 0,
-            Operators.LIKE => ExpressionValueComparer.MatchesLike(leftVal, rightVal, trimQuotedStrings: true),
-            Operators.NOT_LIKE => ExpressionValueComparer.MatchesNotLike(leftVal, rightVal, trimQuotedStrings: true),
-            Operators.IS_NULL => leftVal == null,
-            Operators.IS_NOT_NULL => leftVal != null,
             _ => throw new SecurityException("Invalid operator")
         };
     }
@@ -601,138 +577,5 @@ public class StatementEvaluator : ExpressionEvaluatorCore<HashedTable>
 
             return rows;
         }
-    }
-
-    /// <summary>
-    /// Compares two dynamically typed values for equality. Quoted strings are trimmed before comparison.
-    /// Returns <c>false</c> if either value is <c>null</c>.
-    /// </summary>
-    /// <param name="leftVal">The left-hand value.</param>
-    /// <param name="rightVal">The right-hand value.</param>
-    /// <returns><c>true</c> if the values are considered equal; otherwise, <c>false</c>.</returns>
-    private static bool EvaluateEquality(object? leftVal, object? rightVal)
-    {
-        if (leftVal == null || rightVal == null) return false;
-        return ExpressionValueComparer.AreEqual(leftVal, rightVal, trimQuotedStrings: true);
-    }
-
-    /// <summary>
-    /// Performs an ordered comparison between two dynamically typed values.
-    /// Quoted strings are trimmed before comparison. Returns <c>null</c> if either value is <c>null</c>.
-    /// </summary>
-    /// <param name="left">The left-hand value.</param>
-    /// <param name="right">The right-hand value.</param>
-    /// <returns>
-    /// A negative integer if <paramref name="left"/> is less than <paramref name="right"/>,
-    /// zero if they are equal, a positive integer if <paramref name="left"/> is greater,
-    /// or <c>null</c> if either operand is <c>null</c>.
-    /// </returns>
-    private static int? CompareDynamics(object? left, object? right)
-    {
-        if (left == null || right == null) return null;
-        return ExpressionValueComparer.Compare(left, right, trimQuotedStrings: true);
-    }
-
-    private static bool TryConvertThreshold(object? rawValue, out double threshold)
-    {
-        threshold = 0d;
-        if (rawValue is null)
-        {
-            return false;
-        }
-
-        return rawValue switch
-        {
-            byte v => Assign(v, out threshold),
-            sbyte v => Assign(v, out threshold),
-            short v => Assign(v, out threshold),
-            ushort v => Assign(v, out threshold),
-            int v => Assign(v, out threshold),
-            uint v => Assign(v, out threshold),
-            long v => Assign(v, out threshold),
-            ulong v => Assign(v, out threshold),
-            float v => Assign(v, out threshold),
-            double v => Assign(v, out threshold),
-            decimal v => Assign((double)v, out threshold),
-            string s => TryParseInvariantDouble(s, out threshold),
-            _ => false
-        };
-
-        static bool Assign(double value, out double output)
-        {
-            output = value;
-            return true;
-        }
-
-        static bool TryParseInvariantDouble(string value, out double output)
-        {
-            string candidate = value.Trim();
-            if ((candidate.StartsWith("'", StringComparison.Ordinal) && candidate.EndsWith("'", StringComparison.Ordinal))
-                || (candidate.StartsWith("\"", StringComparison.Ordinal) && candidate.EndsWith("\"", StringComparison.Ordinal)))
-            {
-                candidate = candidate[1..^1].Trim();
-            }
-
-            if (double.TryParse(
-                candidate.AsSpan(),
-                NumberStyles.Float,
-                CultureInfo.InvariantCulture,
-                out output))
-            {
-                return true;
-            }
-
-            return double.TryParse(
-                candidate.AsSpan(),
-                NumberStyles.Float,
-                CultureInfo.CurrentCulture,
-                out output);
-        }
-    }
-
-    private static bool EvaluateDistanceComparison(double distance, double threshold, string comparisonOperator)
-    {
-        return comparisonOperator switch
-        {
-            Operators.LESS_THAN => distance < threshold,
-            Operators.LESS_THAN_OR_EQUAL_TO => distance <= threshold,
-            Operators.GREATER_THAN => distance > threshold,
-            Operators.GREATER_THAN_OR_EQUAL_TO => distance >= threshold,
-            _ => false
-        };
-    }
-
-    private static double ComputeEuclideanDistance(float[] left, float[] right)
-    {
-        double sum = 0d;
-        for (int i = 0; i < left.Length; i++)
-        {
-            double diff = left[i] - right[i];
-            sum += diff * diff;
-        }
-
-        return Math.Sqrt(sum);
-    }
-
-    private static double ComputeCosineDistance(float[] left, float[] right)
-    {
-        double dot = 0d;
-        double magLeft = 0d;
-        double magRight = 0d;
-
-        for (int i = 0; i < left.Length; i++)
-        {
-            dot += left[i] * right[i];
-            magLeft += left[i] * left[i];
-            magRight += right[i] * right[i];
-        }
-
-        if (magLeft == 0d || magRight == 0d)
-        {
-            return 1d;
-        }
-
-        double similarity = dot / (Math.Sqrt(magLeft) * Math.Sqrt(magRight));
-        return 1d - similarity;
     }
 }

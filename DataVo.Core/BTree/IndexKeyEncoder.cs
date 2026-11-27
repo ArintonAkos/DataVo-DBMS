@@ -94,6 +94,39 @@ public static class IndexKeyEncoder
         return true;
     }
 
+    /// <summary>
+    /// Attempts to extract a single-column integer (<see cref="int"/> or <see cref="long"/>) key value from a row dictionary.
+    /// </summary>
+    /// <param name="row">The row values keyed by column name.</param>
+    /// <param name="attributes">The indexed attribute names.</param>
+    /// <param name="key">When this method returns <see langword="true"/>, the extracted 64-bit integer key.</param>
+    /// <returns><see langword="true"/> if <paramref name="attributes"/> contains a single integer column with a non-null value; otherwise <see langword="false"/>.</returns>
+    internal static bool TryGetSingleIntegerKey(
+        IReadOnlyDictionary<string, object?> row,
+        IReadOnlyList<string> attributes,
+        out long key)
+    {
+        key = 0;
+        if (attributes.Count != 1
+            || !row.TryGetValue(attributes[0], out object? value)
+            || value is null)
+        {
+            return false;
+        }
+
+        switch (value)
+        {
+            case int intValue:
+                key = intValue;
+                return true;
+            case long longValue:
+                key = longValue;
+                return true;
+            default:
+                return false;
+        }
+    }
+
     /// <summary>Gets whether typed cells have a non-NULL value for every indexed attribute (see <see cref="HasCompleteKey(IReadOnlyDictionary{string, object?}, IReadOnlyList{string})"/>).</summary>
     internal static bool HasCompleteKey(ReactiveRowSchema schema, ReadOnlySpan<CellValue> cells, IReadOnlyList<string> attributes)
     {

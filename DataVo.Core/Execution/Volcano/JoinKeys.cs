@@ -48,4 +48,38 @@ internal static class JoinKeys
 
         return Convert.ToString(value, CultureInfo.InvariantCulture) ?? string.Empty;
     }
+
+    /// <summary>
+    /// Merges a left and right typed execution row into a single qualified <see cref="ExecutionRow"/>.
+    /// </summary>
+    /// <param name="leftRow">The left-hand input row.</param>
+    /// <param name="rightRow">The right-hand input row.</param>
+    /// <param name="leftTableName">The table qualifier applied to unqualified columns from <paramref name="leftRow"/>.</param>
+    /// <param name="rightTableName">The table qualifier applied to unqualified columns from <paramref name="rightRow"/>.</param>
+    /// <param name="outputRowId">The row identifier assigned to the merged row.</param>
+    /// <returns>A merged <see cref="ExecutionRow"/> containing columns from both sides.</returns>
+    public static ExecutionRow MergeRows(
+        TypedExecutionRow leftRow,
+        TypedExecutionRow rightRow,
+        string leftTableName,
+        string rightTableName,
+        long outputRowId)
+    {
+        int estimatedCapacity = leftRow.Values.Count + rightRow.Values.Count;
+        var values = new Dictionary<string, object?>(Math.Max(estimatedCapacity, 1));
+
+        foreach (var cell in leftRow.Values)
+        {
+            string key = cell.Key.Contains('.') ? cell.Key : $"{leftTableName}.{cell.Key}";
+            values[key] = cell.Value;
+        }
+
+        foreach (var cell in rightRow.Values)
+        {
+            string key = cell.Key.Contains('.') ? cell.Key : $"{rightTableName}.{cell.Key}";
+            values[key] = cell.Value;
+        }
+
+        return new ExecutionRow(outputRowId, values);
+    }
 }

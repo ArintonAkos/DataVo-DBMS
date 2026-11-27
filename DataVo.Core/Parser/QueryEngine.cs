@@ -50,7 +50,7 @@ public class QueryEngine(string query, Guid session, DataVoEngine? engine = null
                 StorageMode = _engine.Config.StorageMode,
                 DatabaseName = databaseName
             };
-            diagnosticsBuilder.SetOperation(InferOperation(query));
+            diagnosticsBuilder.SetOperation(RuntimeQueryStatsBuilder.InferOperation(query));
         }
 
         using RuntimeQueryDiagnosticsScope? diagnosticsScope =
@@ -117,23 +117,6 @@ public class QueryEngine(string query, Guid session, DataVoEngine? engine = null
         return response;
     }
 
-    private static string InferOperation(string sql)
-    {
-        string trimmed = sql.TrimStart();
-        if (trimmed.Length == 0)
-        {
-            return "UNKNOWN";
-        }
-
-        int end = 0;
-        while (end < trimmed.Length && !char.IsWhiteSpace(trimmed[end]) && trimmed[end] != ';')
-        {
-            end++;
-        }
-
-        return trimmed[..end].ToUpperInvariant();
-    }
-
     /// <summary>
     /// Executes a queue of actions until completion or until one action fails.
     /// </summary>
@@ -161,10 +144,7 @@ public class QueryEngine(string query, Guid session, DataVoEngine? engine = null
                 }
 
                 response.Add(result);
-                if (diagnosticsBuilder is not null)
-                {
-                    RecordResultMetrics(diagnosticsBuilder, result);
-                }
+                diagnosticsBuilder?.RecordResultMetrics(result);
             }
             catch (Exception ex)
             {
@@ -177,37 +157,4 @@ public class QueryEngine(string query, Guid session, DataVoEngine? engine = null
 
     private static bool IsSchemaAction(IDbAction action) =>
         action.GetType().Namespace?.EndsWith(".DDL", StringComparison.Ordinal) == true;
-
-    private static void RecordResultMetrics(RuntimeQueryStatsBuilder builder, QueryResult result)
-    {
-        if (result.IsError)
-        {
-            builder.RecordError(string.Join(" | ", result.Messages));
-        }
-
-        if (result.Data.Count > 0)
-        {
-            builder.AddRowsReturned(result.Data.Count);
-        }
-
-        if (result.RowsAffected > 0)
-        {
-            builder.AddRowsAffected(result.RowsAffected);
-        }
-
-        foreach (string message in result.Messages)
-        {
-            if (result.Data.Count == 0 && TryReadMessageCount(message, "Rows selected:", out int selected))
-            {
-                builder.AddRowsReturned(selected);
-            }
-        }
-    }
-
-    private static bool TryReadMessageCount(string message, string prefix, out int count)
-    {
-        count = 0;
-        return message.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
-            && int.TryParse(message[prefix.Length..].Trim(), out count);
-    }
 }

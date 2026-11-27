@@ -92,7 +92,7 @@ public sealed class InnerJoinOperator : IQueryOperator
             if (_currentLeft != null && _currentMatches != null && _currentMatchIndex < _currentMatches.Count)
             {
                 var rightRow = _currentMatches[_currentMatchIndex++];
-                return MergeRows(_currentLeft, rightRow);
+                return JoinKeys.MergeRows(_currentLeft, rightRow, _leftTableName, _rightTableName, ++_outputRowId);
             }
 
             ExecutionRow? nextLeft = _left.GetNextRow();
@@ -127,26 +127,5 @@ public sealed class InnerJoinOperator : IQueryOperator
         _currentMatches = null;
         _currentMatchIndex = 0;
         _rightLookup.Clear();
-    }
-
-    private ExecutionRow MergeRows(TypedExecutionRow leftRow, TypedExecutionRow rightRow)
-    {
-        int estimatedCapacity = leftRow.Values.Count + rightRow.Values.Count;
-        var values = new Dictionary<string, object?>(Math.Max(estimatedCapacity, 1));
-
-        foreach (var cell in leftRow.Values)
-        {
-            string key = cell.Key.Contains('.') ? cell.Key : $"{_leftTableName}.{cell.Key}";
-            values[key] = cell.Value;
-        }
-
-        foreach (var cell in rightRow.Values)
-        {
-            string key = cell.Key.Contains('.') ? cell.Key : $"{_rightTableName}.{cell.Key}";
-            values[key] = cell.Value;
-        }
-
-        _outputRowId++;
-        return new ExecutionRow(_outputRowId, values);
     }
 }

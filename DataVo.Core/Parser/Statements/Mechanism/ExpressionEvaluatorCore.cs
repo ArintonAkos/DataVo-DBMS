@@ -1,3 +1,5 @@
+using System.Globalization;
+using System.Security;
 using DataVo.Core.Enums;
 using DataVo.Core.Exceptions;
 using DataVo.Core.Parser.AST;
@@ -244,6 +246,135 @@ public abstract class ExpressionEvaluatorCore<TResult>
             Operators.GREATER_THAN => Operators.LESS_THAN,
             Operators.GREATER_THAN_OR_EQUAL_TO => Operators.LESS_THAN_OR_EQUAL_TO,
             _ => op
+        };
+    }
+
+    /// <summary>
+    /// Evaluates a constant comparison expression between two literal values using SQL comparison semantics.
+    /// </summary>
+    /// <param name="op">The relational operator to apply.</param>
+    /// <param name="leftVal">The left literal value.</param>
+    /// <param name="rightVal">The right literal value.</param>
+    /// <returns><see langword="true"/> if the condition holds; otherwise <see langword="false"/>.</returns>
+    /// <exception cref="SecurityException">Thrown when <paramref name="op"/> is not a recognized operator.</exception>
+    internal static bool DetermineConstantCondition(string op, object? leftVal, object? rightVal)
+    {
+        return op switch
+        {
+            Operators.EQUALS => EvaluateEquality(leftVal, rightVal),
+            Operators.NOT_EQUALS => ExpressionValueComparer.SqlNotEquals(leftVal, rightVal, trimQuotedStrings: true),
+            Operators.LESS_THAN => CompareDynamics(leftVal, rightVal) < 0,
+            Operators.GREATER_THAN => CompareDynamics(leftVal, rightVal) > 0,
+            Operators.LESS_THAN_OR_EQUAL_TO => CompareDynamics(leftVal, rightVal) <= 0,
+            Operators.GREATER_THAN_OR_EQUAL_TO => CompareDynamics(leftVal, rightVal) >= 0,
+            Operators.LIKE => ExpressionValueComparer.MatchesLike(leftVal, rightVal, trimQuotedStrings: true),
+            Operators.NOT_LIKE => ExpressionValueComparer.MatchesNotLike(leftVal, rightVal, trimQuotedStrings: true),
+            Operators.IS_NULL => leftVal == null,
+            Operators.IS_NOT_NULL => leftVal != null,
+            _ => throw new SecurityException("Invalid operator")
+        };
+    }
+
+    /// <summary>
+    /// Compares two dynamically typed values for SQL equality, trimming quoted strings and returning
+    /// <see langword="false"/> if either operand is <see langword="null"/>.
+    /// </summary>
+    internal static bool EvaluateEquality(object? leftVal, object? rightVal)
+    {
+        if (leftVal == null || rightVal == null)
+        {
+            return false;
+        }
+
+        return ExpressionValueComparer.AreEqual(leftVal, rightVal, trimQuotedStrings: true);
+    }
+
+    /// <summary>
+    /// Performs an ordered comparison between two dynamically typed values, returning <see langword="null"/>
+    /// when either operand is <see langword="null"/>.
+    /// </summary>
+    internal static int? CompareDynamics(object? left, object? right)
+    {
+        if (left == null || right == null)
+        {
+            return null;
+        }
+
+        return ExpressionValueComparer.Compare(left, right, trimQuotedStrings: true);
+    }
+
+    /// <summary>
+    /// Converts a vector-distance threshold literal (numeric or quoted/unquoted string) to a <see cref="double"/>.
+    /// </summary>
+    internal static bool TryConvertThreshold(object? rawValue, out double threshold)
+    {
+        threshold = 0d;
+        if (rawValue is null)
+        {
+            return false;
+        }
+
+        return rawValue switch
+        {
+            byte v => Assign(v, out threshold),
+            sbyte v => Assign(v, out threshold),
+            short v => Assign(v, out threshold),
+            ushort v => Assign(v, out threshold),
+            int v => Assign(v, out threshold),
+            uint v => Assign(v, out threshold),
+            long v => Assign(v, out threshold),
+            ulong v => Assign(v, out threshold),
+            float v => Assign(v, out threshold),
+            double v => Assign(v, out threshold),
+            decimal v => Assign((double)v, out threshold),
+            string s => TryParseInvariantDouble(s, out threshold),
+            _ => false
+        };
+
+        static bool Assign(double value, out double output)
+        {
+            output = value;
+            return true;
+        }
+
+        static bool TryParseInvariantDouble(string value, out double output)
+        {
+            string candidate = value.Trim();
+            if ((candidate.StartsWith("'", StringComparison.Ordinal) && candidate.EndsWith("'", StringComparison.Ordinal))
+                || (candidate.StartsWith("\"", StringComparison.Ordinal) && candidate.EndsWith("\"", StringComparison.Ordinal)))
+            {
+                candidate = candidate[1..^1].Trim();
+            }
+
+            if (double.TryParse(
+                candidate.AsSpan(),
+                NumberStyles.Float,
+                CultureInfo.InvariantCulture,
+                out output))
+            {
+                return true;
+            }
+
+            return double.TryParse(
+                candidate.AsSpan(),
+                NumberStyles.Float,
+                CultureInfo.CurrentCulture,
+                out output);
+        }
+    }
+
+    /// <summary>
+    /// Evaluates a relational comparison between a computed vector distance and a numeric threshold.
+    /// </summary>
+    internal static bool EvaluateDistanceComparison(double distance, double threshold, string comparisonOperator)
+    {
+        return comparisonOperator switch
+        {
+            Operators.LESS_THAN => distance < threshold,
+            Operators.LESS_THAN_OR_EQUAL_TO => distance <= threshold,
+            Operators.GREATER_THAN => distance > threshold,
+            Operators.GREATER_THAN_OR_EQUAL_TO => distance >= threshold,
+            _ => false
         };
     }
 }

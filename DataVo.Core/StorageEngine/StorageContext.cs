@@ -220,20 +220,6 @@ public partial class StorageContext(DataVoConfig config) : IDisposable
         return _storageEngine.InsertRow(databaseName, tableName, serializedData);
     }
 
-    /// <summary>
-    /// Appends an already-serialized row payload to a table, skipping dictionary materialization and
-    /// re-serialization. Used by the zero-allocation update path, which produces the new-row bytes by
-    /// byte-patching the previous row in place.
-    /// </summary>
-    /// <param name="rowBytes">The serialized row payload, already in the on-disk wire format.</param>
-    /// <param name="tableName">The target table.</param>
-    /// <param name="databaseName">The owning database.</param>
-    /// <returns>The assigned row identifier.</returns>
-    internal RowKey InsertSerializedRow(byte[] rowBytes, string tableName, string databaseName)
-    {
-        return _storageEngine.InsertRow(databaseName, tableName, rowBytes);
-    }
-
     internal bool TryPatchFixedWidthRow(
         string tableName,
         string databaseName,
@@ -534,26 +520,6 @@ public partial class StorageContext(DataVoConfig config) : IDisposable
     internal bool TryVisitTypedCells<TState>(string tableName, string databaseName, RowKey rowId, ref TState state, TypedCellsVisitor<TState> visit) =>
         _storageEngine is ITypedRowStorageEngine typedStorage
         && typedStorage.TryVisitTypedCells(databaseName, tableName, RowKeyConversions.ToRowId(rowId), ref state, visit);
-
-    internal bool TryReadStoredRow(string tableName, string databaseName, RowKey rowId, out StoredRow? row)
-    {
-        if (_storageEngine is ITypedRowStorageEngine typedStorage
-            && typedStorage.TryReadTypedRow(databaseName, tableName, RowKeyConversions.ToRowId(rowId), out row))
-        {
-            return true;
-        }
-
-        row = null;
-        byte[]? bytes = TryReadRowBytes(tableName, databaseName, rowId);
-        if (bytes is null)
-        {
-            return false;
-        }
-
-        IReadOnlyList<Column> columns = ResolveCatalog().GetTableColumns(tableName, databaseName);
-        row = StoredRow.FromOwnedCells(BuildReactiveSchema(columns), RowSerializer.DeserializeCells(bytes, columns));
-        return true;
-    }
 
     /// <summary>
     /// Whether the active backend keeps a typed insert in a typed form of its own (in-memory storage packs

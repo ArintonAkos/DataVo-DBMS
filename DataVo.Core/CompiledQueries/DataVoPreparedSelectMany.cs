@@ -228,37 +228,8 @@ public sealed class DataVoPreparedSelectMany<T>
         return ExecuteScanFallback(expectedKey);
     }
 
-    private bool TryProjectRow(RowKey rowId, out T? result)
-    {
-        result = default;
-        if (!_context.Engine.StorageContext.IsRowVisible(_plan.TableName, _databaseName, rowId))
-        {
-            return false;
-        }
-
-        byte[]? bytes = _context.Engine.StorageContext.TryReadRowBytes(_plan.TableName, _databaseName, rowId);
-        if (bytes is not null)
-        {
-            lock (_projection.Buffer)
-            {
-                RowSerializer.DecodeProjectedCells(bytes, _projection.Columns, _projection.IsProjected, _projection.Buffer);
-                result = _mapper(new CompiledRowReader(new StoredRowView(_projection.ProjectedSchema, _projection.Buffer)));
-            }
-
-            return true;
-        }
-
-        lock (_projection.Buffer)
-        {
-            if (_projection.TryFillFromTypedRow(_context.Engine.StorageContext, _plan.TableName, _databaseName, rowId))
-            {
-                result = _mapper(new CompiledRowReader(new StoredRowView(_projection.ProjectedSchema, _projection.Buffer)));
-                return true;
-            }
-        }
-
-        return false;
-    }
+    private bool TryProjectRow(RowKey rowId, out T? result) =>
+        _projection.TryProjectRow(_context.Engine.StorageContext, _plan.TableName, _databaseName, rowId, _mapper, out result);
 
     private IReadOnlyList<T> ExecuteScanFallback(string expectedKey)
     {

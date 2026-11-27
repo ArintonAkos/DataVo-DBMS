@@ -996,43 +996,6 @@ public static partial class RowSerializer
         }
     }
 
-    /// <summary>Reads a non-null typed cell using the column type encoding (matches <see cref="ReadNonNullValue"/>).</summary>
-    private static CellValue ReadTypedCell(BinaryReader reader, Column column)
-    {
-        switch (ClassifyColumnType(column.Type))
-        {
-            case StorageColumnType.Int:
-                return CellValue.From(reader.ReadInt32());
-            case StorageColumnType.Float:
-                return CellValue.From((double)BitConverter.Int32BitsToSingle(reader.ReadInt32()));
-            case StorageColumnType.BigInt:
-                return CellValue.From(reader.ReadInt64());
-            case StorageColumnType.Double:
-                return CellValue.From(BitConverter.Int64BitsToDouble(reader.ReadInt64()));
-            case StorageColumnType.Bit:
-                return CellValue.From(reader.ReadBoolean());
-            case StorageColumnType.Date:
-                return CellValue.From(DataVoDate.FromDateTime(DateTime.FromBinary(reader.ReadInt64())));
-            case StorageColumnType.DateTime:
-                return CellValue.FromUtcTicks(reader.ReadInt64());
-            case StorageColumnType.Guid:
-                return CellValue.From(new Guid(reader.ReadBytes(16)));
-            case StorageColumnType.Vector:
-            {
-                int count = reader.ReadInt32();
-                float[] vector = new float[count];
-                for (int i = 0; i < count; i++)
-                {
-                    vector[i] = BitConverter.Int32BitsToSingle(reader.ReadInt32());
-                }
-
-                return CellValue.From(vector);
-            }
-            default:
-                return CellValue.From(reader.ReadString());
-        }
-    }
-
     /// <summary>The UTC ticks a DATETIME column stores for a boxed value.</summary>
     private static long ToUtcTicksValue(object value, Column column) =>
         DataVoDateTime.TryConvert(value, out long ticks)

@@ -250,37 +250,8 @@ public sealed class DataVoPreparedSelectSingle<T>
         return ExecuteScanFallback(expectedKey);
     }
 
-    private bool TryProjectRow(RowKey rowId, out T? result)
-    {
-        result = default;
-        if (!_context.Engine.StorageContext.IsRowVisible(_plan.TableName, _databaseName, rowId))
-        {
-            return false;
-        }
-
-        byte[]? bytes = _context.Engine.StorageContext.TryReadRowBytes(_plan.TableName, _databaseName, rowId);
-        if (bytes is not null)
-        {
-            lock (_projection.Buffer)
-            {
-                RowSerializer.DecodeProjectedCells(bytes, _projection.Columns, _projection.IsProjected, _projection.Buffer);
-                result = _mapper(new CompiledRowReader(new StoredRowView(_projection.ProjectedSchema, _projection.Buffer)));
-            }
-
-            return true;
-        }
-
-        lock (_projection.Buffer)
-        {
-            if (_projection.TryFillFromTypedRow(_context.Engine.StorageContext, _plan.TableName, _databaseName, rowId))
-            {
-                result = _mapper(new CompiledRowReader(new StoredRowView(_projection.ProjectedSchema, _projection.Buffer)));
-                return true;
-            }
-        }
-
-        return false;
-    }
+    private bool TryProjectRow(RowKey rowId, out T? result) =>
+        _projection.TryProjectRow(_context.Engine.StorageContext, _plan.TableName, _databaseName, rowId, _mapper, out result);
 
     private T? ExecuteScanFallback(string expectedKey)
     {
@@ -330,6 +301,56 @@ internal sealed class PreparedProjection
     public ReactiveRowSchema ProjectedSchema { get; }
 
     public CellValue[] Buffer { get; }
+
+    /// <summary>
+    /// Reads and projects a visible row by identifier into <see cref="Buffer"/>, invoking <paramref name="mapper"/>
+    /// on the projected view without materializing an intermediate dictionary.
+    /// </summary>
+    /// <typeparam name="T">The mapped result type.</typeparam>
+    /// <param name="storage">The storage context used to verify visibility and read the row.</param>
+    /// <param name="tableName">The target table name.</param>
+    /// <param name="databaseName">The owning database name.</param>
+    /// <param name="rowId">The row key to project.</param>
+    /// <param name="mapper">The delegate that materializes <typeparamref name="T"/> from the projected reader.</param>
+    /// <param name="result">When this method returns <see langword="true"/>, the mapped row value.</param>
+    /// <returns><see langword="true"/> if the row is visible and projected; otherwise <see langword="false"/>.</returns>
+    public bool TryProjectRow<T>(
+        StorageContext storage,
+        string tableName,
+        string databaseName,
+        RowKey rowId,
+        CompiledRowMapper<T> mapper,
+        out T? result)
+    {
+        result = default;
+        if (!storage.IsRowVisible(tableName, databaseName, rowId))
+        {
+            return false;
+        }
+
+        byte[]? bytes = storage.TryReadRowBytes(tableName, databaseName, rowId);
+        if (bytes is not null)
+        {
+            lock (Buffer)
+            {
+                RowSerializer.DecodeProjectedCells(bytes, Columns, IsProjected, Buffer);
+                result = mapper(new CompiledRowReader(new StoredRowView(ProjectedSchema, Buffer)));
+            }
+
+            return true;
+        }
+
+        lock (Buffer)
+        {
+            if (TryFillFromTypedRow(storage, tableName, databaseName, rowId))
+            {
+                result = mapper(new CompiledRowReader(new StoredRowView(ProjectedSchema, Buffer)));
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     /// <summary>
     /// Reads one typed row from storage and copies its projected columns into <see cref="Buffer"/>, without

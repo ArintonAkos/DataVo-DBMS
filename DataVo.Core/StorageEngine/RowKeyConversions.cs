@@ -37,26 +37,3 @@ internal static class RowKeyConversions
         return keys;
     }
 }
-
-/// <summary>Exposes a built-in engine through the public <see cref="IStorageEngine"/> contract.</summary>
-internal sealed class RowIdStorageEngineAdapter(IRowIdStorageEngine inner) : IStorageEngine
-{
-    public RowKey InsertRow(string databaseName, string tableName, byte[] rowBytes) => inner.InsertRow(databaseName, tableName, rowBytes);
-
-    public List<RowKey> InsertRows(string databaseName, string tableName, List<byte[]> rowsBytes) =>
-        RowKeyConversions.ToRowKeys(inner.InsertRows(databaseName, tableName, rowsBytes));
-
-    public byte[] ReadRow(string databaseName, string tableName, RowKey rowId) => inner.ReadRow(databaseName, tableName, (long)rowId);
-
-    public IEnumerable<(RowKey RowId, byte[] RawRow)> ReadAllRows(string databaseName, string tableName) =>
-        RowKeyConversions.ToRowKeys(inner.ReadAllRows(databaseName, tableName));
-
-    public void DeleteRow(string databaseName, string tableName, RowKey rowId) => inner.DeleteRow(databaseName, tableName, (long)rowId);
-
-    public void DropTable(string databaseName, string tableName) => inner.DropTable(databaseName, tableName);
-
-    public void DropDatabase(string databaseName) => inner.DropDatabase(databaseName);
-
-    public List<(RowKey NewRowId, byte[] RawRow)> CompactTable(string databaseName, string tableName) =>
-        RowKeyConversions.ToRowKeys(inner.CompactTable(databaseName, tableName));
-}

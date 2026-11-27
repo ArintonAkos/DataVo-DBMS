@@ -177,19 +177,6 @@ namespace DataVo.Core.Parser.Statements.Mechanism
         }
 
         /// <summary>
-        /// Compares two dynamically typed values for equality. Quoted strings are trimmed before comparison.
-        /// Returns <c>false</c> if either value is <c>null</c>.
-        /// </summary>
-        /// <param name="leftVal">The left-hand value.</param>
-        /// <param name="rightVal">The right-hand value.</param>
-        /// <returns><c>true</c> if the values are considered equal; otherwise, <c>false</c>.</returns>
-        private static bool EvaluateEquality(object? leftVal, object? rightVal)
-        {
-            if (leftVal == null || rightVal == null) return false;
-            return ExpressionValueComparer.AreEqual(leftVal, rightVal, trimQuotedStrings: true);
-        }
-
-        /// <summary>
         /// Handles a non-equality comparison between a column and a literal (e.g., <c>&gt;</c>, <c>&lt;</c>, <c>!=</c>, <c>IS NULL</c>).
         /// Performs a full table scan since these operators cannot leverage B-Tree index lookups.
         /// </summary>
@@ -246,8 +233,8 @@ namespace DataVo.Core.Parser.Statements.Mechanism
                     }
 
                     double distance = distanceExpression.Operator == Operators.VECTOR_DISTANCE_COSINE
-                        ? ComputeCosineDistance(queryVector, rowVector)
-                        : ComputeEuclideanDistance(queryVector, rowVector);
+                        ? SimdDistanceKernels.CosineDistanceDouble(queryVector, rowVector)
+                        : SimdDistanceKernels.EuclideanDistanceDouble(queryVector, rowVector);
 
                     return EvaluateDistanceComparison(distance, threshold, comparisonOperator);
                 })
@@ -348,32 +335,6 @@ namespace DataVo.Core.Parser.Statements.Mechanism
         }
 
         /// <summary>
-        /// Evaluates a constant condition by applying the operator to two literal values.
-        /// </summary>
-        /// <param name="op">The relational operator to evaluate (e.g., <c>=</c>, <c>!=</c>, <c>&lt;</c>, <c>&gt;</c>, <c>IS NULL</c>).</param>
-        /// <param name="leftVal">The left literal value.</param>
-        /// <param name="rightVal">The right literal value.</param>
-        /// <returns><c>true</c> if the condition holds; otherwise, <c>false</c>.</returns>
-        /// <exception cref="SecurityException">Thrown when <paramref name="op"/> is not a recognized operator.</exception>
-        private static bool DetermineConstantCondition(string op, object? leftVal, object? rightVal)
-        {
-            return op switch
-            {
-                Operators.EQUALS => EvaluateEquality(leftVal, rightVal),
-                Operators.NOT_EQUALS => ExpressionValueComparer.SqlNotEquals(leftVal, rightVal, trimQuotedStrings: true),
-                Operators.LESS_THAN => CompareDynamics(leftVal, rightVal) < 0,
-                Operators.GREATER_THAN => CompareDynamics(leftVal, rightVal) > 0,
-                Operators.LESS_THAN_OR_EQUAL_TO => CompareDynamics(leftVal, rightVal) <= 0,
-                Operators.GREATER_THAN_OR_EQUAL_TO => CompareDynamics(leftVal, rightVal) >= 0,
-                Operators.LIKE => ExpressionValueComparer.MatchesLike(leftVal, rightVal, trimQuotedStrings: true),
-                Operators.NOT_LIKE => ExpressionValueComparer.MatchesNotLike(leftVal, rightVal, trimQuotedStrings: true),
-                Operators.IS_NULL => leftVal == null,
-                Operators.IS_NOT_NULL => leftVal != null,
-                _ => throw new SecurityException("Invalid operator")
-            };
-        }
-
-        /// <summary>
         /// Combines two result sets using logical AND by intersecting them.
         /// Only row IDs present in both sets are retained.
         /// </summary>
@@ -395,125 +356,6 @@ namespace DataVo.Core.Parser.Statements.Mechanism
         protected override HashSet<RowKey> Or(HashSet<RowKey> leftResult, HashSet<RowKey> rightResult)
         {
             return [.. leftResult.Union(rightResult)];
-        }
-
-        /// <summary>
-        /// Performs an ordered comparison between two dynamically typed values.
-        /// Quoted strings are trimmed before comparison. Returns <c>null</c> if either value is <c>null</c>.
-        /// </summary>
-        /// <param name="left">The left-hand value.</param>
-        /// <param name="right">The right-hand value.</param>
-        /// <returns>
-        /// A negative integer if <paramref name="left"/> is less than <paramref name="right"/>,
-        /// zero if equal, a positive integer if greater, or <c>null</c> if either operand is <c>null</c>.
-        /// </returns>
-        private static int? CompareDynamics(object? left, object? right)
-        {
-            if (left == null || right == null) return null;
-            return ExpressionValueComparer.Compare(left, right, trimQuotedStrings: true);
-        }
-
-        private static bool TryConvertThreshold(object? rawValue, out double threshold)
-        {
-            threshold = 0d;
-            if (rawValue is null)
-            {
-                return false;
-            }
-
-            return rawValue switch
-            {
-                byte v => Assign(v, out threshold),
-                sbyte v => Assign(v, out threshold),
-                short v => Assign(v, out threshold),
-                ushort v => Assign(v, out threshold),
-                int v => Assign(v, out threshold),
-                uint v => Assign(v, out threshold),
-                long v => Assign(v, out threshold),
-                ulong v => Assign(v, out threshold),
-                float v => Assign(v, out threshold),
-                double v => Assign(v, out threshold),
-                decimal v => Assign((double)v, out threshold),
-                string s => TryParseDoubleInvariantFirst(s, out threshold),
-                _ => false
-            };
-
-            static bool Assign(double value, out double output)
-            {
-                output = value;
-                return true;
-            }
-
-            static bool TryParseDoubleInvariantFirst(string value, out double output)
-            {
-                string candidate = value.Trim();
-                if ((candidate.StartsWith("'", StringComparison.Ordinal) && candidate.EndsWith("'", StringComparison.Ordinal))
-                    || (candidate.StartsWith("\"", StringComparison.Ordinal) && candidate.EndsWith("\"", StringComparison.Ordinal)))
-                {
-                    candidate = candidate[1..^1].Trim();
-                }
-
-                if (double.TryParse(
-                    candidate.AsSpan(),
-                    NumberStyles.Float,
-                    CultureInfo.InvariantCulture,
-                    out output))
-                {
-                    return true;
-                }
-
-                return double.TryParse(
-                    candidate.AsSpan(),
-                    NumberStyles.Float,
-                    CultureInfo.CurrentCulture,
-                    out output);
-            }
-        }
-
-        private static bool EvaluateDistanceComparison(double distance, double threshold, string comparisonOperator)
-        {
-            return comparisonOperator switch
-            {
-                Operators.LESS_THAN => distance < threshold,
-                Operators.LESS_THAN_OR_EQUAL_TO => distance <= threshold,
-                Operators.GREATER_THAN => distance > threshold,
-                Operators.GREATER_THAN_OR_EQUAL_TO => distance >= threshold,
-                _ => false
-            };
-        }
-
-        private static double ComputeEuclideanDistance(float[] left, float[] right)
-        {
-            double sum = 0d;
-            for (int i = 0; i < left.Length; i++)
-            {
-                double diff = left[i] - right[i];
-                sum += diff * diff;
-            }
-
-            return Math.Sqrt(sum);
-        }
-
-        private static double ComputeCosineDistance(float[] left, float[] right)
-        {
-            double dot = 0d;
-            double magLeft = 0d;
-            double magRight = 0d;
-
-            for (int i = 0; i < left.Length; i++)
-            {
-                dot += left[i] * right[i];
-                magLeft += left[i] * left[i];
-                magRight += right[i] * right[i];
-            }
-
-            if (magLeft == 0d || magRight == 0d)
-            {
-                return 1d;
-            }
-
-            double similarity = dot / (Math.Sqrt(magLeft) * Math.Sqrt(magRight));
-            return 1d - similarity;
         }
     }
 }

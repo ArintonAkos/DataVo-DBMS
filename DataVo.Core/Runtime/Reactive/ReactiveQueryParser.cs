@@ -628,7 +628,14 @@ internal static class ReactiveQueryParser
         };
     }
 
-    private static bool TryResolveColumn(ExpressionNode? expression, out string? qualifier, out string column)
+    /// <summary>
+    /// Attempts to extract an optional table/alias qualifier and column name from a column reference AST node.
+    /// </summary>
+    /// <param name="expression">The expression node to inspect.</param>
+    /// <param name="qualifier">When this method returns <see langword="true"/>, the optional table or alias qualifier.</param>
+    /// <param name="column">When this method returns <see langword="true"/>, the column name.</param>
+    /// <returns><see langword="true"/> when <paramref name="expression"/> is a column reference; otherwise <see langword="false"/>.</returns>
+    internal static bool TryResolveColumn(ExpressionNode? expression, out string? qualifier, out string column)
     {
         qualifier = null;
         column = string.Empty;

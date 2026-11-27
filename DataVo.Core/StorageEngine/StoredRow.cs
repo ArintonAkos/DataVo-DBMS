@@ -85,6 +85,21 @@ internal sealed class StoredRow
 
     /// <summary>A borrowed, no-copy view over this row's cells. Valid only while this row is alive.</summary>
     public StoredRowView AsView() => new(_schema, _cells);
+
+    /// <summary>
+    /// Materializes this typed row into a case-insensitive dictionary of boxed column values.
+    /// </summary>
+    /// <returns>A dictionary mapping each column name in the row schema to its boxed value.</returns>
+    public Dictionary<string, object?> ToDictionary()
+    {
+        var result = new Dictionary<string, object?>(_cells.Length, StringComparer.OrdinalIgnoreCase);
+        for (int i = 0; i < _cells.Length; i++)
+        {
+            result[_schema.ColumnAt(i)] = _cells[i].ToObject();
+        }
+
+        return result;
+    }
 }
 
 /// <summary>

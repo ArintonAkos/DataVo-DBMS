@@ -286,38 +286,6 @@ namespace DataVo.Core.Parser.Aggregations
         }
 
         /// <summary>
-        /// Validates that the bound source column is string-like.
-        /// </summary>
-        protected void ValidateStringColumn()
-        {
-            if (_field is null)
-            {
-                return;
-            }
-
-            if (!TableColumnService.IsString(_field))
-            {
-                throw new EvaluationException($"Cannot apply {ClassName} aggregation on non string column!");
-            }
-        }
-
-        /// <summary>
-        /// Validates that the bound source column is date-like.
-        /// </summary>
-        protected void ValidateDateColumn()
-        {
-            if (_field is null)
-            {
-                return;
-            }
-
-            if (!TableColumnService.IsDate(_field))
-            {
-                throw new EvaluationException($"Cannot apply {ClassName} aggregation on non date column!");
-            }
-        }
-
-        /// <summary>
         /// Validates that the bound source column can be ordered by MIN/MAX.
         /// </summary>
         protected void ValidateOrderableColumn()

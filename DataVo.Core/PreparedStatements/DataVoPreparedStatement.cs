@@ -68,7 +68,7 @@ public sealed partial class DataVoPreparedStatement
         _engine = engine;
         _defaultSessionId = sessionId;
         Sql = sql;
-        _inferredOperation = InferOperation(sql);
+        _inferredOperation = RuntimeQueryStatsBuilder.InferOperation(sql);
 
         try
         {
@@ -527,10 +527,7 @@ public sealed partial class DataVoPreparedStatement
                 }
 
                 response.Add(result);
-                if (diagnosticsBuilder is not null)
-                {
-                    RecordResultMetrics(diagnosticsBuilder, result);
-                }
+                diagnosticsBuilder?.RecordResultMetrics(result);
             }
             catch (Exception ex)
             {
@@ -543,56 +540,6 @@ public sealed partial class DataVoPreparedStatement
 
     private static bool IsSchemaAction(IDbAction action) =>
         action.GetType().Namespace?.EndsWith(".DDL", StringComparison.Ordinal) == true;
-
-    private static void RecordResultMetrics(RuntimeQueryStatsBuilder builder, QueryResult result)
-    {
-        if (result.IsError)
-        {
-            builder.RecordError(string.Join(" | ", result.Messages));
-        }
-
-        if (result.Data.Count > 0)
-        {
-            builder.AddRowsReturned(result.Data.Count);
-        }
-
-        if (result.RowsAffected > 0)
-        {
-            builder.AddRowsAffected(result.RowsAffected);
-        }
-
-        foreach (string message in result.Messages)
-        {
-            if (result.Data.Count == 0 && TryReadMessageCount(message, "Rows selected:", out int selected))
-            {
-                builder.AddRowsReturned(selected);
-            }
-        }
-    }
-
-    private static bool TryReadMessageCount(string message, string prefix, out int count)
-    {
-        count = 0;
-        return message.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
-            && int.TryParse(message[prefix.Length..].Trim(), out count);
-    }
-
-    private static string InferOperation(string sql)
-    {
-        string trimmed = sql.TrimStart();
-        if (trimmed.Length == 0)
-        {
-            return "UNKNOWN";
-        }
-
-        int end = 0;
-        while (end < trimmed.Length && !char.IsWhiteSpace(trimmed[end]) && trimmed[end] != ';')
-        {
-            end++;
-        }
-
-        return trimmed[..end].ToUpperInvariant();
-    }
 
 #if NET8_0_OR_GREATER
     [System.Runtime.CompilerServices.InlineArray(2)]

@@ -99,23 +99,6 @@ public partial class IndexManager
             }
         }
     }
-
-    /// <summary>Removes the NULL-key entries of the deleted rows among <paramref name="rowIds"/> (persisted indexes only).</summary>
-    internal void DeleteNullKeyRows(IEnumerable<RowKey> rowIds, Func<RowKey, Dictionary<string, object?>?> oldRow, IReadOnlyList<string> attributes, string indexName, string tableName, string databaseName)
-    {
-        if (_lsmStore is null)
-        {
-            return;
-        }
-
-        foreach (RowKey rowId in rowIds)
-        {
-            if (oldRow(rowId) is { } row && !IndexKeyEncoder.HasCompleteKey(row, attributes))
-            {
-                DeleteNullKeyRow(rowId, indexName, tableName, databaseName);
-            }
-        }
-    }
 }
 
 /// <summary>

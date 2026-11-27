@@ -130,78 +130,6 @@ public static partial class DataVoCompiledQuery
         return new DataVoPreparedSelectMany<T>(context, plan, databaseName, indexName, projection, mapper);
     }
 
-    private static IReadOnlyList<T> ExecuteSelectTyped<T>(
-        DataVoContext context,
-        DataVoCompiledQueryPlan plan,
-        IReadOnlyList<DataVoCompiledQueryParameter> parameters,
-        CompiledRowMapper<T> mapper)
-    {
-        string databaseName = ResolveCurrentDatabase(context);
-        plan = StoredTablePlan(context.Engine, plan, databaseName);
-        Dictionary<string, object?> parameterDictionary = ToParameterDictionary(parameters);
-        object? expected = RequiredParameter(parameterDictionary, plan.WhereParameterName!);
-        string expectedKey = BuildComparisonKey(plan.WhereColumn!, expected);
-
-        IReadOnlyList<RowKey>? rowIds = TryResolveMatchingRowIds(context, plan, databaseName, expectedKey);
-        if (rowIds is null)
-        {
-            // Scan fallback: no index path resolved — reuse the full-decode finder + reader (unchanged behavior).
-            List<KeyValuePair<RowKey, StoredRow>> scanned =
-                TryReadMatchingStoredRows(context, plan, databaseName, expectedKey);
-            var scannedResults = new T[scanned.Count];
-            for (int i = 0; i < scanned.Count; i++)
-            {
-                scannedResults[i] = mapper(new CompiledRowReader(scanned[i].Value.AsView()));
-            }
-
-            return scannedResults;
-        }
-
-        // Streaming projection pushdown: decode only the projected columns of each visible row into a reused
-        // buffer, mapping straight to T — no StoredRow, no dictionary, no decode of unprojected columns.
-        IReadOnlyList<Column> columns = context.Engine.Catalog.GetTableColumns(plan.TableName, databaseName);
-        bool[] isProjected = new bool[columns.Count];
-        var projectedNames = new List<string>(plan.ProjectedColumns.Count);
-        for (int i = 0; i < columns.Count; i++)
-        {
-            if (ContainsIgnoreCase(plan.ProjectedColumns, columns[i].Name))
-            {
-                isProjected[i] = true;
-                projectedNames.Add(columns[i].Name);
-            }
-        }
-
-        var projectedSchema = new ReactiveRowSchema(projectedNames);
-        var buffer = new CellValue[projectedNames.Count];
-
-        var results = new List<T>(rowIds.Count);
-        foreach (RowKey rowId in rowIds)
-        {
-            if (!context.Engine.StorageContext.IsRowVisible(plan.TableName, databaseName, rowId))
-            {
-                continue;
-            }
-
-            if (context.Engine.StorageContext.TryReadStoredRow(plan.TableName, databaseName, rowId, out StoredRow? storedRow)
-                && storedRow is not null)
-            {
-                results.Add(mapper(new CompiledRowReader(storedRow.AsView())));
-                continue;
-            }
-
-            byte[]? bytes = context.Engine.StorageContext.TryReadRowBytes(plan.TableName, databaseName, rowId);
-            if (bytes is null)
-            {
-                continue;
-            }
-
-            RowSerializer.DecodeProjectedCells(bytes, columns, isProjected, buffer);
-            results.Add(mapper(new CompiledRowReader(new StoredRowView(projectedSchema, buffer))));
-        }
-
-        return results;
-    }
-
     private static bool ContainsIgnoreCase(IReadOnlyList<string> values, string candidate)
     {
         for (int i = 0; i < values.Count; i++)
@@ -1236,68 +1164,8 @@ public static partial class DataVoCompiledQuery
         return TryReadMatchingStoredRows(context, plan, databaseName, expectedKey)
             .Select(static entry => new KeyValuePair<RowKey, Dictionary<string, object?>>(
                 entry.Key,
-                MaterializeStoredRow(entry.Value)))
+                entry.Value.ToDictionary()))
             .ToList();
-    }
-
-    // Returns the matching row ids when an index access path resolves them (compile-time tag, then primary key,
-    // then a single-column secondary index); returns null to signal the caller should use the full-decode scan
-    // path. Mirrors the fall-through behavior of TryReadMatchingStoredRows (empty result or IndexException on an
-    // index path falls through to scan).
-    private static IReadOnlyList<RowKey>? TryResolveMatchingRowIds(
-        DataVoContext context,
-        DataVoCompiledQueryPlan plan,
-        string databaseName,
-        string expectedKey)
-    {
-        // Returns FilterUsingIndex's read-only row-id view directly (no List/HashSet copy); the caller only enumerates it once.
-        if (plan.AccessPath is CompiledAccessPath.SingleColumnIndex or CompiledAccessPath.PrimaryKey && plan.ResolvedIndexName is not null)
-        {
-            try
-            {
-                IReadOnlyList<RowKey> ids = context.Engine.IndexManager.FilterUsingIndex(expectedKey, plan.ResolvedIndexName, plan.TableName, databaseName);
-                if (ids.Count > 0)
-                {
-                    return ids;
-                }
-            }
-            catch (IndexException)
-            {
-            }
-        }
-
-        List<string> primaryKeys = context.Engine.Catalog.GetTablePrimaryKeys(plan.TableName, databaseName);
-        if (primaryKeys.Contains(plan.WhereColumn!, StringComparer.OrdinalIgnoreCase))
-        {
-            string primaryKeyIndexName = $"_PK_{plan.TableName}";
-            try
-            {
-                IReadOnlyList<RowKey> ids = context.Engine.IndexManager.FilterUsingIndex(expectedKey, primaryKeyIndexName, plan.TableName, databaseName);
-                if (ids.Count > 0)
-                {
-                    return ids;
-                }
-            }
-            catch (IndexException ex) when (IsMissingPrimaryKeyIndex(ex, primaryKeyIndexName, plan.TableName))
-            {
-            }
-        }
-        else if (TryResolveSingleColumnIndex(context, plan.TableName, databaseName, plan.WhereColumn!, out string secondaryIndexName))
-        {
-            try
-            {
-                IReadOnlyList<RowKey> ids = context.Engine.IndexManager.FilterUsingIndex(expectedKey, secondaryIndexName, plan.TableName, databaseName);
-                if (ids.Count > 0)
-                {
-                    return ids;
-                }
-            }
-            catch (IndexException)
-            {
-            }
-        }
-
-        return null;
     }
 
     // Shared finder: resolves matching rows via the compile-time tag, then primary key, then a single-column
@@ -1470,18 +1338,6 @@ public static partial class DataVoCompiledQuery
 
         indexName = string.Empty;
         return false;
-    }
-
-    private static Dictionary<string, object?> MaterializeStoredRow(StoredRow row)
-    {
-        StoredRowView view = row.AsView();
-        var result = new Dictionary<string, object?>(view.Count, StringComparer.OrdinalIgnoreCase);
-        for (int i = 0; i < view.Count; i++)
-        {
-            result[view.Schema.ColumnAt(i)] = view[i].ToObject();
-        }
-
-        return result;
     }
 
     private static List<RowKey> RevalidateMatchingRowIdsAfterLock(
@@ -2096,8 +1952,8 @@ public static partial class DataVoCompiledQuery
         {
             for (int i = 0; i < newRows.Count; i++)
             {
-                bool oldOk = TryGetSingleIntegerKey(oldRows[i], index.AttributeNames, out long oldKey);
-                bool newOk = TryGetSingleIntegerKey(newRows[i], index.AttributeNames, out long newKey);
+                bool oldOk = IndexKeyEncoder.TryGetSingleIntegerKey(oldRows[i], index.AttributeNames, out long oldKey);
+                bool newOk = IndexKeyEncoder.TryGetSingleIntegerKey(newRows[i], index.AttributeNames, out long newKey);
 
                 if (oldOk && (!newOk || oldKey != newKey))
                 {
@@ -2118,8 +1974,8 @@ public static partial class DataVoCompiledQuery
         {
             for (int i = 0; i < newRows.Count; i++)
             {
-                bool hasOld = TryGetSingleIntegerKey(oldRows[i], index.AttributeNames, out long oldKey);
-                bool hasNew = TryGetSingleIntegerKey(newRows[i], index.AttributeNames, out long newKey);
+                bool hasOld = IndexKeyEncoder.TryGetSingleIntegerKey(oldRows[i], index.AttributeNames, out long oldKey);
+                bool hasNew = IndexKeyEncoder.TryGetSingleIntegerKey(newRows[i], index.AttributeNames, out long newKey);
                 if (hasOld && hasNew && oldKey == newKey && oldRowIds[i] == newRowIds[i])
                 {
                     continue;
@@ -2261,30 +2117,6 @@ public static partial class DataVoCompiledQuery
         }
 
         return entries;
-    }
-
-    private static bool TryGetSingleIntegerKey(
-        IReadOnlyDictionary<string, object?> row,
-        IReadOnlyList<string> attributes,
-        out long key)
-    {
-        key = 0;
-        if (attributes.Count != 1 || !row.TryGetValue(attributes[0], out object? value) || value is null)
-        {
-            return false;
-        }
-
-        switch (value)
-        {
-            case int intValue:
-                key = intValue;
-                return true;
-            case long longValue:
-                key = longValue;
-                return true;
-            default:
-                return false;
-        }
     }
 
     private static bool TryGetSingleGuidKey(

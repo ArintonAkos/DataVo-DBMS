@@ -87,6 +87,53 @@ internal static class SimdDistanceKernels
         return EuclideanDistance(a.AsSpan(), b.AsSpan());
     }
 
+    /// <summary>
+    /// Computes double-precision Euclidean (L2) distance between two float vectors of equal length.
+    /// </summary>
+    /// <param name="left">The left vector.</param>
+    /// <param name="right">The right vector.</param>
+    /// <returns>The Euclidean distance as a <see cref="double"/>.</returns>
+    public static double EuclideanDistanceDouble(ReadOnlySpan<float> left, ReadOnlySpan<float> right)
+    {
+        double sum = 0d;
+        for (int i = 0; i < left.Length; i++)
+        {
+            double diff = left[i] - right[i];
+            sum += diff * diff;
+        }
+
+        return Math.Sqrt(sum);
+    }
+
+    /// <summary>
+    /// Computes double-precision cosine distance (<c>1 - cosineSimilarity</c>) between two float vectors of equal length,
+    /// returning <c>1.0</c> when either vector has zero magnitude.
+    /// </summary>
+    /// <param name="left">The left vector.</param>
+    /// <param name="right">The right vector.</param>
+    /// <returns>The cosine distance as a <see cref="double"/>.</returns>
+    public static double CosineDistanceDouble(ReadOnlySpan<float> left, ReadOnlySpan<float> right)
+    {
+        double dot = 0d;
+        double magLeft = 0d;
+        double magRight = 0d;
+
+        for (int i = 0; i < left.Length; i++)
+        {
+            dot += left[i] * right[i];
+            magLeft += left[i] * left[i];
+            magRight += right[i] * right[i];
+        }
+
+        if (magLeft <= 0d || magRight <= 0d)
+        {
+            return 1d;
+        }
+
+        double similarity = dot / (Math.Sqrt(magLeft) * Math.Sqrt(magRight));
+        return 1d - similarity;
+    }
+
     [System.Runtime.CompilerServices.MethodImpl(DataVo.Core.Compat.MethodImplCompat.AggressiveOptimization)]
     public static float EuclideanDistance(ReadOnlySpan<float> a, ReadOnlySpan<float> b)
     {

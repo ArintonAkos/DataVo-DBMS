@@ -1,3 +1,5 @@
+using DataVo.Core.Utils;
+
 namespace DataVo.Core.Indexing.HNSW;
 
 internal sealed class BrowserFallbackVectorIndex : IVectorIndex
@@ -46,8 +48,8 @@ internal sealed class BrowserFallbackVectorIndex : IVectorIndex
             {
                 RowId = entry.Key,
                 Distance = useEuclidean
-                    ? ComputeEuclideanDistance(queryVector, entry.Value)
-                    : ComputeCosineDistance(queryVector, entry.Value)
+                    ? SimdDistanceKernels.EuclideanDistanceDouble(queryVector, entry.Value)
+                    : SimdDistanceKernels.CosineDistanceDouble(queryVector, entry.Value)
             })
             .OrderBy(candidate => candidate.Distance)
             .Take(topK)
@@ -58,39 +60,5 @@ internal sealed class BrowserFallbackVectorIndex : IVectorIndex
     public void Clear()
     {
         _vectors.Clear();
-    }
-
-    private static double ComputeEuclideanDistance(float[] left, float[] right)
-    {
-        double sum = 0d;
-        for (int i = 0; i < left.Length; i++)
-        {
-            double diff = left[i] - right[i];
-            sum += diff * diff;
-        }
-
-        return Math.Sqrt(sum);
-    }
-
-    private static double ComputeCosineDistance(float[] left, float[] right)
-    {
-        double dot = 0d;
-        double leftNorm = 0d;
-        double rightNorm = 0d;
-
-        for (int i = 0; i < left.Length; i++)
-        {
-            dot += left[i] * right[i];
-            leftNorm += left[i] * left[i];
-            rightNorm += right[i] * right[i];
-        }
-
-        if (leftNorm <= 0d || rightNorm <= 0d)
-        {
-            return 1d;
-        }
-
-        double cosineSimilarity = dot / (Math.Sqrt(leftNorm) * Math.Sqrt(rightNorm));
-        return 1d - cosineSimilarity;
     }
 }

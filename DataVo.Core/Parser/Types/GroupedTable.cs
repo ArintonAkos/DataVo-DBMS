@@ -1,4 +1,3 @@
-using DataVo.Core.Parser.Aggregations;
 using System.Collections;
 
 namespace DataVo.Core.Parser.Types
@@ -53,36 +52,6 @@ namespace DataVo.Core.Parser.Types
         {
             get { return _tables[hash]; }
             set { _tables[hash] = value; }
-        }
-
-        /// <summary>
-        /// Applies aggregate definitions to each group and returns one projected row per group.
-        /// </summary>
-        /// <param name="aggregations">The aggregate computations to execute per group.</param>
-        /// <returns>A listed table containing one aggregated row for each group key.</returns>
-        public ListedTable ApplyAggregations(List<Aggregation> aggregations)
-        {
-            ListedTable result = [];
-
-            foreach (var group in _tables)
-            {
-                // It doesn't matter which one do we choose, because
-                // the return value will only return one value / group
-                // which have the same value.
-                JoinedRow row = group.Value.First();
-                Row groupedRow = new();
-
-                foreach (var aggregation in aggregations)
-                {
-                    object? value = aggregation.Execute(group.Value);
-                    groupedRow.Add(aggregation.GetHeaderName(), value);
-                }
-
-                row.Add(Aggregation.HASH_VALUE, groupedRow);
-                result.Add(row);
-            }
-
-            return result;
         }
     }
 }

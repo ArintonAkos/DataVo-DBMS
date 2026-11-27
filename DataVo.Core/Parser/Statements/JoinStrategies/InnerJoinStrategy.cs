@@ -62,7 +62,7 @@ internal class InnerJoinStrategy : IJoinStrategy
         string rightColumn)
     {
         HashedTable result = [];
-        JoinLookupTable rightLookup = BuildRightLookup(rightTableData, rightColumn);
+        JoinLookupTable rightLookup = JoinStrategyContext.BuildRightLookup(rightTableData, rightColumn);
 
         foreach (var leftRowEntry in leftRows)
         {
@@ -136,32 +136,5 @@ internal class InnerJoinStrategy : IJoinStrategy
         }
 
         return result;
-    }
-
-    /// <summary>
-    /// Pre-processes the target table into an optimized memory map explicitly matching target values cleanly.
-    /// </summary>
-    private static JoinLookupTable BuildRightLookup(TableData rightTableData, string rightColumn)
-    {
-        JoinLookupTable lookup = [];
-
-        foreach (var rightTableRow in rightTableData)
-        {
-            if (!rightTableRow.Value.ContainsKey(rightColumn))
-            {
-                continue;
-            }
-
-            object? keyValue = rightTableRow.Value[rightColumn];
-            if (keyValue == null)
-            {
-                continue;
-            }
-
-            object key = keyValue;
-            lookup.AddRecord(key, rightTableRow.Value);
-        }
-
-        return lookup;
     }
 }

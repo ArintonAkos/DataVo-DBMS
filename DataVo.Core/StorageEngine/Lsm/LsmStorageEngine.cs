@@ -994,18 +994,6 @@ public sealed partial class LsmStorageEngine : IFixedWidthPatchStorageEngine, IL
         state.FlushedLsn = checked((long)flushed);
     }
 
-    private static List<LsmTableFileMetadata> AllLiveFiles(TableState state) =>
-        state.FileRegistry.ExecuteVersionEdit(() =>
-        {
-            var files = new List<LsmTableFileMetadata>();
-            for (int level = 0; level <= MaxLevelToScan; level++)
-            {
-                files.AddRange(state.Manifest.GetLiveFiles(level));
-            }
-
-            return files;
-        });
-
     /// <summary>
     /// Drops overlay versions that a flushed MemTable wrote to its SSTable. Runs on the flushing thread
     /// after the file is in the manifest; works in chunks so publishers are never stalled for long.

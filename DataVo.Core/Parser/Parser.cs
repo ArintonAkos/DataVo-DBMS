@@ -1399,27 +1399,6 @@ public class Parser(List<Token> tokens)
             : (int.Parse(Consume(TokenType.NumberLiteral, description).Value), null);
     }
 
-    private LimitNode ParseLimit()
-    {
-        Consume(TokenType.Keyword, SqlKeywords.LIMIT);
-
-        var limitToken = Consume(TokenType.NumberLiteral, "limit value");
-        int take = int.Parse(limitToken.Value);
-        int skip = 0;
-
-        if (Match(TokenType.Keyword, SqlKeywords.OFFSET))
-        {
-            var offsetToken = Consume(TokenType.NumberLiteral, "offset value");
-            skip = int.Parse(offsetToken.Value);
-        }
-
-        return new LimitNode
-        {
-            TakeTarget = take,
-            SkipTarget = skip
-        };
-    }
-
     private bool IsLimitKeyword()
     {
         return ParserSyntaxHelper.IsKeyword(Current, SqlKeywords.LIMIT);

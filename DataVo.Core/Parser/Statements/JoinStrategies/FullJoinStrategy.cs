@@ -49,7 +49,7 @@ internal class FullJoinStrategy : IJoinStrategy
             ? ExecuteHashJoin(leftRows, rightTableData, leftTable, leftColumn, rightTable, rightColumn, matchedRightKeys, context)
             : ExecuteNestedLoopJoin(leftRows, rightTableData, leftTable, leftColumn, rightTable, rightColumn, matchedRightKeys, context);
 
-        ProcessUnmatchedRightRows(leftRows, rightTableData, leftTable, rightTable, matchedRightKeys, result, context);
+        context.ProcessUnmatchedRightRows(leftRows, rightTableData, leftTable, rightTable, matchedRightKeys, result);
 
         return result;
     }
@@ -68,7 +68,7 @@ internal class FullJoinStrategy : IJoinStrategy
         JoinStrategyContext context)
     {
         HashedTable result = [];
-        JoinLookupTable rightLookup = BuildRightGroupedLookup(rightTableData, rightColumn);
+        JoinLookupTable rightLookup = JoinStrategyContext.BuildRightLookup(rightTableData, rightColumn);
 
         foreach (var leftRowEntry in leftRows)
         {
@@ -171,88 +171,5 @@ internal class FullJoinStrategy : IJoinStrategy
         }
 
         return result;
-    }
-
-    /// <summary>
-    /// Evaluates unmarked target records explicitly building null pointers logically avoiding mapped entries.
-    /// </summary>
-    private static void ProcessUnmatchedRightRows(
-        HashedTable leftRows,
-        TableData rightTableData,
-        string leftTable,
-        string rightTable,
-        HashSet<RowKey> matchedRightKeys,
-        HashedTable result,
-        JoinStrategyContext context)
-    {
-        if (matchedRightKeys.Count >= rightTableData.Count)
-        {
-            return;
-        }
-
-        JoinedRow? existingLeftRow = leftRows.FirstOrDefault().Value;
-
-        foreach (var rightTableRow in rightTableData)
-        {
-            if (!matchedRightKeys.Contains(rightTableRow.Key))
-            {
-                var dict = new Dictionary<string, Row>();
-
-                if (existingLeftRow != null)
-                {
-                    foreach (var key in existingLeftRow.Keys)
-                    {
-                        dict[key] = context.TableService.GetNullRowForTable(key);
-                    }
-                }
-                else
-                {
-                    dict[leftTable] = context.TableService.GetNullRowForTable(leftTable);
-
-                    foreach (var joinTableDetail in context.JoinModel.JoinTableDetails.Values)
-                    {
-                        if (joinTableDetail.TableName != rightTable)
-                        {
-                            dict[joinTableDetail.TableName] = context.TableService.GetNullRowForTable(joinTableDetail.TableName);
-                        }
-                    }
-                }
-
-                dict[rightTable] = rightTableRow.Value.ToRow();
-                JoinedRow nullPaddedRow = new(dict);
-
-                JoinedRowId hash = context.BuildUnmatchedRightHash(rightTableRow.Key);
-                result.Add(hash, nullPaddedRow);
-            }
-        }
-    }
-
-    /// <summary>
-    /// Pre-processes the target table into an optimized memory map explicitly matching target values cleanly.
-    /// </summary>
-    private static JoinLookupTable BuildRightGroupedLookup(
-        TableData rightTableData,
-        string rightColumn)
-    {
-        JoinLookupTable lookup = [];
-
-        foreach (var rightRowEntry in rightTableData)
-        {
-            if (!rightRowEntry.Value.ContainsKey(rightColumn))
-            {
-                continue;
-            }
-
-            object? keyValue = rightRowEntry.Value[rightColumn];
-            if (keyValue == null)
-            {
-                continue;
-            }
-
-            object key = keyValue;
-            lookup.AddRecord(key, rightRowEntry.Value);
-        }
-
-        return lookup;
     }
 }

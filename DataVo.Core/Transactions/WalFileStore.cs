@@ -269,14 +269,6 @@ internal sealed class WalFileStore
     }
 
     /// <summary>
-    /// Deletes the WAL file if it exists.
-    /// </summary>
-    public void DeleteIfExists()
-    {
-        ExecuteLocked(DeleteIfExistsCore);
-    }
-
-    /// <summary>
     /// Executes an operation while holding the file-specific synchronization lock.
     /// </summary>
     /// <param name="action">The action to execute.</param>
