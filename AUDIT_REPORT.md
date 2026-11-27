@@ -339,7 +339,7 @@ Before listing removable legacy items, the following compatibility seams were au
 
 ### Subsystem: `DataVo.Browser`
 
-#### `BC-26` — Legacy `Newtonsoft.Json`, `Microsoft.CSharp` (`dynamic?`), Dormant `XmlSerializer` Trimmer Roots & Stale `0.1.0-preview.1` Version
+#### [DONE] `BC-26` — Legacy `Newtonsoft.Json`, `Microsoft.CSharp` (`dynamic?`), Dormant `XmlSerializer` Trimmer Roots & Stale `0.1.0-preview.1` Version
 - **Exact Location(s):**
   - `DataVo.Browser/DataVo.Browser.csproj:7,13,21-40`
   - `DataVo.Browser/Program.cs:4,15,284`
@@ -347,20 +347,22 @@ Before listing removable legacy items, the following compatibility seams were au
 - **Proposed Action:** Replace `dynamic?` with `object?` at `Program.cs:284`, migrate `Program.cs` serialization to `System.Text.Json` source-gen, remove `Newtonsoft.Json` and obsolete `XmlSerializer`/`Microsoft.CSharp` trimmer roots, align version, and evaluate enabling trimming.
 - **Risk / Dependencies:** Medium — requires `wasm-tools` workload and Playwright browser suite verification.
 - **Effort Estimate:** `M`
+- **Resolution (Phase 5):** `Program.cs` uses `System.Text.Json` through the source-generated `BrowserJsonContext` (`BrowserJson.cs`); result cells (`object?`) are written by `BrowserCellJsonConverter` by runtime type, so the `dynamic?` and `JObject` paths are gone. `Newtonsoft.Json` and the `Microsoft.CSharp`/`System.Xml.XmlSerializer`/framework trimmer roots are removed. Trimming is now enabled (`PublishTrimmed=true`, roots: `DataVo.Core` and `DataVo.Browser` only): the docs bundle went from 16.6 MB to 7.7 MB with no trim warnings. `<Version>` comes from the new shared `$(DataVoVersion)` (0.5.1) in `Directory.Build.props`.
 
-#### `BC-27` — `localStorage` & Non-Persistent `worker-memory-fallback` Compatibility Shims in `datavo.interop.js`
+#### [DONE] `BC-27` — `localStorage` & Non-Persistent `worker-memory-fallback` Compatibility Shims in `datavo.interop.js`
 - **Exact Location(s):**
   - `DataVo.Browser/datavo.interop.js:1-7,69-82,122-313,452-490`
 - **What it is & Why it's there:** OPFS worker transport requires `Atomics.wait` + `SharedArrayBuffer`, which always fails on the browser main thread or without COOP/COEP headers — forcing fallback to synchronous `localStorage` (~5 MB cap) or silent non-persistent `worker-memory-fallback` (loses all data on reload).
 - **Proposed Action:** Keep `localStorage` only if main-thread/non-COOP hosting is still desired; surface an explicit warning/flag when `worker-memory-fallback` activates; consider direct `FileSystemSyncAccessHandle` inside a single Web Worker (eliminating `SharedArrayBuffer` requirement).
 - **Risk / Dependencies:** Medium (affects docs playground hosting on GitHub Pages, which lacks COOP/COEP headers by default).
 - **Effort Estimate:** `M`
+- **Resolution (Phase 5):** `localStorage` stays as the main-thread/non-isolated fallback. `worker-memory-fallback` now logs a warning, sets `globalThis.__datavoStorageNonPersistent` and reports `persistent: false` plus a `warning` in the capabilities (every backend reports `persistent`). **Open follow-up:** the OPFS worker transport still never engages. `DataVoRuntimeWorker.ts` calls `withApplicationArgumentsFromQuery()` (throws without `window`), and the nested storage worker never starts while its parent blocks in `Atomics.wait`. Making OPFS work needs the single-worker `FileSystemSyncAccessHandle` redesign.
 
 ---
 
 ### Subsystem: `integrations/unity`
 
-#### `BC-28` — Stale `StorageMode.Disk` Claim in `integrations/unity/com.datavo.core/README.md`
+#### [DONE] `BC-28` — Stale `StorageMode.Disk` Claim in `integrations/unity/com.datavo.core/README.md`
 - **Exact Location(s):**
   - `integrations/unity/com.datavo.core/README.md:15`
   - `scripts/check-unity-support-status.sh:88-89`
@@ -368,8 +370,9 @@ Before listing removable legacy items, the following compatibility seams were au
 - **Proposed Action:** Remove `StorageMode.Disk` from `integrations/unity/com.datavo.core/README.md:15` and add this file to `scripts/check-unity-support-status.sh`.
 - **Risk / Dependencies:** Low.
 - **Effort Estimate:** `XS`
+- **Resolution (Phase 5):** `StorageMode.Disk` removed from the UPM README status table; `check-unity-support-status.sh` rejects `StorageMode.Disk` in that README.
 
-#### `BC-29` — Stale `0.4.0-rc.1` Version in Unity `CHANGELOG.md` & `package-unity-upm.sh`
+#### [DONE] `BC-29` — Stale `0.4.0-rc.1` Version in Unity `CHANGELOG.md` & `package-unity-upm.sh`
 - **Exact Location(s):**
   - `integrations/unity/com.datavo.core/CHANGELOG.md:3,31`
   - `scripts/package-unity-upm.sh:8`
@@ -377,6 +380,7 @@ Before listing removable legacy items, the following compatibility seams were au
 - **Proposed Action:** Add `0.5.x` changelog entry and read the default version dynamically from `Directory.Build.props` (or require `--version`).
 - **Risk / Dependencies:** Low.
 - **Effort Estimate:** `XS`
+- **Resolution (Phase 5):** UPM `CHANGELOG.md` has `0.5.0` (Disk removal) and `0.5.1` entries; `package-unity-upm.sh` defaults to `<DataVoVersion>` from `Directory.Build.props` (verified: builds `com.datavo.core-0.5.1.tgz`).
 
 ---
 
@@ -1019,7 +1023,7 @@ Before listing removable legacy items, the following compatibility seams were au
 
 ### Subsystem: `DataVo.Browser`
 
-#### `LE-38` — Severe JS Interop Memory/Perf Defects & Dead Code in `datavo.interop.js` / `datavo.storage.worker.js`
+#### [DONE] `LE-38` — Severe JS Interop Memory/Perf Defects & Dead Code in `datavo.interop.js` / `datavo.storage.worker.js`
 - **Exact Location(s):**
   - `DataVo.Browser/datavo.interop.js:13,46-53,329,349-351`
   - `DataVo.Browser/datavo.storage.worker.js:20-35,44-50,131-146,169,180,192-197,306-318`
@@ -1032,8 +1036,9 @@ Before listing removable legacy items, the following compatibility seams were au
 - **Proposed Action:** Reuse a single `SharedArrayBuffer` without zero-filling 8 MB per call; clear `rootDirectoryPromise` on rejection; fix `bytesToBase64`; delete dead `encoder` and redundant checks; chunk/stream `readAllRows` and batch `insertRows`.
 - **Risk / Dependencies:** Medium (requires browser Playwright verification).
 - **Effort Estimate:** `M`
+- **Resolution (Phase 5):** `invokeSync` reuses one control buffer and one 8 MB `SharedArrayBuffer` for the backend's lifetime (sent once in an `attach` message); the worker writes with `TextEncoder.encodeInto` (no per-call allocation or zero-fill) and the reader copies only the payload. `rootDirectoryPromise` is cleared on rejection; `bytesToBase64` converts in 32 KB chunks; the unused `encoder` and redundant prefix checks are gone. `readAllRows` chunking and batched `insertRows` remain open.
 
-#### `LE-39` — `BrowserStorageEngine` & `DataVoInterop` Persistence, API & Error-Contract Loose Ends
+#### [DONE] `LE-39` — `BrowserStorageEngine` & `DataVoInterop` Persistence, API & Error-Contract Loose Ends
 - **Exact Location(s):**
   - `DataVo.Browser/BrowserStorageEngine.cs:9-20,46-54,59,68-116,133-147`
   - `DataVo.Browser/Program.cs:73,100-158,212,245-329`
@@ -1045,8 +1050,9 @@ Before listing removable legacy items, the following compatibility seams were au
 - **Proposed Action:** Persist catalog only on DDL/DB changes; make `CompactTable` atomic; unify JSON error envelope; align NULL index rebuild; remove/gate `DiagnoseLexer`; fix stale IndexedDB comments.
 - **Risk / Dependencies:** Medium (touches `docs/src/DataVoClient.ts` if JSON envelope changes).
 - **Effort Estimate:** `M`
+- **Resolution (Phase 5):** `ExecuteSql` persists the catalog only when `Catalog.Generation` changed and the selected database only when it changed (verified in Chromium: read-only and failing statements leave `writeCatalog` untouched). Every SQL response is a `QueryResult[]` (failures via `QueryResult.FromException`, with `ErrorCode`); `DiagnoseLexer` and the client's diagnostic fallback are removed. `CompactTable` no longer drops and re-inserts: rows are independent entries, so it returns them under their ids and writes nothing (atomic). Index rebuild on startup calls Core's new `DataVoEngine.RebuildIndexesFromStorage()` (same NULL-key and vector rules as engine open). `BrowserStorageEngine` has `[SupportedOSPlatform("browser")]` and OPFS docs.
 
-#### `LE-40` — Broken `/DataVo-DBMS/` Base-Path URLs in Browser Client/Playwright & 189 Placeholder-Stubbed "Parity" Tests
+#### [DONE] `LE-40` — Broken `/DataVo-DBMS/` Base-Path URLs in Browser Client/Playwright & 189 Placeholder-Stubbed "Parity" Tests
 - **Exact Location(s):**
   - `docs/src/DataVoClient.ts:146-153`, `docs/src/DataVoRuntimeWorker.ts:52-57` (hardcode `/datavo-wasm/...` without `/DataVo-DBMS/` base)
   - `docs/playwright.config.ts:15,21`, `docs/tests/browser/datavo-wasm.spec.ts:340,365,382,463,466,536,539`, `docs/tests/browser/support/wasm-parity.ts:113,144,157`, `needs-specific-suite.ts:26` (hardcode `page.goto("/")` and `import("/src/DataVoClient.ts")`)
@@ -1056,6 +1062,7 @@ Before listing removable legacy items, the following compatibility seams were au
 - **Proposed Action:** Use `import.meta.env.BASE_URL` in TS client/worker and prefix `/DataVo-DBMS/` in Playwright; replace the 6 placeholder plans with real assertions or honestly relabel the browser test suite as smoke-only.
 - **Risk / Dependencies:** High for browser playground functionality.
 - **Effort Estimate:** `M`
+- **Resolution (Phase 5):** `DataVoClient.ts`/`DataVoRuntimeWorker.ts` resolve the bundle via `import.meta.env.BASE_URL` (`src/datavoWasmPaths.ts`); Playwright uses `baseURL .../DataVo-DBMS/` and `tests/browser/support/base-path.ts` for `page.goto` and the client module URL; the stale `/Disk/i` match is removed. `datavo-wasm.spec.ts` passes (strict parity included). The placeholder needs-specific plans are unchanged.
 
 ---
 
@@ -1080,7 +1087,7 @@ Before listing removable legacy items, the following compatibility seams were au
 - **Risk / Dependencies:** Medium for UPM package consumers; zero risk to .NET builds.
 - **Effort Estimate:** `XS`
 
-#### `LE-43` — `com.datavo.unity.mathematics` Stuck at `0.1.0-preview.1`, Missing `com.datavo.core` Dependency, & Contradictory Docs Referencing Unimplemented `com.datavo.unity.jobs`
+#### [DONE] `LE-43` — `com.datavo.unity.mathematics` Stuck at `0.1.0-preview.1`, Missing `com.datavo.core` Dependency, & Contradictory Docs Referencing Unimplemented `com.datavo.unity.jobs`
 - **Exact Location(s):**
   - `integrations/unity/com.datavo.unity.mathematics/package.json:4,6-9`
   - `integrations/unity/com.datavo.unity.mathematics/Documentation~/README.md:45,53-56` vs `integrations/unity/com.datavo.unity.mathematics/README.md:46-53`
@@ -1088,6 +1095,7 @@ Before listing removable legacy items, the following compatibility seams were au
 - **Proposed Action:** Reconcile `Documentation~/README.md` with `README.md`, mark `com.datavo.unity.jobs` clearly as planned/unimplemented, and align `package.json` version & dependency on `com.datavo.core`.
 - **Risk / Dependencies:** Low.
 - **Effort Estimate:** `XS`
+- **Resolution (Phase 5):** `com.datavo.unity.mathematics` is `0.5.1-preview.1` and depends on `com.datavo.core` 0.5.1. The generated dev candidate is now named `com.datavo.core` so the smoke/arena projects satisfy it (manifests, locks and checks updated; Unity EditMode 7/7 and IL2CPP smoke pass). Both READMEs agree on status and mark `com.datavo.unity.jobs` as planned and unimplemented.
 
 #### `LE-44` — Windows x64 IL2CPP Player Unverified & macOS-Only Player Builders / SQLite P/Invoke
 - **Exact Location(s):**
@@ -1100,7 +1108,7 @@ Before listing removable legacy items, the following compatibility seams were au
 - **Risk / Dependencies:** Requires a Windows runner with Unity 6000.5.4f1 + IL2CPP workload.
 - **Effort Estimate:** `M`
 
-#### `LE-45` — `PlayerSmokeBootstrap.cs` Hardcodes `scenarioCount = 3`
+#### [DONE] `LE-45` — `PlayerSmokeBootstrap.cs` Hardcodes `scenarioCount = 3`
 - **Exact Location(s):**
   - `tests/unity/DataVo.UnitySmoke/Assets/DataVoSmoke/Runtime/PlayerSmokeBootstrap.cs:326`
   - `scripts/run-unity-macos-il2cpp-player-smoke.sh:165`
@@ -1108,6 +1116,7 @@ Before listing removable legacy items, the following compatibility seams were au
 - **Proposed Action:** Count executed scenarios dynamically and assert `>= 4` when `DATAVO_UPM_PACKAGE_SCENARIO` is active.
 - **Risk / Dependencies:** Low.
 - **Effort Estimate:** `XS`
+- **Resolution (Phase 5):** `PlayerSmokeBootstrap` counts completed scenarios (the package scenario adds its own); `run-unity-macos-il2cpp-player-smoke.sh` requires `>= 4` when `DATAVO_UPM_PACKAGE_SCENARIO=1`, which `verify-unity-upm-package.sh` sets (verified: candidate Player reports 3, UPM tarball Player reports 4).
 
 ---
 
