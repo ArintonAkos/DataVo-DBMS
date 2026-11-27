@@ -147,7 +147,7 @@ Before listing removable legacy items, the following compatibility seams were au
 - **Risk / Dependencies:** High — retiring prematurely breaks outer joins, `HAVING`, subqueries, and window functions.
 - **Effort Estimate:** `L`
 
-#### `BC-10` — Transition Bridge `StoredRowDictionaryView` & `StoredRow.AsDictionary()`
+#### [DONE] `BC-10` — Transition Bridge `StoredRowDictionaryView` & `StoredRow.AsDictionary()`
 - **Exact Location(s):**
   - `DataVo.Core/StorageEngine/StoredRowDictionaryView.cs:1-81`
   - `DataVo.Core/StorageEngine/StoredRow.cs:89-91`
@@ -157,6 +157,7 @@ Before listing removable legacy items, the following compatibility seams were au
 - **Proposed Action:** Migrate `ReactiveRegistry.cs:547` to consume `StoredRow` / `StoredRowView` directly, then delete `StoredRowDictionaryView.cs`, `StoredRow.AsDictionary()`, and `StoredRowDictionaryViewTests.cs`.
 - **Risk / Dependencies:** Low (`internal` class; `StoredRow.AsDictionary()` is public only on `StoredRow` if exposed).
 - **Effort Estimate:** `S`
+- **Resolution (Phase 7):** Reactive operators now seed from typed rows: `IReactiveQuery.Seed` takes `IEnumerable<TypedRow>` and `ReactiveRegistry` wraps each `StoredRow`'s cells without copying. `StoredRowDictionaryView.cs`, `StoredRow.AsDictionary()` and `StoredRowDictionaryViewTests.cs` are deleted; `TypedReadParityTests` compares `StoredRow` cells directly.
 
 #### [DONE] `BC-11` — Legacy Disk B+Tree 32-Byte Binary Key Encoding, Dead JSON Attributes & O(n log n) `Delete` in `BTree/`
 - **Exact Location(s):**
@@ -227,7 +228,7 @@ Before listing removable legacy items, the following compatibility seams were au
 - **Effort Estimate:** `S`
 - **Resolution (Phase 2A):** `BaseDbAction` records a structured first error (`AddError(Exception)` / `AddError(QueryResult)`); the `"Error:"` scan and classifier prefix are gone; `CreateTable` was the last `Messages.Add("Error: ...")` site.
 
-#### `BC-17` — Legacy `StorageMode.Disk` Naming & Stale Comment Remnants in `DataVo.Core`
+#### [DONE] `BC-17` — Legacy `StorageMode.Disk` Naming & Stale Comment Remnants in `DataVo.Core`
 - **Exact Location(s):**
   - `DataVo.Core/StorageEngine/Config/DataVoConfig.cs:68,303,357` (`DiskStoragePath` property name — 235 references repo-wide)
   - `DataVo.Core/StorageEngine/StorageContext.cs:146,313,321`
@@ -237,8 +238,9 @@ Before listing removable legacy items, the following compatibility seams were au
 - **Proposed Action:** Clean up all stale `Disk`-mode comments immediately; optionally rename `DiskStoragePath` → `StoragePath` (or `DataDirectory`) across the repo in a coordinated breaking cleanup since zero BC is required.
 - **Risk / Dependencies:** Trivial for comments; Medium-wide mechanical rename across 235 references (core, providers, tests, examples, benchmarks, Unity, docs) if renaming `DiskStoragePath`.
 - **Effort Estimate:** `XS` (comments only) / `S` (full `DiskStoragePath` rename)
+- **Resolution (Phase 7):** `DataVoConfig.DiskStoragePath` is renamed `DataDirectory` (matching `ResolveDataDirectory()`) across Core, providers, tests, benchmarks, demos, examples, tools, Unity smoke and docs (the prebuilt `docs/public/datavo-wasm` binary is left for the next bundle rebuild). The stale `Disk`-mode comments in `StorageContext`, `IStorageEngine`, `IStorageBackend`, `CatalogStore`, `DeferredPublication`, `RowDeletedException`, `IndexManager`, `InsertInto` and `InsertRowService` now describe the InMemory/LSM engines.
 
-#### `BC-18` — Legacy Dictionary Bridges in `DataVoCompiledQuery` & Reactive Operators (`_legacyBuilder`)
+#### [DONE] `BC-18` — Legacy Dictionary Bridges in `DataVoCompiledQuery` & Reactive Operators (`_legacyBuilder`)
 - **Exact Location(s):**
   - `DataVo.Core/CompiledQueries/DataVoCompiledQuery.cs:34-74,653,1395` (`SelectSingle`/`SelectMany` dictionary overloads)
   - `DataVo.Core/Runtime/Reactive/{Aggregate,Join,TopK,RecursiveCte,VipExposure}ReactiveQuery.cs` (`_legacyBuilder` field + duplicated `Apply` overrides)
@@ -248,6 +250,7 @@ Before listing removable legacy items, the following compatibility seams were au
 - **Proposed Action:** Migrate remaining `DataVoQueryGenerator` shapes to typed readers and delete dictionary `SelectSingle`/`SelectMany` overloads; centralize `IBorrowedReactiveQuery`→`QueryChange` adaptation inside `ReactiveRegistry` so individual operators don't carry `_legacyBuilder`.
 - **Risk / Dependencies:** Touches `DataVo.Generators`, `CompiledQueryRuntimeTests`, and reactive tests.
 - **Effort Estimate:** `M`
+- **Resolution (Phase 7):** Every SQL-compiled operator implements `IBorrowedReactiveQuery`; `IReactiveQuery` no longer has `Apply`, and `ReactiveRegistry.DispatchCompiled` is the single place a borrowed delta is materialized (`QueryChangeRef.Materialize`) for owned subscribers. All `_legacyBuilder` fields and owned `Apply` overrides are gone. The dictionary `DataVoCompiledQuery.SelectSingle`/`SelectMany` overloads and their `ExecuteSelect` path are deleted; `DataVoQueryGenerator` always emits a typed `CompiledRowMapper` (`SelectSingleTyped`/`SelectManyTyped`), reading a constructor parameter without a typed getter through the new `CompiledRowReader.GetValue(column)` cast to its type, so `QueryMethodModel.DictionaryArguments` is gone. `RowRef.ToOwnedDictionary()` stays as the one owned boundary behind `Materialize` and the LINQ dictionary-model projector. Tests that used the dictionary path as a parity oracle compare the runtime-resolved and tagged typed paths instead; the materialization-reclaim test now asserts typed per-row cost does not grow with unprojected columns (measured 80 B/row narrow and wide, ceiling 128 B/row).
 
 ---
 
@@ -572,7 +575,7 @@ Before listing removable legacy items, the following compatibility seams were au
 
 ### Subsystem: `DataVo.Core`
 
-#### `LE-01` — Hardcoded Benchmark-Specific `VipExposureReactiveQuery` Shipped in `DataVo.Core`
+#### [DONE] `LE-01` — Hardcoded Benchmark-Specific `VipExposureReactiveQuery` Shipped in `DataVo.Core`
 - **Exact Location(s):**
   - `DataVo.Core/Runtime/Reactive/VipExposureReactiveQuery.cs:7-297` (`:40-52` loose `IsSupported`; `:264` `row[3].AsInt32()` bug on `decimal Stake`)
   - `DataVo.Core/Runtime/Reactive/ReactiveRegistry.cs:514-517`
@@ -580,6 +583,7 @@ Before listing removable legacy items, the following compatibility seams were au
 - **Proposed Action:** Replace with composable multi-table join + aggregate reactive operators (or remove from `DataVo.Core` and tighten `IsSupported` + fix line 264 immediately if retained short-term for the benchmark).
 - **Risk / Dependencies:** `demos/Research.Benchmark` (`arena-live-views` / betting risk runner) currently depends on this query shape running reactively.
 - **Effort Estimate:** `S` (fix & isolate) / `L` (general 3-way join+aggregate IVM)
+- **Resolution (Phase 7):** `VipExposureReactiveQuery` and its tests are deleted. The new `JoinAggregateReactiveQuery` maintains any N-way INNER equi-join with an optional WHERE (qualified or unambiguous columns), `GROUP BY` and `COUNT`/`SUM`/`AVG`/`MIN`/`MAX`: each table's rows are kept typed and bucketed by every join column (no primary key needed; rows are a bag), and each committed row change is joined against the other tables along a precomputed spanning-tree probe plan and fed ±1 into the shared `ReactiveGroupAggregator` (extracted from `AggregateReactiveQuery`, now ordinal-based with typed MIN/MAX state). Self-joins, outer joins, HAVING and ORDER BY/LIMIT are rejected with `NotSupportedException`. `SUM` over an INT column is now a BIGINT, as in SQL, so the benchmark engine and tests read it numerically. Tests: scenario coverage (dimension flips, category moves, deletes, bag duplicates, seeding, zero-alloc delivery), a randomized differential against an in-test oracle on InMemory and LSM, and the rejected shapes; the VIP allocation guard (≤ 2,450 B/insert) and the DataVo/DuckDB/SQLite VIP benchmark test still pass.
 
 #### [DONE] `LE-02` — `BTreeIndexFactory` Defaults `minDegree = 3` Instead of `InMemoryBTreeIndex.DefaultMinDegree` (`50`)
 - **Exact Location(s):**
@@ -658,7 +662,7 @@ Before listing removable legacy items, the following compatibility seams were au
 - **Effort Estimate:** `S`
 - **Resolution (Phase 3):** `TableRows.Compact` renumbers serialized and typed (including kept-apart) rows in order; typed survivors report an empty payload since VACUUM now rebuilds indexes from stored rows. `StorageMode.Wasm` without an OPFS engine resolves to `InMemoryStorageBackend("Wasm")` via `WasmStorageBackend.Create`, keeping every capability interface; a supplied OPFS engine is still wrapped as before. `InMemoryTypedStorageTests` now asserts typed compaction instead of the old throw.
 
-#### [PARTIAL — safety fix DONE] `LE-08` — Incomplete Transactional / Snapshot Support & Unsafe `UpdateFixedWidthByPrimaryKeyBatch`
+#### [DONE] `LE-08` — Incomplete Transactional / Snapshot Support & Unsafe `UpdateFixedWidthByPrimaryKeyBatch`
 - **Exact Location(s):**
   - `DataVo.Core/Runtime/DataVoEngine.cs:530-566`, `StorageEngine/StorageContext.cs:1492-1511` (`CreateSnapshot`/`RestoreSnapshot` throw `NotSupportedException` outside `InMemory`)
   - `DataVo.Core/DataVoContext.cs:543-548,631-636,730-735,860-863` (`BulkInsert`, `InsertTyped`, `InsertTypedBatch`, `Insert<T>`, `ApplyBatch` reject active transactions)
@@ -668,8 +672,9 @@ Before listing removable legacy items, the following compatibility seams were au
 - **Risk / Dependencies:** High safety value for `UpdateFixedWidthByPrimaryKeyBatch`; Medium effort to wire transactions into direct APIs.
 - **Effort Estimate:** `XS` (safety fix) / `L` (full tx + LSM snapshots)
 - **Resolution (Phase 3, safety fix):** `UpdateFixedWidthByPrimaryKeyBatch` rejects an active session transaction (shared `ThrowIfActiveTransaction`, also used by the other compiled updates), authorizes `WriteData`, and resolves/validates/patches the whole batch under the table write lock (taken after the commit-clock unit, as `BulkInsert` does). **Reserved for Phase 7:** transactional `InsertTyped`/`ApplyBatch`/compiled updates and LSM snapshots.
+- **Resolution (Phase 7):** Direct writes no longer reject or bypass an open transaction. `BulkInsert`, `InsertTyped`, `InsertTypedBatch` and `Insert<T>` validate and buffer their rows in it like SQL `INSERT` (keys checked against committed and buffered rows; provisional keys returned; diagnostics record failures). `ApplyBatch` folds the batch as before and writes it into the transaction (`BatchApplier.ExecuteInTransaction`): rows found through the transaction's view, deletes/updates as parameterized statements (row locks, MVCC, constraints, cascades), inserts buffered, the whole batch under a savepoint, same insert/update/delete/unchanged/missing counts. Compiled `Update`, `UpdateFixedWidth`, `UpdateFixedWidthByPrimaryKey` and `UpdateFixedWidthByPrimaryKeyBatch` run as a cached parameterized `UPDATE` of the transaction (the batch under a savepoint) instead of patching storage. `CreateSnapshot`/`RestoreSnapshot` support `StorageMode.Lsm`: the snapshot holds the catalog and every table's rows; a restore requires an unchanged schema, rewrites all tables in one LSM write batch, rebuilds scalar and vector indexes, and is durable across reopen. Tests: `DirectApiTransactionTests`, `ApplyBatchTests.OpenTransaction_*`, `CompiledQueryRuntimeTests.CompiledUpdate*InsideATransaction*`, `LsmSnapshotTests`.
 
-#### [PARTIAL — leak fix DONE] `LE-09` — Reactive IVM Follow-Ups (`SubscribeZeroAlloc` Gaps, `RowChange.TypedBefore`, Buffer Leak, Test Seam)
+#### [DONE] `LE-09` — Reactive IVM Follow-Ups (`SubscribeZeroAlloc` Gaps, `RowChange.TypedBefore`, Buffer Leak, Test Seam)
 - **Exact Location(s):**
   - `DataVo.Core/Runtime/Reactive/ReactiveRegistry.cs:151-152,195-199,422-450,492` (`AddCompiledForTest` seam; `SubscribeZeroAlloc` throws `NotSupportedException` for 4 of 9 operators; `_incomingBuffer` leak after unsubscribe; unused `sql` param at `:492`)
   - `DataVo.Core/Runtime/Reactive/{ReactiveSubscription,DistinctReactiveQuery,SubqueryReactiveQuery,UnionReactiveQuery}.cs` (missing `IBorrowedReactiveQuery`)
@@ -682,6 +687,7 @@ Before listing removable legacy items, the following compatibility seams were au
 - **Risk / Dependencies:** High memory-leak impact for long-lived engines using reactive views.
 - **Effort Estimate:** `XS` (buffer leak fix) / `L` (full zero-alloc IVM completion)
 - **Resolution (Phase 3, leak fix):** `ReactiveRegistry` unhooks `Changes.Captured` and clears its buffer when the last subscription is removed (switching capture off only if it turned it on and no other subscriber listens), `Enqueue` drops sets while no subscription exists, and subscribing again re-hooks. The unused `sql` parameter of `CreateQuery` is gone. **Reserved for Phase 7:** `AddCompiledForTest` removal, borrowed emit for the remaining operators, `RowChange.TypedBefore`.
+- **Resolution (Phase 7):** `AddCompiledForTest` is removed (the bridge test uses `AddCompiled`). `ReactiveSubscription` (now internal), `DistinctReactiveQuery`, `UnionReactiveQuery` and `SubqueryReactiveQuery` emit borrowed deltas with typed state (`PackedKey`-keyed, shared `ReactiveTupleCounter` for DISTINCT/UNION), and `RecursiveCteReactiveQuery` keeps its base relations and CTE tuples typed, so `SubscribeZeroAlloc` serves every shape `Subscribe` accepts. `RowChange` gains `TypedBefore` and `RowChange.FromTyped`; each image is available typed and as a dictionary, the missing form built lazily and cached. `ChangeRecorder` captures insert/update/delete images as typed rows (per-table cached schema; dictionary snapshot only for values without a typed form), so operators read typed images only and owned readers get dictionaries on demand. `AggregateReactiveQuery` uses typed images for every change kind; MIN/MAX state is a typed multiset (no boxing per change). Out of scope and unchanged: HAVING/ORDER BY/LIMIT on aggregates and the two-table limit of non-aggregate joins.
 
 #### [DONE] `LE-10` — SQL Dialect Gaps & Legacy `TableColumnService` (`DATETIME`) / `GroupBy` Hash-Collision Bugs
 - **Exact Location(s):**
