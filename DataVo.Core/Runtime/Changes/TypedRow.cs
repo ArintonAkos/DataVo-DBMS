@@ -49,6 +49,34 @@ public readonly struct TypedRow
         return new TypedRow(schema, ownedCells, owned: true);
     }
 
+    /// <summary>
+    /// Builds a typed image from a dictionary image, in the dictionary's key order, or returns <c>null</c> when
+    /// <paramref name="image"/> is <c>null</c>. Bound parameter values are materialized and vectors are copied, so
+    /// the result shares no mutable state with the dictionary.
+    /// </summary>
+    /// <param name="image">The dictionary image.</param>
+    /// <returns>The typed image, or <c>null</c>.</returns>
+    /// <exception cref="NotSupportedException">A value has no typed cell representation.</exception>
+    internal static TypedRow? FromImage(IReadOnlyDictionary<string, object?>? image)
+    {
+        if (image is null)
+        {
+            return null;
+        }
+
+        var columns = new string[image.Count];
+        var cells = new CellValue[image.Count];
+        int i = 0;
+        foreach (KeyValuePair<string, object?> pair in image)
+        {
+            columns[i] = pair.Key;
+            cells[i] = CellValue.From(pair.Value is ValueConversion.DataVoBoundValue bound ? bound.ToMaterializedValue() : pair.Value);
+            i++;
+        }
+
+        return new TypedRow(new ReactiveRowSchema(columns), cells, owned: true);
+    }
+
     /// <summary>Gets the schema that describes the row's cell order.</summary>
     public ReactiveRowSchema Schema { get; }
 

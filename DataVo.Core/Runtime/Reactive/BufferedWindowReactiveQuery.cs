@@ -76,6 +76,7 @@ internal sealed class BufferedWindowReactiveQuery<TProjection, TProjector> : IDi
     private int _activeCount;
 
     private readonly CellValue[] _incomingScratch;
+    private readonly CellValue[] _beforeScratch;
     private readonly CellValue[] _prevWindowCells;
     private int _prevWindowCount;
 
@@ -130,6 +131,7 @@ internal sealed class BufferedWindowReactiveQuery<TProjection, TProjector> : IDi
         _freeSlots = new int[_slotCapacity];
         _orderedSlots = new int[_slotCapacity];
         _incomingScratch = new CellValue[_slotWidth];
+        _beforeScratch = new CellValue[_slotWidth];
         _prevWindowCells = new CellValue[_windowMax * _outputWidth];
     }
 
@@ -137,24 +139,18 @@ internal sealed class BufferedWindowReactiveQuery<TProjection, TProjector> : IDi
     public IReadOnlyCollection<string> Tables => [_table];
 
     /// <inheritdoc />
-    public void Seed(string table, IEnumerable<(RowKey RowId, IReadOnlyDictionary<string, object?> Row)> rows)
+    public void Seed(string table, IEnumerable<TypedRow> rows)
     {
-        foreach ((RowKey _, IReadOnlyDictionary<string, object?> row) in rows)
+        foreach (TypedRow row in rows)
         {
-            if (MatchesDictionary(row))
+            if (Matches(row, dictionary: null))
             {
-                FillScratchFromDictionary(row, _incomingScratch);
+                FillScratchFromTyped(row.AsRowRef(), _incomingScratch);
                 UpsertSlot(_incomingScratch);
             }
         }
 
         SnapshotWindowBaseline();
-    }
-
-    /// <inheritdoc />
-    public QueryChange Apply(IReadOnlyList<RowChange> changes)
-    {
-        throw new NotSupportedException("Buffered window subscriptions use direct zero-allocation dispatch.");
     }
 
     /// <inheritdoc />
@@ -196,64 +192,38 @@ internal sealed class BufferedWindowReactiveQuery<TProjection, TProjector> : IDi
 
     private void ApplyInsert(RowChange change)
     {
-        if (change.TypedAfter is { } typed && _fallbackPredicate is null)
+        if (change.TypedAfter is { } after && Matches(after, _fallbackPredicate is null ? null : change.After))
         {
-            RowRef typedRow = typed.AsRowRef();
-            if (_predicate is null || _predicate.Matches(typedRow))
-            {
-                FillScratchFromTyped(typedRow, _incomingScratch);
-                UpsertSlot(_incomingScratch);
-            }
-
-            return;
-        }
-
-        if (change.After is { } after && MatchesDictionary(after))
-        {
-            FillScratchFromDictionary(after, _incomingScratch);
+            FillScratchFromTyped(after.AsRowRef(), _incomingScratch);
             UpsertSlot(_incomingScratch);
         }
     }
 
     private void ApplyDelete(RowChange change)
     {
-        if (change.Before is not { } before)
+        if (change.TypedBefore is { } before)
         {
-            return;
+            FillScratchFromTyped(before.AsRowRef(), _beforeScratch);
+            RemoveSlot(_beforeScratch[_keySlotOffset]);
         }
-
-        CellValue key = ReadDictionaryCell(before, _slotColumns[_keySlotOffset]);
-        RemoveSlot(key);
     }
 
     private void ApplyUpdate(RowChange change)
     {
-        bool beforeMatches = change.Before is not null && MatchesDictionary(change.Before);
-        CellValue beforeKey = change.Before is not null
-            ? ReadDictionaryCell(change.Before, _slotColumns[_keySlotOffset])
-            : CellValue.Null;
+        bool beforeMatches = false;
+        CellValue beforeKey = CellValue.Null;
+        if (change.TypedBefore is { } before)
+        {
+            beforeMatches = Matches(before, _fallbackPredicate is null ? null : change.Before);
+            FillScratchFromTyped(before.AsRowRef(), _beforeScratch);
+            beforeKey = _beforeScratch[_keySlotOffset];
+        }
 
-        bool afterMatches;
-        if (change.TypedAfter is { } typed && _fallbackPredicate is null)
+        bool afterMatches = change.TypedAfter is { } after
+            && Matches(after, _fallbackPredicate is null ? null : change.After);
+        if (afterMatches)
         {
-            RowRef typedRow = typed.AsRowRef();
-            afterMatches = _predicate is null || _predicate.Matches(typedRow);
-            if (afterMatches)
-            {
-                FillScratchFromTyped(typedRow, _incomingScratch);
-            }
-        }
-        else if (change.After is { } after)
-        {
-            afterMatches = MatchesDictionary(after);
-            if (afterMatches)
-            {
-                FillScratchFromDictionary(after, _incomingScratch);
-            }
-        }
-        else
-        {
-            afterMatches = false;
+            FillScratchFromTyped(change.TypedAfter!.Value.AsRowRef(), _incomingScratch);
         }
 
         if (beforeMatches && !afterMatches)
@@ -280,22 +250,18 @@ internal sealed class BufferedWindowReactiveQuery<TProjection, TProjector> : IDi
         }
     }
 
-    private bool MatchesDictionary(IReadOnlyDictionary<string, object?> row)
+    /// <summary>
+    /// Evaluates the filter on a typed image: the compiled predicate directly, or the C# fallback predicate on
+    /// the image's dictionary form (the change's cached one when available).
+    /// </summary>
+    private bool Matches(TypedRow image, IReadOnlyDictionary<string, object?>? dictionary)
     {
         if (_fallbackPredicate is not null)
         {
-            return _fallbackPredicate(row);
+            return _fallbackPredicate(dictionary ?? image.AsRowRef().ToOwnedDictionary());
         }
 
-        return _predicate is null || _predicate.Matches(row);
-    }
-
-    private void FillScratchFromDictionary(IReadOnlyDictionary<string, object?> row, CellValue[] target)
-    {
-        for (int i = 0; i < _slotWidth; i++)
-        {
-            target[i] = ReadDictionaryCell(row, _slotColumns[i]);
-        }
+        return _predicate is null || _predicate.Matches(image.AsRowRef());
     }
 
     private void FillScratchFromTyped(in RowRef row, CellValue[] target)
@@ -356,9 +322,6 @@ internal sealed class BufferedWindowReactiveQuery<TProjection, TProjector> : IDi
 
         return -1;
     }
-
-    private static CellValue ReadDictionaryCell(IReadOnlyDictionary<string, object?> row, string column) =>
-        row.TryGetValue(column, out object? value) ? CellValue.FromBorrowedObject(value) : CellValue.Null;
 
     private void UpsertSlot(ReadOnlySpan<CellValue> incoming)
     {

@@ -72,38 +72,21 @@ internal sealed partial class JoinReactiveQuery
         /// <summary>Gets the matchable rows (non-NULL join key) bucketed by join key, then by primary key.</summary>
         public Dictionary<PackedKey, Dictionary<PackedKey, SideRow>> ByKey { get; } = [];
 
-        /// <summary>Loads a dictionary image as a new row that may be stored.</summary>
-        public SideRow LoadStored(IReadOnlyDictionary<string, object?> row)
-        {
-            var image = new SideRow(new CellValue[Layout.Count]);
-            Layout.Load(row, image.Cells);
-            return Keyed(image);
-        }
-
         /// <summary>
         /// Loads a typed image as a new row that may be stored, sharing the captured cell array when it is
         /// already in this side's layout.
         /// </summary>
-        public SideRow LoadStored(TypedRow row)
-        {
-            if (!Layout.TryAdopt(row, out CellValue[] cells))
-            {
-                cells = new CellValue[Layout.Count];
-                Layout.Load(row.AsRowRef(), row.Schema, cells);
-            }
-
-            return Keyed(new SideRow(cells));
-        }
+        public SideRow LoadStored(TypedRow row) => Keyed(new SideRow(Layout.AdoptOrCopy(row)));
 
         /// <summary>
         /// Loads a before-image that is only probed and retracted, never stored. It comes from the pool and
         /// goes back through <see cref="Release"/> once the batch is diffed.
         /// </summary>
-        public SideRow LoadRetracted(IReadOnlyDictionary<string, object?> row)
+        public SideRow LoadRetracted(TypedRow row)
         {
             SideRow image = _retractedPool.Count > 0 ? _retractedPool.Pop() : new SideRow(new CellValue[Layout.Count]);
             image.ResetCache();
-            Layout.Load(row, image.Cells);
+            Layout.TryLoad(row, image.Cells);
             return Keyed(image);
         }
 

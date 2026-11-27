@@ -263,7 +263,7 @@ internal static class ReactiveCellOrdering
 
 /// <summary>
 /// A fixed column layout for rows kept inside a reactive arrangement, and the loader that copies a change
-/// image (a dictionary or a typed <see cref="RowRef"/>) into it as unboxed <see cref="CellValue"/> cells.
+/// image (a typed <see cref="Changes.TypedRow"/>) into it as unboxed <see cref="CellValue"/> cells.
 /// </summary>
 /// <remarks>
 /// Column names resolve case-insensitively; a column the image does not carry loads as <c>NULL</c>. For typed
@@ -274,7 +274,7 @@ internal static class ReactiveCellOrdering
 /// <code>
 /// var layout = new ReactiveRowLayout(["Id", "Score"]);
 /// CellValue[] cells = new CellValue[layout.Count];
-/// layout.Load(change.After!, cells);
+/// if (layout.TryLoadAfter(change, cells)) { /* read cells */ }
 /// </code>
 /// </example>
 internal sealed class ReactiveRowLayout
@@ -313,17 +313,51 @@ internal sealed class ReactiveRowLayout
     /// <returns>The ordinal, or -1.</returns>
     public int OrdinalOf(string column) => _ordinals.TryGetValue(column, out int ordinal) ? ordinal : -1;
 
-    /// <summary>Copies a dictionary image into <paramref name="destination"/> in layout order, without boxing.</summary>
-    /// <param name="row">The source image.</param>
+    /// <summary>Copies a change's before-image into <paramref name="destination"/> in layout order.</summary>
+    /// <param name="change">The change.</param>
     /// <param name="destination">The destination cells; its length must equal <see cref="Count"/>.</param>
-    public void Load(IReadOnlyDictionary<string, object?> row, Span<CellValue> destination)
+    /// <returns><see langword="false"/> when the change carries no before-image (an insert).</returns>
+    public bool TryLoadBefore(Changes.RowChange change, Span<CellValue> destination) =>
+        change.Kind != Changes.ChangeKind.Insert && TryLoad(change.TypedBefore, destination);
+
+    /// <summary>Copies a change's after-image into <paramref name="destination"/> in layout order.</summary>
+    /// <param name="change">The change.</param>
+    /// <param name="destination">The destination cells; its length must equal <see cref="Count"/>.</param>
+    /// <returns><see langword="false"/> when the change carries no after-image (a delete).</returns>
+    public bool TryLoadAfter(Changes.RowChange change, Span<CellValue> destination) =>
+        change.Kind != Changes.ChangeKind.Delete && TryLoad(change.TypedAfter, destination);
+
+    /// <summary>Copies a typed image into <paramref name="destination"/> in layout order.</summary>
+    /// <param name="row">The image, or <c>null</c>.</param>
+    /// <param name="destination">The destination cells; its length must equal <see cref="Count"/>.</param>
+    /// <returns><see langword="false"/> when <paramref name="row"/> is <c>null</c>.</returns>
+    public bool TryLoad(Changes.TypedRow? row, Span<CellValue> destination)
     {
-        for (int i = 0; i < _columns.Length; i++)
+        if (row is not { } image)
         {
-            destination[i] = row.TryGetValue(_columns[i], out object? value)
-                ? CellValue.FromBorrowedObject(value)
-                : CellValue.Null;
+            return false;
         }
+
+        Load(image.AsRowRef(), image.Schema, destination);
+        return true;
+    }
+
+    /// <summary>
+    /// Returns a typed image's cells in layout order: the image's own array when its columns are exactly this
+    /// layout, otherwise a fresh copy. The result may be kept; change capture never mutates a captured image.
+    /// </summary>
+    /// <param name="row">The image.</param>
+    /// <returns>The cells in layout order.</returns>
+    public CellValue[] AdoptOrCopy(Changes.TypedRow row)
+    {
+        if (TryAdopt(row, out CellValue[] cells))
+        {
+            return cells;
+        }
+
+        cells = new CellValue[_columns.Length];
+        Load(row.AsRowRef(), row.Schema, cells);
+        return cells;
     }
 
     /// <summary>Copies a typed image into <paramref name="destination"/> in layout order.</summary>

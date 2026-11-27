@@ -79,8 +79,7 @@ public class CellValueDateTests
     {
         var select = (SelectStatement)ReactiveQueryParser.ParseSingleStatement(
             "SELECT Day, COUNT(*) AS Cnt FROM Events GROUP BY Day");
-        using DataVoEngine engine = DataVoEngine.Initialize(
-            new DataVoConfig { StorageMode = StorageMode.InMemory });
+        using DataVoEngine engine = ReactiveTestRows.EngineWith("DateDb", "CREATE TABLE Events (Id INT, Day DATE)");
         var query = new AggregateReactiveQuery(select, engine, "DateDb");
         var builder = new QueryChangeBuilder(query.OutputSchema);
         var schema = new ReactiveRowSchema("Id", "Day");
@@ -94,9 +93,11 @@ public class CellValueDateTests
         query.ApplyInto([change], builder);
 
         var groups = Assert.IsAssignableFrom<IDictionary>(
-            typeof(AggregateReactiveQuery)
+            typeof(ReactiveGroupAggregator)
                 .GetField("_groups", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
-                .GetValue(query));
+                .GetValue(typeof(AggregateReactiveQuery)
+                    .GetField("_aggregator", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+                    .GetValue(query)));
         Assert.True(groups.Contains("v:2026-06-22"));
     }
 }

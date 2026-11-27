@@ -36,14 +36,36 @@ public class TypedRowChangeTests
     }
 
     [Fact]
-    public void RowChange_DefaultsTypedAfterToNull_ForExistingConstructorCalls()
+    public void RowChange_DerivesTypedImages_FromDictionaryImages()
     {
-        var after = new Dictionary<string, object?> { ["Id"] = 1 };
+        var before = new Dictionary<string, object?> { ["Id"] = 1, ["Name"] = "a" };
+        var after = new Dictionary<string, object?> { ["Id"] = 1, ["Name"] = "b" };
 
-        var change = new RowChange("Orders", 7, ChangeKind.Insert, before: null, after: after);
+        var change = new RowChange("Orders", 7, ChangeKind.Update, before, after);
 
-        Assert.Null(change.TypedAfter);
+        Assert.Same(before, change.Before);
         Assert.Same(after, change.After);
+        Assert.Equal("a", change.TypedBefore!.Value.AsRowRef()["Name"].AsString());
+        Assert.Equal("b", change.TypedAfter!.Value.AsRowRef()["Name"].AsString());
+        Assert.Equal(1, change.TypedAfter!.Value.AsRowRef()["Id"].AsInt32());
+    }
+
+    [Fact]
+    public void RowChange_FromTyped_MaterializesDictionaryImagesLazily()
+    {
+        var schema = new ReactiveRowSchema("Id", "Name");
+        var change = RowChange.FromTyped(
+            "Orders",
+            7,
+            ChangeKind.Delete,
+            TypedRow.FromOwnedCells(schema, [CellValue.From(3), CellValue.From("gone")]),
+            typedAfter: null);
+
+        Assert.Null(change.After);
+        Assert.Null(change.TypedAfter);
+        Assert.Equal(3, change.Before!["Id"]);
+        Assert.Equal("gone", change.Before["Name"]);
+        Assert.Same(change.Before, change.Before);
     }
 
     [Fact]

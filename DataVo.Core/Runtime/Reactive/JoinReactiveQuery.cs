@@ -28,7 +28,6 @@ internal sealed partial class JoinReactiveQuery : IBorrowedReactiveQuery
 
     private readonly ReactiveRowSchema _outputSchema;
     private readonly OutputSource[] _outputSources;
-    private readonly QueryChangeBuilder _legacyBuilder;
     private readonly CellValue[] _rowScratch;
     private readonly CellValue[] _previousScratch;
 
@@ -85,30 +84,20 @@ internal sealed partial class JoinReactiveQuery : IBorrowedReactiveQuery
         _outputSchema = new ReactiveRowSchema(outputColumns);
         _rowScratch = new CellValue[outputColumns.Length];
         _previousScratch = new CellValue[outputColumns.Length];
-        _legacyBuilder = new QueryChangeBuilder(_outputSchema);
     }
 
     private static ReactiveRowLayout CatalogLayout(DataVoEngine engine, string table, string databaseName) =>
-        new(engine.Catalog.GetTableColumns(table, databaseName).Select(column => column.Name).ToList());
+        ReactiveTableLayouts.ForTable(engine, table, databaseName);
 
     /// <inheritdoc />
     public IReadOnlyCollection<string> Tables => [_shape.LeftTable, _shape.RightTable];
 
     /// <inheritdoc />
-    public void Seed(string table, IEnumerable<(RowKey RowId, IReadOnlyDictionary<string, object?> Row)> rows)
+    public void Seed(string table, IEnumerable<TypedRow> rows)
     {
         SeedSide(table, rows);
     }
 
     /// <inheritdoc />
     public ReactiveRowSchema OutputSchema => _outputSchema;
-
-    /// <summary>Owned path: build the borrowed delta into our own arena, then materialize. Behavior-
-    /// identical to the pre-migration <c>Apply</c> (same <see cref="QueryChange"/> shape and values).</summary>
-    public QueryChange Apply(IReadOnlyList<RowChange> changes)
-    {
-        _legacyBuilder.Reset();
-        ApplyInto(changes, _legacyBuilder);
-        return _legacyBuilder.Build().Materialize();
-    }
 }

@@ -72,9 +72,9 @@ public class TopKBorrowedTests
             $"SELECT Id, Score FROM Players ORDER BY Score DESC LIMIT {windowSize}");
         var op = new TopKReactiveQuery(select, ctx.Engine, "TopKDb");
 
-        var seed = new List<(RowKey, IReadOnlyDictionary<string, object?>)>();
-        for (int i = 1; i <= windowSize; i++) seed.Add((i, Row(i, i * 10)));
-        op.Seed("Players", seed);
+        var seed = new List<IReadOnlyDictionary<string, object?>>();
+        for (int i = 1; i <= windowSize; i++) seed.Add(Row(i, i * 10));
+        op.Seed("Players", ReactiveTestRows.Typed([.. seed]));
 
         var builder = new QueryChangeBuilder(op.OutputSchema);
         // Re-insert an existing windowed row with the same value: the window is unchanged (no emit),

@@ -9,25 +9,25 @@ public class ReactiveExtremumMultisetTests
     {
         var values = new ReactiveExtremumMultiset();
 
-        values.Add(10);
-        values.Add(30);
-        values.Add(20);
-        values.Add(30);
+        values.Add(CellValue.From(10));
+        values.Add(CellValue.From(30));
+        values.Add(CellValue.From(20));
+        values.Add(CellValue.From(30));
 
-        Assert.Equal(10, values.Min);
-        Assert.Equal(30, values.Max);
+        Assert.Equal(10, values.Min.AsInt32());
+        Assert.Equal(30, values.Max.AsInt32());
 
-        values.Remove(30);
-        Assert.Equal(30, values.Max);
+        values.Remove(CellValue.From(30));
+        Assert.Equal(30, values.Max.AsInt32());
 
-        values.Remove(30);
-        Assert.Equal(20, values.Max);
+        values.Remove(CellValue.From(30));
+        Assert.Equal(20, values.Max.AsInt32());
 
-        values.Remove(10);
-        Assert.Equal(20, values.Min);
+        values.Remove(CellValue.From(10));
+        Assert.Equal(20, values.Min.AsInt32());
 
-        values.Remove(20);
-        Assert.Null(values.Min);
-        Assert.Null(values.Max);
+        values.Remove(CellValue.From(20));
+        Assert.True(values.Min.IsNull);
+        Assert.True(values.Max.IsNull);
     }
 }

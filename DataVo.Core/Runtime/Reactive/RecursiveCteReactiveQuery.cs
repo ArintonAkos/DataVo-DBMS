@@ -36,162 +36,126 @@ namespace DataVo.Core.Runtime.Reactive;
 /// are identified by <b>primary key</b> value, never by <see cref="RowChange.RowId"/> — the physical row
 /// id is not stable across the engine's out-of-place updates — so every observed base table must declare
 /// a primary key; a PK-less base table is rejected at construction with <see cref="NotSupportedException"/>.
+/// Base rows and CTE tuples are kept typed (base rows in their table's catalog layout, tuples in the CTE's
+/// column order) and keyed by <see cref="PackedKey"/>.
 /// </para>
 /// </remarks>
 internal sealed class RecursiveCteReactiveQuery : IBorrowedReactiveQuery
 {
     private readonly RecursiveCteShape _shape;
     private readonly ReactivePredicate _finalPredicate;
-    private readonly bool _finalSelectStar;
-    private readonly List<string> _finalProjection = [];
+    private readonly ReactiveRowSchema _cteSchema;
+    private readonly ReactiveProjection _finalProjection;
 
-    // Primary-key columns per observed base table, used to identify base rows stably across operations.
-    // Physical row ids are NOT stable across updates (update = physical delete + reinsert), so the base
-    // relation is keyed by primary-key value, not by RowId.
-    private readonly Dictionary<string, IReadOnlyList<string>> _basePrimaryKeys =
-        new(StringComparer.OrdinalIgnoreCase);
+    private readonly ReactiveRowLayout _baseLayout;
+    private readonly ReactiveRowLayout _recursiveLayout;
+    private readonly int[] _basePrimaryKey;
+    private readonly int[] _recursivePrimaryKey;
 
-    // Maintained base relation: identity (table + primary-key values) -> base row image.
-    private readonly Dictionary<string, (string Table, IReadOnlyDictionary<string, object?> Row)> _baseRows =
-        new(StringComparer.Ordinal);
+    // Base arm: CTE column i comes from base-table ordinal _baseArmSources[i]. Recursive arm: from the CTE
+    // tuple (ordinal >= 0 in _recursiveFromCte) or the recursive base row (_recursiveFromBase).
+    private readonly int[] _baseArmSources;
+    private readonly int[] _recursiveFromCte;
+    private readonly int[] _recursiveFromBase;
+    private readonly int[] _cteJoin;
+    private readonly int[] _baseJoin;
+    private readonly int[] _tupleKey;
 
-    // Present CTE tuples: tupleKey -> tuple image (set semantics; presence-based).
-    private readonly Dictionary<string, IReadOnlyDictionary<string, object?>> _present = new(StringComparer.Ordinal);
+    // Maintained base relations, keyed by primary key; the same instance when both arms read one table.
+    private readonly Dictionary<PackedKey, CellValue[]> _baseRows = [];
+    private readonly Dictionary<PackedKey, CellValue[]> _recursiveRows;
 
-    // Emitted (post-final-projection) output rows, keyed by CTE tupleKey, for exact output diffing.
-    private readonly Dictionary<string, IReadOnlyDictionary<string, object?>> _emitted = new(StringComparer.Ordinal);
+    // Present CTE tuples (set semantics) and the delivered final rows, both keyed by the CTE tuple.
+    private readonly Dictionary<PackedKey, CellValue[]> _present = [];
+    private Dictionary<PackedKey, CellValue[]> _emitted = [];
+    private Dictionary<PackedKey, CellValue[]> _spareEmitted = [];
 
-    private readonly ReactiveRowSchema _outputSchema;
-    private readonly string[] _outputColumns;
-    private readonly QueryChangeBuilder _legacyBuilder;
-    private readonly CellValue[] _rowScratch;
-
+    private readonly CellValue[] _baseImage;
+    private readonly CellValue[] _recursiveImage;
     private bool _seeded;
 
     /// <summary>
-    /// Compiles the supplied recursive-CTE shape into an incrementally maintained closure operator.
+    /// Compiles a validated recursive CTE shape.
     /// </summary>
-    /// <param name="shape">The extracted, validated linear <c>WITH RECURSIVE</c> shape.</param>
-    /// <param name="engine">The owning engine (catalog access for each base table's primary key).</param>
+    /// <param name="shape">The parsed recursive CTE shape.</param>
+    /// <param name="engine">The owning engine (catalog access for the base tables).</param>
     /// <param name="databaseName">The database that owns the base tables.</param>
-    /// <exception cref="NotSupportedException">Thrown when any observed base table lacks a primary key to identify rows across updates.</exception>
+    /// <exception cref="NotSupportedException">A base table has no primary key, or a column does not exist.</exception>
     public RecursiveCteReactiveQuery(RecursiveCteShape shape, DataVoEngine engine, string databaseName)
     {
         _shape = shape;
         _finalPredicate = ReactivePredicate.Compile(shape.FinalWhere);
+        var cteLayout = new ReactiveRowLayout(shape.OutputColumns);
+        _cteSchema = cteLayout.Schema;
+        _finalProjection = FinalProjection(shape.FinalColumns, cteLayout);
 
-        foreach (SelectColumnNode column in shape.FinalColumns)
-        {
-            if (IsStarColumn(column))
-            {
-                _finalSelectStar = true;
-                continue;
-            }
+        bool oneTable = shape.BaseTable.Equals(shape.RecursiveBaseTable, StringComparison.OrdinalIgnoreCase);
+        Tables = oneTable ? [shape.BaseTable] : [shape.BaseTable, shape.RecursiveBaseTable];
+        _baseLayout = ReactiveTableLayouts.ForTable(engine, shape.BaseTable, databaseName);
+        _recursiveLayout = oneTable ? _baseLayout : ReactiveTableLayouts.ForTable(engine, shape.RecursiveBaseTable, databaseName);
+        _recursiveRows = oneTable ? _baseRows : [];
+        _basePrimaryKey = PrimaryKey(engine, shape.BaseTable, databaseName, _baseLayout);
+        _recursivePrimaryKey = oneTable ? _basePrimaryKey : PrimaryKey(engine, shape.RecursiveBaseTable, databaseName, _recursiveLayout);
 
-            _finalProjection.Add(ResolveProjectedColumnName(column));
-        }
+        _baseArmSources = shape.BaseSourceColumns.Select(column => Require(_baseLayout, shape.BaseTable, column)).ToArray();
+        _recursiveFromCte = shape.RecursiveColumns.Select(source => source.FromCte ? Require(cteLayout, shape.CteName, source.SourceColumn) : -1).ToArray();
+        _recursiveFromBase = shape.RecursiveColumns.Select(source => source.FromCte ? -1 : Require(_recursiveLayout, shape.RecursiveBaseTable, source.SourceColumn)).ToArray();
+        _cteJoin = [Require(cteLayout, shape.CteName, shape.CteJoinColumn)];
+        _baseJoin = [Require(_recursiveLayout, shape.RecursiveBaseTable, shape.BaseJoinColumn)];
+        _tupleKey = Enumerable.Range(0, shape.OutputColumns.Count).ToArray();
 
-        if (_finalProjection.Count == 0)
-        {
-            _finalSelectStar = true;
-        }
-
-        // Output schema: explicit final projection, or the CTE relation's output columns for SELECT *.
-        string[] outputColumns = _finalSelectStar
-            ? _shape.OutputColumns.ToArray()
-            : _finalProjection.ToArray();
-        _outputColumns = outputColumns;
-        _outputSchema = new ReactiveRowSchema(outputColumns);
-        _rowScratch = new CellValue[outputColumns.Length];
-        _legacyBuilder = new QueryChangeBuilder(_outputSchema);
-
-        Tables = _shape.BaseTable.Equals(_shape.RecursiveBaseTable, StringComparison.OrdinalIgnoreCase)
-            ? [_shape.BaseTable]
-            : [_shape.BaseTable, _shape.RecursiveBaseTable];
-
-        foreach (string table in Tables)
-        {
-            IReadOnlyList<string> keys = engine.Catalog.GetTablePrimaryKeys(table, databaseName);
-            if (keys.Count == 0)
-            {
-                throw new NotSupportedException(
-                    $"Reactive recursive CTE requires a primary key on base table '{table}' to identify rows across updates.");
-            }
-
-            _basePrimaryKeys[table] = keys;
-        }
+        _baseImage = new CellValue[_baseLayout.Count];
+        _recursiveImage = new CellValue[_recursiveLayout.Count];
     }
 
     /// <inheritdoc />
     public IReadOnlyCollection<string> Tables { get; }
 
     /// <inheritdoc />
-    public void Seed(string table, IEnumerable<(RowKey RowId, IReadOnlyDictionary<string, object?> Row)> rows)
+    public ReactiveRowSchema OutputSchema => _finalProjection.Schema;
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Seeding only populates the maintained base relations; the closure itself is computed on the first
+    /// Apply so the baseline is established but never delivered.
+    /// </remarks>
+    public void Seed(string table, IEnumerable<TypedRow> rows)
     {
-        // Seeding only populates the maintained base relation; the closure itself is computed lazily on
-        // the first Apply (see EnsureSeededClosure) so the baseline is established but never delivered.
-        foreach ((RowKey _, IReadOnlyDictionary<string, object?> row) in rows)
+        foreach (TypedRow row in rows)
         {
             StoreBase(table, row);
         }
     }
 
     /// <inheritdoc />
-    public ReactiveRowSchema OutputSchema => _outputSchema;
-
-    /// <summary>Owned path: build the borrowed delta into our own arena, then materialize. Behavior-
-    /// identical to the pre-migration <c>Apply</c> (same <see cref="QueryChange"/> shape and values).</summary>
-    public QueryChange Apply(IReadOnlyList<RowChange> changes)
-    {
-        _legacyBuilder.Reset();
-        ApplyInto(changes, _legacyBuilder);
-        return _legacyBuilder.Build().Materialize();
-    }
-
-    /// <inheritdoc />
-    /// <remarks>
-    /// Splits the batch into base-relation retractions and insertions. A pure-insertion batch grows the
-    /// closure incrementally (<see cref="GrowClosure"/>); a batch with any retraction recomputes the
-    /// closure from scratch (<see cref="RecomputeClosureFromScratch"/>). Either way the new closure is
-    /// diffed against the previously emitted output to produce the exact added/removed rows. This is the
-    /// borrowed emit-side migration only — deep state purification is infeasible here (a retraction
-    /// recomputes the whole closure), so it is deferred to a later slice.
-    /// </remarks>
     public void ApplyInto(IReadOnlyList<RowChange> changes, QueryChangeBuilder builder)
     {
         EnsureSeededClosure();
 
         bool hasRetraction = false;
+        var baseArmInserts = new List<CellValue[]>();
+        var recursiveInserts = new List<CellValue[]>();
 
-        // Inserted rows, partitioned by table, so the forward growth pass can use base-arm and recursive
-        // join roles correctly even when the base arm and recursive arm read different tables.
-        var insertedByTable = new Dictionary<string, List<IReadOnlyDictionary<string, object?>>>(StringComparer.OrdinalIgnoreCase);
-
-        // Index loop (not foreach) so iterating the IReadOnlyList does not allocate a boxed enumerator.
         for (int i = 0; i < changes.Count; i++)
         {
             RowChange change = changes[i];
-            if (!IsObserved(change.Table))
+            if (change.Kind != ChangeKind.Insert && change.TypedBefore is { } before)
             {
-                continue;
+                hasRetraction |= RemoveBase(change.Table, before);
             }
 
-            if (change.Before is not null && change.Kind is ChangeKind.Delete or ChangeKind.Update)
+            if (change.Kind != ChangeKind.Delete && change.TypedAfter is { } after)
             {
-                RemoveBase(change.Table, change.Before);
-                hasRetraction = true;
-            }
-
-            if (change.After is not null && change.Kind is ChangeKind.Insert or ChangeKind.Update)
-            {
-                IReadOnlyDictionary<string, object?> image = StoreBase(change.Table, change.After);
-                if (!insertedByTable.TryGetValue(change.Table, out List<IReadOnlyDictionary<string, object?>>? list))
+                (CellValue[]? baseRow, CellValue[]? recursiveRow) = StoreBase(change.Table, after);
+                if (baseRow is not null)
                 {
-                    list = [];
-                    insertedByTable[change.Table] = list;
+                    baseArmInserts.Add(baseRow);
                 }
 
-                list.Add(image);
+                if (recursiveRow is not null)
+                {
+                    recursiveInserts.Add(recursiveRow);
+                }
             }
         }
 
@@ -199,43 +163,55 @@ internal sealed class RecursiveCteReactiveQuery : IBorrowedReactiveQuery
         {
             RecomputeClosureFromScratch();
         }
-        else if (insertedByTable.Count > 0)
+        else if (baseArmInserts.Count > 0 || recursiveInserts.Count > 0)
         {
-            GrowClosure(insertedByTable);
+            GrowClosure(baseArmInserts, recursiveInserts);
         }
 
         EmitDiffInto(builder);
     }
 
-    private string BaseIdentity(string table, IReadOnlyDictionary<string, object?> row)
+    /// <summary>Stores a base row in the relation(s) its table feeds and returns the stored image per role.</summary>
+    private (CellValue[]? BaseRow, CellValue[]? RecursiveRow) StoreBase(string table, TypedRow row)
     {
-        IReadOnlyList<string> keys = _basePrimaryKeys[table];
-        string pk = string.Join("", keys.Select(column => DistinctReactiveQuery.ValueKey(ValueAt(row, column))));
-        return table.Length.ToString(System.Globalization.CultureInfo.InvariantCulture) + ":" + table + pk;
+        CellValue[]? baseRow = null;
+        CellValue[]? recursiveRow = null;
+        if (table.Equals(_shape.BaseTable, StringComparison.OrdinalIgnoreCase))
+        {
+            baseRow = _baseLayout.AdoptOrCopy(row);
+            _baseRows[PackedKey.From(baseRow, _basePrimaryKey)] = baseRow;
+        }
+
+        if (table.Equals(_shape.RecursiveBaseTable, StringComparison.OrdinalIgnoreCase))
+        {
+            recursiveRow = baseRow ?? _recursiveLayout.AdoptOrCopy(row);
+            _recursiveRows[PackedKey.From(recursiveRow, _recursivePrimaryKey)] = recursiveRow;
+        }
+
+        return (baseRow, recursiveRow);
     }
 
-    private IReadOnlyDictionary<string, object?> StoreBase(string table, IReadOnlyDictionary<string, object?> row)
+    /// <summary>Removes a retracted base row from the relation(s) its table feeds.</summary>
+    /// <returns><see langword="true"/> when the table is observed.</returns>
+    private bool RemoveBase(string table, TypedRow row)
     {
-        IReadOnlyDictionary<string, object?> image = Copy(row);
-        _baseRows[BaseIdentity(table, row)] = (table, image);
-        return image;
+        bool observed = false;
+        if (table.Equals(_shape.BaseTable, StringComparison.OrdinalIgnoreCase) && _baseLayout.TryLoad(row, _baseImage))
+        {
+            _baseRows.Remove(PackedKey.From(_baseImage, _basePrimaryKey));
+            observed = true;
+        }
+
+        if (table.Equals(_shape.RecursiveBaseTable, StringComparison.OrdinalIgnoreCase) && _recursiveLayout.TryLoad(row, _recursiveImage))
+        {
+            _recursiveRows.Remove(PackedKey.From(_recursiveImage, _recursivePrimaryKey));
+            observed = true;
+        }
+
+        return observed;
     }
 
-    private void RemoveBase(string table, IReadOnlyDictionary<string, object?> row)
-    {
-        _baseRows.Remove(BaseIdentity(table, row));
-    }
-
-    private IEnumerable<IReadOnlyDictionary<string, object?>> BaseArmRows() =>
-        _baseRows.Values
-            .Where(entry => entry.Table.Equals(_shape.BaseTable, StringComparison.OrdinalIgnoreCase))
-            .Select(entry => entry.Row);
-
-    private IEnumerable<IReadOnlyDictionary<string, object?>> RecursiveBaseRows() =>
-        _baseRows.Values
-            .Where(entry => entry.Table.Equals(_shape.RecursiveBaseTable, StringComparison.OrdinalIgnoreCase))
-            .Select(entry => entry.Row);
-
+    /// <summary>Computes the closure once and records its qualifying rows as the baseline (never delivered).</summary>
     private void EnsureSeededClosure()
     {
         if (_seeded)
@@ -245,74 +221,43 @@ internal sealed class RecursiveCteReactiveQuery : IBorrowedReactiveQuery
 
         _seeded = true;
         RecomputeClosureFromScratch();
-        // Establish the emitted baseline without producing output (Subscribe seeds, never re-delivers).
-        foreach ((string key, IReadOnlyDictionary<string, object?> tuple) in _present)
-        {
-            if (_finalPredicate.Matches(tuple))
-            {
-                _emitted[key] = ProjectFinal(tuple);
-            }
-        }
+        CollectCurrentOutput(_emitted);
     }
 
-    /// <summary>
-    /// Recomputes the full closure from a fixpoint over the current base relation, replacing <c>_present</c>.
-    /// </summary>
+    /// <summary>Rebuilds the CTE relation as the fixpoint over the current base relations.</summary>
     private void RecomputeClosureFromScratch()
     {
         _present.Clear();
-
-        // Base arm: project each base-arm row to a CTE tuple.
-        var frontier = new List<IReadOnlyDictionary<string, object?>>();
-        foreach (IReadOnlyDictionary<string, object?> baseRow in BaseArmRows())
+        var frontier = new List<CellValue[]>();
+        foreach (CellValue[] baseRow in _baseRows.Values)
         {
-            IReadOnlyDictionary<string, object?> tuple = ProjectBaseArm(baseRow);
-            if (AddPresent(tuple))
-            {
-                frontier.Add(tuple);
-            }
+            AddDerived(ProjectBaseArm(baseRow), frontier);
         }
 
         Saturate(frontier);
     }
 
-    /// <summary>
-    /// Grows the closure after a batch of base-row insertions: newly-inserted base-arm rows seed new CTE
-    /// tuples, and newly-inserted recursive-base rows join against existing CTE tuples (the Δbase ⋈ cte
-    /// half of the recursive delta). Saturation then closes the result to a fixpoint.
-    /// </summary>
-    private void GrowClosure(Dictionary<string, List<IReadOnlyDictionary<string, object?>>> insertedByTable)
+    /// <summary>Semi-naïve forward growth from newly inserted base rows only.</summary>
+    private void GrowClosure(List<CellValue[]> baseArmInserts, List<CellValue[]> recursiveInserts)
     {
-        var frontier = new List<IReadOnlyDictionary<string, object?>>();
-
-        // New base-arm tuples from inserted rows of the base-arm table.
-        if (insertedByTable.TryGetValue(_shape.BaseTable, out List<IReadOnlyDictionary<string, object?>>? baseArmInserts))
+        var frontier = new List<CellValue[]>();
+        foreach (CellValue[] baseRow in baseArmInserts)
         {
-            foreach (IReadOnlyDictionary<string, object?> baseRow in baseArmInserts)
-            {
-                IReadOnlyDictionary<string, object?> tuple = ProjectBaseArm(baseRow);
-                if (AddPresent(tuple))
-                {
-                    frontier.Add(tuple);
-                }
-            }
+            AddDerived(ProjectBaseArm(baseRow), frontier);
         }
 
-        // Existing CTE tuples joined with newly-inserted recursive-base rows.
-        if (insertedByTable.TryGetValue(_shape.RecursiveBaseTable, out List<IReadOnlyDictionary<string, object?>>? recursiveInserts))
+        // Existing CTE tuples joined with newly inserted recursive-base rows.
+        if (recursiveInserts.Count > 0)
         {
-            foreach (IReadOnlyDictionary<string, object?> baseRow in recursiveInserts)
+            CellValue[][] existing = [.. _present.Values];
+            foreach (CellValue[] baseRow in recursiveInserts)
             {
-                object? baseKey = ValueAt(baseRow, _shape.BaseJoinColumn);
-                foreach (IReadOnlyDictionary<string, object?> cteTuple in _present.Values.ToArray())
+                PackedKey baseKey = PackedKey.From(baseRow, _baseJoin);
+                foreach (CellValue[] cteTuple in existing)
                 {
-                    if (JoinMatches(cteTuple, baseKey))
+                    if (PackedKey.From(cteTuple, _cteJoin).Equals(baseKey))
                     {
-                        IReadOnlyDictionary<string, object?> derived = ProjectRecursiveArm(cteTuple, baseRow);
-                        if (AddPresent(derived))
-                        {
-                            frontier.Add(derived);
-                        }
+                        AddDerived(ProjectRecursiveArm(cteTuple, baseRow), frontier);
                     }
                 }
             }
@@ -321,18 +266,14 @@ internal sealed class RecursiveCteReactiveQuery : IBorrowedReactiveQuery
         Saturate(frontier);
     }
 
-    /// <summary>
-    /// Semi-naïve saturation: repeatedly join the growing frontier of CTE tuples against the full base
-    /// relation, adding newly-derived tuples, until the frontier is empty (fixpoint).
-    /// </summary>
-    private void Saturate(List<IReadOnlyDictionary<string, object?>> frontier)
+    /// <summary>Applies the recursive arm to the frontier until no new tuple appears.</summary>
+    private void Saturate(List<CellValue[]> frontier)
     {
-        // Index the recursive-base relation by the recursive join key for efficient probing.
-        var baseByJoinKey = new Dictionary<string, List<IReadOnlyDictionary<string, object?>>>(StringComparer.Ordinal);
-        foreach (IReadOnlyDictionary<string, object?> baseRow in RecursiveBaseRows())
+        var baseByJoinKey = new Dictionary<PackedKey, List<CellValue[]>>();
+        foreach (CellValue[] baseRow in _recursiveRows.Values)
         {
-            string key = DistinctReactiveQuery.ValueKey(ValueAt(baseRow, _shape.BaseJoinColumn));
-            if (!baseByJoinKey.TryGetValue(key, out List<IReadOnlyDictionary<string, object?>>? bucket))
+            PackedKey key = PackedKey.From(baseRow, _baseJoin);
+            if (!baseByJoinKey.TryGetValue(key, out List<CellValue[]>? bucket))
             {
                 bucket = [];
                 baseByJoinKey[key] = bucket;
@@ -343,22 +284,17 @@ internal sealed class RecursiveCteReactiveQuery : IBorrowedReactiveQuery
 
         while (frontier.Count > 0)
         {
-            var next = new List<IReadOnlyDictionary<string, object?>>();
-            foreach (IReadOnlyDictionary<string, object?> cteTuple in frontier)
+            var next = new List<CellValue[]>();
+            foreach (CellValue[] cteTuple in frontier)
             {
-                string probe = DistinctReactiveQuery.ValueKey(ValueAt(cteTuple, _shape.CteJoinColumn));
-                if (!baseByJoinKey.TryGetValue(probe, out List<IReadOnlyDictionary<string, object?>>? bucket))
+                if (!baseByJoinKey.TryGetValue(PackedKey.From(cteTuple, _cteJoin), out List<CellValue[]>? bucket))
                 {
                     continue;
                 }
 
-                foreach (IReadOnlyDictionary<string, object?> baseRow in bucket)
+                foreach (CellValue[] baseRow in bucket)
                 {
-                    IReadOnlyDictionary<string, object?> derived = ProjectRecursiveArm(cteTuple, baseRow);
-                    if (AddPresent(derived))
-                    {
-                        next.Add(derived);
-                    }
+                    AddDerived(ProjectRecursiveArm(cteTuple, baseRow), next);
                 }
             }
 
@@ -366,153 +302,127 @@ internal sealed class RecursiveCteReactiveQuery : IBorrowedReactiveQuery
         }
     }
 
-    private bool JoinMatches(IReadOnlyDictionary<string, object?> cteTuple, object? baseKey)
+    private void AddDerived(CellValue[] tuple, List<CellValue[]> frontier)
     {
-        object? cteKey = ValueAt(cteTuple, _shape.CteJoinColumn);
-        return DistinctReactiveQuery.ValueKey(cteKey) == DistinctReactiveQuery.ValueKey(baseKey);
-    }
-
-    private bool AddPresent(IReadOnlyDictionary<string, object?> tuple)
-    {
-        string key = DistinctReactiveQuery.TupleKey(tuple);
+        PackedKey key = PackedKey.From(tuple, _tupleKey);
         if (_present.ContainsKey(key))
         {
-            return false;
+            return;
         }
 
         _present[key] = tuple;
-        return true;
+        frontier.Add(tuple);
     }
 
-    /// <summary>
-    /// Diffs the (final-projected, filtered) current CTE relation against the last emitted output and
-    /// writes the added/removed rows into the borrowed <paramref name="builder"/>. A recursive CTE emits
-    /// only Added/Removed (set semantics; no Updated).
-    /// </summary>
+    /// <summary>Diffs the current final output against the delivered one and makes it the delivered one.</summary>
     private void EmitDiffInto(QueryChangeBuilder builder)
     {
-        // Current output keyed by CTE tupleKey.
-        var current = new Dictionary<string, IReadOnlyDictionary<string, object?>>(StringComparer.Ordinal);
-        foreach ((string key, IReadOnlyDictionary<string, object?> tuple) in _present)
+        Dictionary<PackedKey, CellValue[]> current = _spareEmitted;
+        CollectCurrentOutput(current);
+
+        foreach (KeyValuePair<PackedKey, CellValue[]> row in current)
         {
-            if (_finalPredicate.Matches(tuple))
+            if (!_emitted.ContainsKey(row.Key))
             {
-                current[key] = ProjectFinal(tuple);
+                builder.AddAddedRow(row.Value);
             }
         }
 
-        foreach ((string key, IReadOnlyDictionary<string, object?> row) in current)
+        foreach (KeyValuePair<PackedKey, CellValue[]> row in _emitted)
         {
-            if (!_emitted.ContainsKey(key))
+            if (!current.ContainsKey(row.Key))
             {
-                WriteRow(row);
-                builder.AddAddedRow(_rowScratch);
+                builder.AddRemovedRow(row.Value);
             }
         }
 
-        foreach ((string key, IReadOnlyDictionary<string, object?> row) in _emitted)
+        (_emitted, _spareEmitted) = (current, _emitted);
+    }
+
+    private void CollectCurrentOutput(Dictionary<PackedKey, CellValue[]> target)
+    {
+        target.Clear();
+        foreach (KeyValuePair<PackedKey, CellValue[]> tuple in _present)
         {
-            if (!current.ContainsKey(key))
+            if (_finalPredicate.Matches(new RowRef(_cteSchema, tuple.Value)))
             {
-                WriteRow(row);
-                builder.AddRemovedRow(_rowScratch);
+                var row = new CellValue[_finalProjection.Ordinals.Length];
+                _finalProjection.Project(tuple.Value, row);
+                target[tuple.Key] = row;
             }
         }
+    }
 
-        _emitted.Clear();
-        foreach ((string key, IReadOnlyDictionary<string, object?> row) in current)
+    private CellValue[] ProjectBaseArm(CellValue[] baseRow)
+    {
+        var tuple = new CellValue[_baseArmSources.Length];
+        for (int i = 0; i < tuple.Length; i++)
         {
-            _emitted[key] = row;
+            tuple[i] = baseRow[_baseArmSources[i]];
         }
+
+        return tuple;
+    }
+
+    private CellValue[] ProjectRecursiveArm(CellValue[] cteTuple, CellValue[] baseRow)
+    {
+        var tuple = new CellValue[_recursiveFromCte.Length];
+        for (int i = 0; i < tuple.Length; i++)
+        {
+            tuple[i] = _recursiveFromCte[i] >= 0 ? cteTuple[_recursiveFromCte[i]] : baseRow[_recursiveFromBase[i]];
+        }
+
+        return tuple;
     }
 
     /// <summary>
-    /// Writes a final-projected output row into the reused <see cref="_rowScratch"/>, in
-    /// <see cref="_outputSchema"/> column order. Step 1 (emit-side) wraps boxed cell values via
-    /// <c>CellValue.From(object?)</c>; deep state purification is deferred for the recursive CTE.
+    /// Compiles the final SELECT list over the CTE columns; qualifiers name the CTE (or its alias) and are
+    /// ignored, and <c>*</c> selects every CTE column.
     /// </summary>
-    private void WriteRow(IReadOnlyDictionary<string, object?> row)
+    private static ReactiveProjection FinalProjection(IReadOnlyList<SelectColumnNode> columns, ReactiveRowLayout cteLayout)
     {
-        for (int i = 0; i < _outputColumns.Length; i++)
+        var names = new List<string>();
+        var ordinals = new List<int>();
+        foreach (SelectColumnNode column in columns)
         {
-            _rowScratch[i] = CellValue.From(row.TryGetValue(_outputColumns[i], out object? v) ? v : null);
+            if (ReactiveTableLayouts.IsStarColumn(column))
+            {
+                names.AddRange(cteLayout.Columns);
+                ordinals.AddRange(Enumerable.Range(0, cteLayout.Count));
+                continue;
+            }
+
+            (_, string name) = ReactiveTableLayouts.ColumnReference(column);
+            names.Add(column.Alias ?? name);
+            ordinals.Add(Require(cteLayout, "the recursive CTE", name));
         }
+
+        if (names.Count == 0)
+        {
+            names.AddRange(cteLayout.Columns);
+            ordinals.AddRange(Enumerable.Range(0, cteLayout.Count));
+        }
+
+        return new ReactiveProjection(new ReactiveRowSchema(names), [.. ordinals]);
     }
 
-    private IReadOnlyDictionary<string, object?> ProjectBaseArm(IReadOnlyDictionary<string, object?> baseRow)
+    private static int[] PrimaryKey(DataVoEngine engine, string table, string databaseName, ReactiveRowLayout layout)
     {
-        var tuple = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
-        for (int i = 0; i < _shape.OutputColumns.Count; i++)
+        List<string> keys = engine.Catalog.GetTablePrimaryKeys(table, databaseName);
+        if (keys.Count == 0)
         {
-            tuple[_shape.OutputColumns[i]] = ValueAt(baseRow, _shape.BaseSourceColumns[i]);
+            throw new NotSupportedException(
+                $"Reactive recursive CTE requires a primary key on base table '{table}' to identify rows across updates.");
         }
 
-        return tuple;
+        return keys.Select(key => Require(layout, table, key)).ToArray();
     }
 
-    private IReadOnlyDictionary<string, object?> ProjectRecursiveArm(
-        IReadOnlyDictionary<string, object?> cteTuple,
-        IReadOnlyDictionary<string, object?> baseRow)
+    private static int Require(ReactiveRowLayout layout, string owner, string column)
     {
-        var tuple = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
-        for (int i = 0; i < _shape.OutputColumns.Count; i++)
-        {
-            RecursiveColumnSource source = _shape.RecursiveColumns[i];
-            tuple[_shape.OutputColumns[i]] = source.FromCte
-                ? ValueAt(cteTuple, source.SourceColumn)
-                : ValueAt(baseRow, source.SourceColumn);
-        }
-
-        return tuple;
-    }
-
-    private IReadOnlyDictionary<string, object?> ProjectFinal(IReadOnlyDictionary<string, object?> tuple)
-    {
-        if (_finalSelectStar)
-        {
-            return Copy(tuple);
-        }
-
-        var projected = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
-        foreach (string column in _finalProjection)
-        {
-            projected[column] = tuple.TryGetValue(column, out object? value) ? value : null;
-        }
-
-        return projected;
-    }
-
-    private bool IsObserved(string table) =>
-        Tables.Any(t => t.Equals(table, StringComparison.OrdinalIgnoreCase));
-
-    private static object? ValueAt(IReadOnlyDictionary<string, object?> row, string column) =>
-        row.TryGetValue(column, out object? value) ? value : null;
-
-    private static IReadOnlyDictionary<string, object?> Copy(IReadOnlyDictionary<string, object?> row) =>
-        new Dictionary<string, object?>(
-            row.ToDictionary(pair => pair.Key, pair => pair.Value),
-            StringComparer.OrdinalIgnoreCase);
-
-    private static bool IsStarColumn(SelectColumnNode column)
-    {
-        return column.RawExpression.Trim() == "*"
-            || (column.Expression is null && column.RawExpression.Trim().EndsWith("*", StringComparison.Ordinal));
-    }
-
-    private static string ResolveProjectedColumnName(SelectColumnNode column)
-    {
-        if (column.Expression is ColumnRefNode columnRef)
-        {
-            return columnRef.Column;
-        }
-
-        if (column.Expression is ResolvedColumnRefNode resolved)
-        {
-            return resolved.Column;
-        }
-
-        string raw = column.RawExpression.Trim();
-        int dot = raw.LastIndexOf('.');
-        return dot >= 0 ? raw[(dot + 1)..] : raw;
+        int ordinal = layout.OrdinalOf(column);
+        return ordinal >= 0
+            ? ordinal
+            : throw new NotSupportedException($"Reactive recursive CTE cannot resolve column '{column}' of {owner}.");
     }
 }

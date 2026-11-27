@@ -247,7 +247,7 @@ public class InsertTypedTests
     }
 
     [Fact]
-    public void InsertTyped_PopulatesTypedAfter_AndBulkInsertLeavesTypedAfterNull()
+    public void InsertTyped_AndBulkInsert_BothCaptureTypedAfterImages()
     {
         using DataVoContext ctx = CreateContext();
         ctx.Execute("CREATE TABLE Players (Id INT PRIMARY KEY, Name VARCHAR(20), Level INT)");
@@ -268,8 +268,10 @@ public class InsertTypedTests
         Assert.Equal("Ada", typedChange.TypedAfter.Value.AsRowRef()[1].AsString());
         Assert.Equal(7, typedChange.After!["Level"]);
 
+        // The dictionary insert path captures a typed image too; its owned dictionary is built on demand.
         RowChange dictChange = captured.Single(c => Equals(c.After!["Id"], 2));
-        Assert.Null(dictChange.TypedAfter);
+        Assert.NotNull(dictChange.TypedAfter);
+        Assert.Equal("Bob", dictChange.TypedAfter.Value.AsRowRef()["Name"].AsString());
         Assert.Equal("Bob", dictChange.After!["Name"]);
     }
 
@@ -571,7 +573,7 @@ public class InsertTypedTests
         // rows (Category + TotalExposure) rather than being a no-op. No LINQ, no boxing, and
         // no per-dispatch allocation, so the GC measurement below stays undistorted.
         long categorySink = 0;
-        decimal exposureSink = 0m;
+        long exposureSink = 0;
         using IDisposable sub = ctx.SubscribeZeroAlloc("""
             SELECT m.Category, SUM(o.Stake) AS TotalExposure
             FROM Orders o
@@ -592,7 +594,7 @@ public class InsertTypedTests
                 RowRef row = added[i];
                 string? category = row["Category"].AsString();
                 categorySink += category?.Length ?? 0;
-                exposureSink += row["TotalExposure"].AsDecimal();
+                exposureSink += row["TotalExposure"].AsInt64(); // SUM over an INT column is a BIGINT
             }
 
             RowSet updated = change.Updated;
@@ -601,7 +603,7 @@ public class InsertTypedTests
                 RowRef row = updated[i];
                 string? category = row["Category"].AsString();
                 categorySink += category?.Length ?? 0;
-                exposureSink += row["TotalExposure"].AsDecimal();
+                exposureSink += row["TotalExposure"].AsInt64(); // SUM over an INT column is a BIGINT
             }
         });
 
@@ -620,7 +622,7 @@ public class InsertTypedTests
         // Discard warmup deliveries so the post-loop assertion strictly reflects rows the
         // reactive pipeline delivered during the measured loop (all of which arrive as Updated).
         categorySink = 0;
-        exposureSink = 0m;
+        exposureSink = 0;
 
         long before = GC.GetAllocatedBytesForCurrentThread();
         for (int i = 0; i < 2_000; i++)
@@ -633,7 +635,7 @@ public class InsertTypedTests
         // The reactive pipeline must have delivered real rows into the sinks; otherwise the
         // callback could silently be a no-op and the benchmark would measure nothing useful.
         // Captured after `allocated` so the assertion strings don't skew the measurement.
-        Assert.True(exposureSink > 0m, $"exposureSink={exposureSink}");
+        Assert.True(exposureSink > 0, $"exposureSink={exposureSink}");
         Assert.True(categorySink > 0, $"categorySink={categorySink}");
 
         return allocated;

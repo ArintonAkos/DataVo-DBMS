@@ -51,12 +51,7 @@ public sealed class ReactiveRegistry
         DataVo.Core.Compat.ThrowHelper.ThrowIfNull(onChanged);
 
         string databaseName = ResolveDatabase(ctx);
-        IReactiveQuery subscription = CreateQuery(sql, databaseName);
-
-        Registration registration = RegisterUnderLock(new Registration(subscription, onChanged));
-
-        SeedSubscription(subscription, databaseName);
-        return new SubscriptionHandle(this, registration);
+        return RegisterOwned(CreateQuery(sql, databaseName), databaseName, onChanged);
     }
 
     /// <summary>
@@ -79,11 +74,8 @@ public sealed class ReactiveRegistry
         DataVo.Core.Compat.ThrowHelper.ThrowIfNull(statement);
         DataVo.Core.Compat.ThrowHelper.ThrowIfNull(onChanged);
 
-        (IReactiveQuery subscription, string databaseName) = CompilePreparedQuery(ctx, statement, parameters);
-        Registration registration = RegisterUnderLock(new Registration(subscription, onChanged));
-
-        SeedSubscription(subscription, databaseName);
-        return new SubscriptionHandle(this, registration);
+        (IBorrowedReactiveQuery subscription, string databaseName) = CompilePreparedQuery(ctx, statement, parameters);
+        return RegisterOwned(subscription, databaseName, onChanged);
     }
 
     /// <summary>
@@ -105,7 +97,7 @@ public sealed class ReactiveRegistry
         DataVo.Core.Compat.ThrowHelper.ThrowIfNull(statement);
         DataVo.Core.Compat.ThrowHelper.ThrowIfNull(onChanged);
 
-        (IReactiveQuery subscription, string databaseName) = CompilePreparedQuery(ctx, statement, parameters);
+        (IBorrowedReactiveQuery subscription, string databaseName) = CompilePreparedQuery(ctx, statement, parameters);
         return RegisterBorrowed(subscription, databaseName, onChanged);
     }
 
@@ -119,44 +111,27 @@ public sealed class ReactiveRegistry
         DataVo.Core.Compat.ThrowHelper.ThrowIfNull(query);
 
         string databaseName = ResolveDatabase(ctx);
-        var registration = new Registration(query, new List<RowChange>());
-        RegisterUnderLock(registration);
-
-        SeedSubscription(query, databaseName);
-        return new SubscriptionHandle(this, registration);
+        return Register(new Registration(query), databaseName);
     }
 
     /// <summary>
     /// Registers a pre-built reactive operator delivering owned <see cref="QueryChange"/> notifications,
     /// seeds it, and returns a handle whose disposal removes it.
     /// </summary>
-    internal IDisposable AddCompiled(DataVoContext ctx, IReactiveQuery query, Action<QueryChange> onChanged)
+    internal IDisposable AddCompiled(DataVoContext ctx, IBorrowedReactiveQuery query, Action<QueryChange> onChanged)
     {
         DataVo.Core.Compat.ThrowHelper.ThrowIfNull(ctx);
         DataVo.Core.Compat.ThrowHelper.ThrowIfNull(query);
         DataVo.Core.Compat.ThrowHelper.ThrowIfNull(onChanged);
 
         string databaseName = ResolveDatabase(ctx);
-        Registration registration = RegisterUnderLock(new Registration(query, onChanged));
-
-        SeedSubscription(query, databaseName);
-        return new SubscriptionHandle(this, registration);
+        return RegisterOwned(query, databaseName, onChanged);
     }
 
     /// <summary>
-    /// Test-only seam: registers a pre-built reactive operator (bypassing SQL compilation), seeds it,
-    /// and returns a disposing handle. Exists to exercise the borrowed-to-materialized delta bridge
-    /// end-to-end through the same <see cref="Dispatch"/> path as production subscriptions, without
-    /// migrating real operators (Phase 1).
-    /// </summary>
-    internal IDisposable AddCompiledForTest(DataVoContext ctx, IReactiveQuery query, Action<QueryChange> onChanged)
-        => AddCompiled(ctx, query, onChanged);
-
-    /// <summary>
     /// Registers a zero-allocation subscription that delivers borrowed <see cref="QueryChangeRef"/>
-    /// deltas (no materialization) for query shapes whose operator implements
-    /// <see cref="IBorrowedReactiveQuery"/>. Throws <see cref="NotSupportedException"/> — with no side
-    /// effects — for shapes that have not been migrated to borrowed emit.
+    /// deltas (no materialization). Every query shape <see cref="Add(DataVoContext, string, Action{QueryChange})"/>
+    /// accepts is served.
     /// </summary>
     public IDisposable SubscribeZeroAlloc(DataVoContext ctx, string sql, QueryDeltaHandler onChanged)
     {
@@ -164,11 +139,10 @@ public sealed class ReactiveRegistry
         DataVo.Core.Compat.ThrowHelper.ThrowIfNull(onChanged);
 
         string databaseName = ResolveDatabase(ctx);
-        IReactiveQuery subscription = CreateQuery(sql, databaseName);
-        return RegisterBorrowed(subscription, databaseName, onChanged);
+        return RegisterBorrowed(CreateQuery(sql, databaseName), databaseName, onChanged);
     }
 
-    private (IReactiveQuery Query, string DatabaseName) CompilePreparedQuery(
+    private (IBorrowedReactiveQuery Query, string DatabaseName) CompilePreparedQuery(
         DataVoContext ctx,
         DataVoPreparedStatement statement,
         ReadOnlySpan<DataVoQueryParameter> parameters)
@@ -183,30 +157,25 @@ public sealed class ReactiveRegistry
         string databaseName = ResolveDatabase(ctx);
         Parser.AST.SqlStatement boundStatement = statement.BindSingleReactiveStatement(parameters);
         Parser.Binding.SqlNameResolver.Resolve(boundStatement, _engine, databaseName);
-        IReactiveQuery subscription = CreateQuery(boundStatement, databaseName);
-        return (subscription, databaseName);
+        return (CreateQuery(boundStatement, databaseName), databaseName);
     }
 
     private IDisposable RegisterBorrowed(
-        IReactiveQuery subscription,
+        IBorrowedReactiveQuery subscription,
         string databaseName,
-        QueryDeltaHandler onChanged)
+        QueryDeltaHandler onChanged) =>
+        Register(new Registration(subscription, borrowedHandler: onChanged, ownedCallback: null), databaseName);
+
+    private IDisposable RegisterOwned(
+        IBorrowedReactiveQuery subscription,
+        string databaseName,
+        Action<QueryChange> onChanged) =>
+        Register(new Registration(subscription, borrowedHandler: null, ownedCallback: onChanged), databaseName);
+
+    private IDisposable Register(Registration registration, string databaseName)
     {
-        // Support check BEFORE any side effect (no registration, no hook enable, no seed on throw).
-        if (subscription is not IBorrowedReactiveQuery borrowed)
-        {
-            throw new NotSupportedException(
-                "Zero-allocation subscriptions are not yet supported for this query shape.");
-        }
-
-        var registration = new Registration(
-            borrowed,
-            onChanged,
-            new QueryChangeBuilder(borrowed.OutputSchema),
-            new List<RowChange>());
-
         RegisterUnderLock(registration);
-        SeedSubscription(subscription, databaseName);
+        SeedSubscription(registration.Subscription, databaseName);
         return new SubscriptionHandle(this, registration);
     }
 
@@ -278,13 +247,9 @@ public sealed class ReactiveRegistry
                     {
                         DispatchDirect(registration, set);
                     }
-                    else if (registration.IsBorrowed)
-                    {
-                        DispatchBorrowed(registration, set);
-                    }
                     else
                     {
-                        DispatchOwned(registration, set);
+                        DispatchCompiled(registration, set);
                     }
                 }
             }
@@ -299,96 +264,68 @@ public sealed class ReactiveRegistry
         }
     }
 
-    // Direct zero-alloc path — filters relevant changes into reused scratch and delegates directly.
+    // Direct zero-alloc path — the operator notifies its consumer itself.
     private static void DispatchDirect(Registration registration, ChangeSet set)
     {
-        string[] observed = registration.ObservedTables;
-        if (!ObservesAny(set.Tables, observed))
+        if (CollectRelevant(registration, set))
         {
-            return;
-        }
-
-        List<RowChange> scratch = registration.Scratch!;
-        scratch.Clear();
-        IReadOnlyList<RowChange> changes = set.Changes;
-        for (int i = 0; i < changes.Count; i++)
-        {
-            RowChange change = changes[i];
-            if (ObservesTable(observed, change.Table))
-            {
-                scratch.Add(change);
-            }
-        }
-
-        if (scratch.Count == 0)
-        {
-            return;
-        }
-
-        registration.DirectQuery!.ApplyAndNotify(scratch);
-    }
-
-    // Owned path — behavior unchanged (extracted verbatim from the previous inline loop body).
-    private static void DispatchOwned(Registration registration, ChangeSet set)
-    {
-        IReadOnlyCollection<string> tables = registration.Subscription.Tables;
-
-        if (!set.Tables.Any(table => Observes(tables, table)))
-        {
-            return;
-        }
-
-        List<RowChange> relevantChanges = set.Changes
-            .Where(change => Observes(tables, change.Table))
-            .ToList();
-
-        if (relevantChanges.Count == 0)
-        {
-            return;
-        }
-
-        QueryChange result = registration.Subscription.Apply(relevantChanges);
-        if (!result.IsEmpty)
-        {
-            registration.Callback!(result);
+            registration.DirectQuery!.ApplyAndNotify(registration.Scratch);
         }
     }
 
-    // Borrowed (zero-alloc) path — manual loops, no LINQ/closures/enumerators; reused scratch list.
-    private static void DispatchBorrowed(Registration registration, ChangeSet set)
+    /// <summary>
+    /// Compiled path — the operator builds its delta into the registration's arena; a zero-allocation subscriber
+    /// receives it borrowed, an owned subscriber receives a materialized copy. Manual loops, no LINQ/closures.
+    /// </summary>
+    private static void DispatchCompiled(Registration registration, ChangeSet set)
     {
-        string[] observed = registration.ObservedTables;
-
-        if (!ObservesAny(set.Tables, observed))
-        {
-            return;
-        }
-
-        List<RowChange> scratch = registration.Scratch!;
-        scratch.Clear();
-        IReadOnlyList<RowChange> changes = set.Changes;
-        for (int i = 0; i < changes.Count; i++)
-        {
-            RowChange change = changes[i];
-            if (ObservesTable(observed, change.Table))
-            {
-                scratch.Add(change);
-            }
-        }
-
-        if (scratch.Count == 0)
+        if (!CollectRelevant(registration, set))
         {
             return;
         }
 
         QueryChangeBuilder builder = registration.Builder!;
         builder.Reset();
-        ((IBorrowedReactiveQuery)registration.Subscription).ApplyInto(scratch, builder);
+        registration.Compiled!.ApplyInto(registration.Scratch, builder);
         QueryChangeRef delta = builder.Build();
-        if (!delta.IsEmpty)
+        if (delta.IsEmpty)
         {
-            registration.BorrowedHandler!(in delta);
+            return;
         }
+
+        if (registration.BorrowedHandler is not null)
+        {
+            registration.BorrowedHandler(in delta);
+        }
+        else
+        {
+            registration.OwnedCallback!(delta.Materialize());
+        }
+    }
+
+    /// <summary>Fills the registration's reused scratch with the set's changes to its observed tables.</summary>
+    /// <returns><see langword="false"/> when none of the changes concern the registration.</returns>
+    private static bool CollectRelevant(Registration registration, ChangeSet set)
+    {
+        string[] observed = registration.ObservedTables;
+        if (!ObservesAny(set.Tables, observed))
+        {
+            return false;
+        }
+
+        List<RowChange> scratch = registration.Scratch;
+        scratch.Clear();
+        IReadOnlyList<RowChange> changes = set.Changes;
+        for (int i = 0; i < changes.Count; i++)
+        {
+            RowChange change = changes[i];
+            if (ObservesTable(observed, change.Table))
+            {
+                scratch.Add(change);
+            }
+        }
+
+        return scratch.Count > 0;
     }
 
     private static bool ObservesAny(IReadOnlyList<string> setTables, string[] observed)
@@ -416,9 +353,6 @@ public sealed class ReactiveRegistry
 
         return false;
     }
-
-    private static bool Observes(IReadOnlyCollection<string> tables, string table) =>
-        tables.Any(observed => observed.Equals(table, StringComparison.OrdinalIgnoreCase));
 
     private void EnsureHookedNoLock()
     {
@@ -506,7 +440,7 @@ public sealed class ReactiveRegistry
     /// to the linear <see cref="ReactiveSubscription"/>. Unsupported shapes (joins, subqueries, and so on)
     /// raise <see cref="NotSupportedException"/> from the chosen operator's constructor.
     /// </remarks>
-    private IReactiveQuery CreateQuery(string sql, string databaseName)
+    private IBorrowedReactiveQuery CreateQuery(string sql, string databaseName)
     {
         // A WITH RECURSIVE CTE is detected at the SQL level: the engine's primary parser does not accept
         // the RECURSIVE keyword nor a UNION ALL CTE body, so RecursiveCteParser slices and validates it.
@@ -527,22 +461,27 @@ public sealed class ReactiveRegistry
     }
 
     /// <summary>
-    /// Routes a parsed statement to the operator for its shape, in precedence order: UNION → join →
-    /// IN/EXISTS subquery → aggregate → top-K → DISTINCT → linear filter. The first matching shape wins;
+    /// Routes a parsed statement to the operator for its shape, in precedence order: UNION → join aggregate →
+    /// join → IN/EXISTS subquery → aggregate → top-K → DISTINCT → linear filter. The first matching shape wins;
     /// an unsupported construct surfaces as <see cref="NotSupportedException"/> from the chosen operator.
     /// </summary>
     /// <param name="statement">The parsed SELECT-family statement.</param>
     /// <param name="databaseName">The database that owns the query's source tables.</param>
-    private IReactiveQuery CreateQuery(Parser.AST.SqlStatement statement, string databaseName)
+    private IBorrowedReactiveQuery CreateQuery(Parser.AST.SqlStatement statement, string databaseName)
     {
         if (statement is Parser.AST.UnionSelectStatement union)
         {
-            return new UnionReactiveQuery(union, branch => CreateQuery(branch, databaseName));
+            return new UnionReactiveQuery(union, _engine, databaseName);
         }
 
         if (statement is not Parser.AST.SelectStatement select)
         {
             throw new NotSupportedException("Reactive subscriptions support only SELECT statements.");
+        }
+
+        if (select.Joins.Count > 0 && ReactiveQueryParser.IsAggregateShape(select))
+        {
+            return new JoinAggregateReactiveQuery(select, _engine, databaseName);
         }
 
         if (ReactiveQueryParser.TryGetJoinShape(select, out JoinShape joinShape))
@@ -553,11 +492,6 @@ public sealed class ReactiveRegistry
         if (ReactiveQueryParser.TryGetSubqueryShape(select, out SubqueryShape subqueryShape))
         {
             return new SubqueryReactiveQuery(subqueryShape, _engine, databaseName);
-        }
-
-        if (VipExposureReactiveQuery.IsSupported(select))
-        {
-            return new VipExposureReactiveQuery();
         }
 
         if (ReactiveQueryParser.IsAggregateShape(select))
@@ -572,10 +506,10 @@ public sealed class ReactiveRegistry
 
         if (ReactiveQueryParser.IsDistinctShape(select))
         {
-            return new DistinctReactiveQuery(select);
+            return new DistinctReactiveQuery(select, _engine, databaseName);
         }
 
-        return new ReactiveSubscription(select);
+        return new ReactiveSubscription(select, _engine, databaseName);
     }
 
     private void SeedSubscription(IReactiveQuery subscription, string databaseName)
@@ -584,11 +518,17 @@ public sealed class ReactiveRegistry
 
         foreach (string table in subscription.Tables)
         {
-            Dictionary<RowKey, StoredRow> rows =
-                _engine.StorageContext.GetTypedTableContents(table, databaseName);
+            Dictionary<RowKey, StoredRow> rows = _engine.StorageContext.GetTypedTableContents(table, databaseName);
+            subscription.Seed(table, TypedRows(rows.Values));
+        }
+    }
 
-            subscription.Seed(table, rows.Select(pair =>
-                (pair.Key, (IReadOnlyDictionary<string, object?>)pair.Value.AsDictionary())));
+    /// <summary>Wraps stored rows as typed images without copying their cells.</summary>
+    private static IEnumerable<TypedRow> TypedRows(IEnumerable<StoredRow> rows)
+    {
+        foreach (StoredRow row in rows)
+        {
+            yield return TypedRow.FromOwnedCells(row.Schema, row.OwnedCells);
         }
     }
 
@@ -611,46 +551,37 @@ public sealed class ReactiveRegistry
 
     private sealed class Registration
     {
-        // Owned (materialized) registration.
-        public Registration(IReactiveQuery subscription, Action<QueryChange> callback)
-        {
-            Subscription = subscription;
-            Callback = callback;
-            ObservedTables = ToArray(subscription.Tables);
-        }
-
-        // Borrowed (zero-allocation) registration.
+        // Compiled registration: the operator builds borrowed deltas; exactly one of the handlers is set.
         public Registration(
             IBorrowedReactiveQuery subscription,
-            QueryDeltaHandler borrowedHandler,
-            QueryChangeBuilder builder,
-            List<RowChange> scratch)
+            QueryDeltaHandler? borrowedHandler,
+            Action<QueryChange>? ownedCallback)
         {
             Subscription = subscription;
+            Compiled = subscription;
             BorrowedHandler = borrowedHandler;
-            Builder = builder;
-            Scratch = scratch;
+            OwnedCallback = ownedCallback;
+            Builder = new QueryChangeBuilder(subscription.OutputSchema);
             ObservedTables = ToArray(subscription.Tables);
         }
 
         // Direct (zero-allocation buffered window) registration.
-        public Registration(IDirectReactiveQuery directQuery, List<RowChange> scratch)
+        public Registration(IDirectReactiveQuery directQuery)
         {
             Subscription = directQuery;
             DirectQuery = directQuery;
-            Scratch = scratch;
             ObservedTables = ToArray(directQuery.Tables);
         }
 
         public IReactiveQuery Subscription { get; }
+        public IBorrowedReactiveQuery? Compiled { get; }
         public IDirectReactiveQuery? DirectQuery { get; }
-        public Action<QueryChange>? Callback { get; }
         public QueryDeltaHandler? BorrowedHandler { get; }
+        public Action<QueryChange>? OwnedCallback { get; }
         public QueryChangeBuilder? Builder { get; }
-        public List<RowChange>? Scratch { get; }
+        public List<RowChange> Scratch { get; } = [];
         public string[] ObservedTables { get; }
         public bool Disposed { get; set; }
-        public bool IsBorrowed => BorrowedHandler is not null;
 
         private static string[] ToArray(IReadOnlyCollection<string> tables)
         {

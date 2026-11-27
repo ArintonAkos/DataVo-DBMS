@@ -1,28 +1,37 @@
 using DataVo.Core;
+using DataVo.Core.Runtime;
 using DataVo.Core.Runtime.Changes;
 using DataVo.Core.Runtime.Reactive;
+using DataVo.Tests.Reactive;
 
 namespace DataVo.Tests.E2E;
 
 public class ReactiveSubscriptionTests
 {
+    private static readonly DataVoEngine Engine = ReactiveTestRows.EngineWith(
+        "SubDb",
+        "CREATE TABLE Players (Id INT, Health INT)",
+        "CREATE TABLE A (Id INT)",
+        "CREATE TABLE B (Id INT)");
+
+    private static ReactiveSubscription Subscription(string sql) =>
+        new(ReactiveQueryParser.ParseSingleSelect(sql), Engine, "SubDb");
+
     private static IReadOnlyDictionary<string, object?> Row(int id, int hp) =>
         new Dictionary<string, object?> { ["Id"] = id, ["Health"] = hp };
 
     [Fact]
     public void Rejects_Unsupported_Sql()
     {
-        Assert.Throws<NotSupportedException>(() =>
-            new ReactiveSubscription("SELECT Id FROM A JOIN B ON A.Id=B.Id"));
-        Assert.Throws<NotSupportedException>(() =>
-            new ReactiveSubscription("SELECT COUNT(*) FROM Players"));
+        Assert.Throws<NotSupportedException>(() => Subscription("SELECT Id FROM A JOIN B ON A.Id=B.Id"));
+        Assert.Throws<NotSupportedException>(() => Subscription("SELECT COUNT(*) FROM Players"));
     }
 
     [Fact]
     public void Apply_ComputesEnterLeaveStay()
     {
-        var sub = new ReactiveSubscription("SELECT Id, Health FROM Players WHERE Health < 20");
-        sub.Seed("Players", new (RowKey, IReadOnlyDictionary<string, object?>)[] { (1, Row(1, 10)) }); // row 1 already matches
+        var sub = Subscription("SELECT Id, Health FROM Players WHERE Health < 20");
+        sub.Seed("Players", ReactiveTestRows.Typed(Row(1, 10))); // row 1 already matches
 
         var changes = new[]
         {
@@ -31,7 +40,7 @@ public class ReactiveSubscriptionTests
             new RowChange("Players", 3, ChangeKind.Insert, null, Row(3, 99)),       // never matches -> ignore
         };
 
-        QueryChange qc = sub.Apply(changes);
+        QueryChange qc = sub.ApplyOwned(changes);
         Assert.Single(qc.Added);
         Assert.Equal(2, qc.Added[0]["Id"]);
         Assert.Single(qc.Removed);
@@ -42,10 +51,10 @@ public class ReactiveSubscriptionTests
     [Fact]
     public void Apply_StayInSet_IsUpdated()
     {
-        var sub = new ReactiveSubscription("SELECT Id, Health FROM Players WHERE Health < 20");
-        sub.Seed("Players", new (RowKey, IReadOnlyDictionary<string, object?>)[] { (1, Row(1, 10)) });
+        var sub = Subscription("SELECT Id, Health FROM Players WHERE Health < 20");
+        sub.Seed("Players", ReactiveTestRows.Typed(Row(1, 10)));
 
-        QueryChange qc = sub.Apply(new[]
+        QueryChange qc = sub.ApplyOwned(new[]
         {
             new RowChange("Players", 1, ChangeKind.Update, Row(1, 10), Row(1, 15)),
         });
@@ -59,10 +68,10 @@ public class ReactiveSubscriptionTests
     [Fact]
     public void Apply_StayInSet_CarriesBeforeAndAfterImages()
     {
-        var sub = new ReactiveSubscription("SELECT Id, Health FROM Players WHERE Health < 20");
-        sub.Seed("Players", new (RowKey, IReadOnlyDictionary<string, object?>)[] { (1, Row(1, 10)) });
+        var sub = Subscription("SELECT Id, Health FROM Players WHERE Health < 20");
+        sub.Seed("Players", ReactiveTestRows.Typed(Row(1, 10)));
 
-        QueryChange qc = sub.Apply(new[]
+        QueryChange qc = sub.ApplyOwned(new[]
         {
             new RowChange("Players", 1, ChangeKind.Update, Row(1, 10), Row(1, 15)),
         });

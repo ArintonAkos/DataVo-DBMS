@@ -87,7 +87,7 @@ public class AggregateBorrowedTests(ITestOutputHelper output)
     public void AggregateDispatch_TypedInsert_DoesNotMaterializeOwnedAfterDictionary()
     {
         var select = (SelectStatement)ReactiveQueryParser.ParseSingleStatement(TypedOpenGroupBySql);
-        using DataVoEngine engine = DataVoEngine.Initialize(new DataVoConfig { StorageMode = StorageMode.InMemory });
+        using DataVoEngine engine = ReactiveTestRows.EngineWith("AggDb", "CREATE TABLE Orders (Id INT, MarketId INT, Stake INT, IsOpen BIT)");
         var op = new AggregateReactiveQuery(select, engine, "AggDb");
         var builder = new QueryChangeBuilder(op.OutputSchema);
         var schema = new ReactiveRowSchema("Id", "MarketId", "Stake", "IsOpen");
@@ -120,9 +120,9 @@ public class AggregateBorrowedTests(ITestOutputHelper output)
     private static AggregateReactiveQuery SeededSportsOperator(out DataVoEngine engine)
     {
         var select = (SelectStatement)ReactiveQueryParser.ParseSingleStatement(GroupBySql);
-        engine = DataVoEngine.Initialize(new DataVoConfig { StorageMode = StorageMode.InMemory });
+        engine = ReactiveTestRows.EngineWith("AggDb", "CREATE TABLE Orders (Id INT, Category VARCHAR(20), Stake INT)");
         var op = new AggregateReactiveQuery(select, engine, "AggDb");
-        op.Seed("Orders", new (RowKey, IReadOnlyDictionary<string, object?>)[] { (1L, Row(("Id", 1), ("Category", "sports"), ("Stake", 100))) });
+        op.Seed("Orders", ReactiveTestRows.Typed(Row(("Id", 1), ("Category", "sports"), ("Stake", 100))));
         return op;
     }
 
@@ -170,9 +170,9 @@ public class AggregateBorrowedTests(ITestOutputHelper output)
     private static AggregateReactiveQuery SeededMinMaxOperator(out DataVoEngine engine)
     {
         var select = (SelectStatement)ReactiveQueryParser.ParseSingleStatement(MinMaxSql);
-        engine = DataVoEngine.Initialize(new DataVoConfig { StorageMode = StorageMode.InMemory });
+        engine = ReactiveTestRows.EngineWith("AggDb", "CREATE TABLE Orders (Id INT, Category VARCHAR(20), Stake INT)");
         var op = new AggregateReactiveQuery(select, engine, "AggDb");
-        op.Seed("Orders", new (RowKey, IReadOnlyDictionary<string, object?>)[] { (1L, Row(("Id", 1), ("Category", "sports"), ("Stake", 100))) });
+        op.Seed("Orders", ReactiveTestRows.Typed(Row(("Id", 1), ("Category", "sports"), ("Stake", 100))));
         return op;
     }
 
@@ -320,10 +320,9 @@ public class AggregateBorrowedTests(ITestOutputHelper output)
 
             var select = (SelectStatement)ReactiveQueryParser.ParseSingleStatement(
                 "SELECT Price, COUNT(*) AS Cnt FROM Orders GROUP BY Price");
-            using DataVoEngine engine = DataVoEngine.Initialize(
-                new DataVoConfig { StorageMode = StorageMode.InMemory });
+            using DataVoEngine engine = ReactiveTestRows.EngineWith("AggDb", "CREATE TABLE Orders (Id INT, Price FLOAT)");
             var aggregate = new AggregateReactiveQuery(select, engine, "AggDb");
-            aggregate.Seed("Orders", [(1L, Row(("Price", 12.5m)))]);
+            aggregate.Seed("Orders", ReactiveTestRows.Typed(Row(("Price", 12.5m))));
 
             var builder = new QueryChangeBuilder(aggregate.OutputSchema);
             var schema = new ReactiveRowSchema("Price");

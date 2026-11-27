@@ -188,6 +188,35 @@ public sealed class PreparedStatementReactiveTests
     }
 
     [Fact]
+    public void SubscribeZeroAlloc_PreparedLinearFilter_DeliversBorrowedRows()
+    {
+        using DataVoContext ctx = CreateContext();
+        DataVoPreparedStatement linearStmt = ctx.Prepare("SELECT Id, Score FROM Players WHERE Score > @min");
+        var added = new List<(int Id, int Score)>();
+        var removed = new List<int>();
+        using IDisposable sub = ctx.SubscribeZeroAlloc(linearStmt, (in QueryChangeRef change) =>
+        {
+            for (int i = 0; i < change.Added.Count; i++)
+            {
+                added.Add((change.Added[i]["Id"].AsInt32(), change.Added[i]["Score"].AsInt32()));
+            }
+
+            for (int i = 0; i < change.Removed.Count; i++)
+            {
+                removed.Add(change.Removed[i]["Id"].AsInt32());
+            }
+        }, ("min", 10));
+
+        ctx.Execute("INSERT INTO Players VALUES (1, 'A', 'Red', 5)");
+        ctx.Execute("INSERT INTO Players VALUES (2, 'B', 'Red', 50)");
+        ctx.Execute("UPDATE Players SET Score = 1 WHERE Id = 2");
+        ctx.DispatchPendingNotifications();
+
+        Assert.Equal([(2, 50)], added);
+        Assert.Equal([2], removed);
+    }
+
+    [Fact]
     public void Subscribe_PreparedStatement_InvalidStatementsAndCap_FailCleanlyWithoutSideEffects()
     {
         using DataVoContext ctx = CreateContext();
@@ -205,7 +234,7 @@ public sealed class PreparedStatementReactiveTests
         Assert.Throws<NotSupportedException>(() => ctx.Subscribe(badSql, _ => { }));
         Assert.Throws<BindingException>(() => ctx.Subscribe(missingParam, _ => { }));
         Assert.Throws<NotSupportedException>(() => ctx.Subscribe(distinctAgg, _ => { }));
-        Assert.Throws<NotSupportedException>(() => ctx.SubscribeZeroAlloc(linearStmt, (in QueryChangeRef _) => { }, ("min", 10)));
+        Assert.Throws<NotSupportedException>(() => ctx.SubscribeZeroAlloc(distinctAgg, (in QueryChangeRef _) => { }));
 
         // None of the rejected attempts should have enabled change capture.
         Assert.False(ctx.Changes.Enabled);

@@ -105,15 +105,19 @@ public sealed class DataVoComplexVipExposureEngine : IComplexVipExposureEngine
 
             for (int i = 0; i < change.Added.Count; i++)
             {
-                _exposure[change.Added[i]["Category"].AsString()!] = change.Added[i]["TotalExposure"].AsDecimal();
+                _exposure[change.Added[i]["Category"].AsString()!] = ToDecimal(change.Added[i]["TotalExposure"]);
             }
 
             for (int i = 0; i < change.Updated.Count; i++)
             {
-                _exposure[change.Updated[i]["Category"].AsString()!] = change.Updated[i]["TotalExposure"].AsDecimal();
+                _exposure[change.Updated[i]["Category"].AsString()!] = ToDecimal(change.Updated[i]["TotalExposure"]);
             }
         }
     }
+
+    // SUM over the INT Stake column is a BIGINT; a fractional sum would be a DECIMAL.
+    private static decimal ToDecimal(CellValue value) =>
+        value.Type == CellType.Decimal ? value.AsDecimal() : value.AsInt64();
 
     private static IReadOnlyDictionary<string, object?> ToRow(ComplexOrderTick order) =>
         new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)

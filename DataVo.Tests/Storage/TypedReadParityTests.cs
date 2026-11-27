@@ -38,7 +38,7 @@ public class TypedReadParityTests
         Assert.Equal(DataVoDate.FromDateTime(new DateTime(2026, 6, 22)), row["D"].AsDate());
         Assert.Equal("hello", row["S"].AsString());
         Assert.Equal(new float[] { 1f, 2f, 3f }, row["V"].AsVector());
-        AssertDictionaryEquivalent(legacy.Values.Single(), row.AsDictionary());
+        AssertRowEquivalent(legacy.Values.Single(), row);
     }
 
     [Fact]
@@ -58,7 +58,7 @@ public class TypedReadParityTests
 
         KeyValuePair<RowKey, StoredRow> row = Assert.Single(typed);
         Assert.Equal(rowIds[1], row.Key);
-        AssertDictionaryEquivalent(legacy[rowIds[1]], row.Value.AsDictionary());
+        AssertRowEquivalent(legacy[rowIds[1]], row.Value);
     }
 
     private static DataVoContext NewContext()
@@ -80,26 +80,25 @@ public class TypedReadParityTests
         ["V"] = new float[] { id, id + 1, id + 2 },
     };
 
-    private static void AssertDictionaryEquivalent(
-        IReadOnlyDictionary<string, object?> expected,
-        IReadOnlyDictionary<string, object?> actual)
+    private static void AssertRowEquivalent(IReadOnlyDictionary<string, object?> expected, StoredRow row)
     {
-        Assert.Equal(expected.Keys, actual.Keys);
+        Assert.Equal(expected.Keys, row.Schema.Columns.ToArray());
         foreach (string key in expected.Keys)
         {
+            object? actualValue = row[key].ToObject();
             if (key.Equals("F", StringComparison.OrdinalIgnoreCase))
             {
-                Assert.Equal(Convert.ToDouble(expected[key]), Convert.ToDouble(actual[key]));
+                Assert.Equal(Convert.ToDouble(expected[key]), Convert.ToDouble(actualValue));
                 continue;
             }
 
             if (expected[key] is float[] expectedVector)
             {
-                Assert.Equal(expectedVector, Assert.IsType<float[]>(actual[key]));
+                Assert.Equal(expectedVector, Assert.IsType<float[]>(actualValue));
                 continue;
             }
 
-            Assert.Equal(expected[key], actual[key]);
+            Assert.Equal(expected[key], actualValue);
         }
     }
 }

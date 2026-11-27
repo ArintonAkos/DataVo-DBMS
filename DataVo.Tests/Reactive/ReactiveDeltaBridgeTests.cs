@@ -16,7 +16,7 @@ public class ReactiveDeltaBridgeTests
 
         QueryChange? received = null;
         var probe = new BridgeProbeReactiveQuery();
-        using IDisposable sub = ctx.Engine.Reactive.AddCompiledForTest(ctx, probe, qc => received = qc);
+        using IDisposable sub = ctx.Engine.Reactive.AddCompiled(ctx, probe, qc => received = qc);
 
         ctx.Execute("INSERT INTO Probe VALUES (7, 250)");
         ctx.DispatchPendingNotifications();

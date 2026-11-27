@@ -47,9 +47,8 @@ public class InsertAllocationGuardTests
     }
 
     // Task 3.3 fence: with a borrowed VIP subscriber active (capture on), an Orders insert must not
-    // allocate the owned after-image dict, because VipExposureReactiveQuery reads TypedAfter (the typed
-    // lane) and never touches RowChange.After. VipExposure is the only production borrowed operator that
-    // reads the typed image, so it is the shape that exercises the dual-image collapse.
+    // allocate the owned after-image dict, because the join-aggregate operator reads TypedAfter (the typed
+    // lane) and never touches RowChange.After.
     //
     // Honest numbers (measured, low variance ~8 B): collapsing the dual after-image drops the warm
     // per-insert from ~2,551 B (eager dict + TypedRow clone) to ~2,370 B — a ~180 B win. The absolute is
@@ -59,7 +58,7 @@ public class InsertAllocationGuardTests
     // sits below the pre-collapse baseline so a regression re-adding the eager dict is caught.
     private const long VipBorrowedPerInsertCeilingBytes = 2_450;
 
-    // The benchmark's complex-vip query shape (proven to route to VipExposureReactiveQuery).
+    // The benchmark's complex-vip query shape (routes to JoinAggregateReactiveQuery).
     private const string VipSql =
         "SELECT m.Category, SUM(o.Stake) AS TotalExposure " +
         "FROM Orders o " +
@@ -85,8 +84,8 @@ public class InsertAllocationGuardTests
         decimal sink = 0m;
         using IDisposable sub = ctx.SubscribeZeroAlloc(VipSql, (in QueryChangeRef change) =>
         {
-            for (int i = 0; i < change.Added.Count; i++) sink += change.Added[i]["TotalExposure"].AsDecimal();
-            for (int i = 0; i < change.Updated.Count; i++) sink += change.Updated[i]["TotalExposure"].AsDecimal();
+            for (int i = 0; i < change.Added.Count; i++) sink += change.Added[i]["TotalExposure"].AsInt64();
+            for (int i = 0; i < change.Updated.Count; i++) sink += change.Updated[i]["TotalExposure"].AsInt64();
         });
 
         var schema = new ReactiveRowSchema("Id", "AccountId", "MarketId", "Stake");

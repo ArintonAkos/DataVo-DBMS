@@ -266,7 +266,11 @@ internal static class DataVoReactiveLinq
     {
         string databaseName = ResolveDatabase(table.Context);
         string canonicalTable = table.Context.Engine.Catalog.FindTableName(table.TableName, databaseName) ?? table.TableName;
-        var query = new TypedFallbackLinearQuery<T, TState>(canonicalTable, source, table);
+        var query = new TypedFallbackLinearQuery<T, TState>(
+            canonicalTable,
+            ReactiveTableLayouts.ForTable(table.Context.Engine, canonicalTable, databaseName),
+            source,
+            table);
         return table.Context.Engine.Reactive.AddCompiled(
             table.Context,
             query,
@@ -431,53 +435,50 @@ internal static class DataVoReactiveLinq
                 : table.Read(row.ToOwnedDictionary()));
     }
 
+    /// <summary>
+    /// A linear subscription whose filter is a C# predicate evaluated on materialized models (the LINQ shapes the
+    /// interceptors could not compile to SQL). It emits whole catalog rows; owned delivery maps them to models.
+    /// </summary>
     private sealed class TypedFallbackLinearQuery<T, TState>(
         string tableName,
+        ReactiveRowLayout layout,
         DataVoQuery<T, TState> source,
-        DataVoTable<T> table) : IReactiveQuery
+        DataVoTable<T> table) : IBorrowedReactiveQuery
     {
+        private readonly CellValue[] _before = new CellValue[layout.Count];
+        private readonly CellValue[] _after = new CellValue[layout.Count];
+
         public IReadOnlyCollection<string> Tables => [tableName];
 
-        public void Seed(string table, IEnumerable<(RowKey RowId, IReadOnlyDictionary<string, object?> Row)> rows)
+        public ReactiveRowSchema OutputSchema => layout.Schema;
+
+        public void Seed(string table, IEnumerable<TypedRow> rows)
         {
             // Predicate transitions are evaluated directly on before/after images (matching ReactiveSubscription).
         }
 
-        public QueryChange Apply(IReadOnlyList<RowChange> changes)
+        public void ApplyInto(IReadOnlyList<RowChange> changes, QueryChangeBuilder builder)
         {
-            List<IReadOnlyDictionary<string, object?>> added = [];
-            List<IReadOnlyDictionary<string, object?>> removed = [];
-            List<IReadOnlyDictionary<string, object?>> updated = [];
-            List<IReadOnlyDictionary<string, object?>> updatedBefore = [];
-
             for (int i = 0; i < changes.Count; i++)
             {
                 RowChange change = changes[i];
-                bool beforeMatches = change.Before is not null && source.MatchesInMemory(table.Read(change.Before));
-                bool afterMatches = change.After is not null && source.MatchesInMemory(table.Read(change.After));
+                bool beforeMatches = layout.TryLoadBefore(change, _before) && source.MatchesInMemory(table.Read(change.Before!));
+                bool afterMatches = layout.TryLoadAfter(change, _after) && source.MatchesInMemory(table.Read(change.After!));
 
-                switch (change.Kind)
+                if (beforeMatches && afterMatches)
                 {
-                    case ChangeKind.Insert when afterMatches:
-                        added.Add(change.After!);
-                        break;
-                    case ChangeKind.Delete when beforeMatches:
-                        removed.Add(change.Before!);
-                        break;
-                    case ChangeKind.Update when !beforeMatches && afterMatches:
-                        added.Add(change.After!);
-                        break;
-                    case ChangeKind.Update when beforeMatches && !afterMatches:
-                        removed.Add(change.Before!);
-                        break;
-                    case ChangeKind.Update when beforeMatches && afterMatches:
-                        updatedBefore.Add(change.Before!);
-                        updated.Add(change.After!);
-                        break;
+                    builder.AddUpdatedBeforeRow(_before);
+                    builder.AddUpdatedRow(_after);
+                }
+                else if (afterMatches)
+                {
+                    builder.AddAddedRow(_after);
+                }
+                else if (beforeMatches)
+                {
+                    builder.AddRemovedRow(_before);
                 }
             }
-
-            return new QueryChange(added, removed, updated, updatedBefore);
         }
     }
 }

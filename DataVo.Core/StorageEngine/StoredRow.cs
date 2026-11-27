@@ -51,7 +51,6 @@ internal sealed class StoredRow
     /// <summary>The number of cells.</summary>
     public int Count => _cells.Length;
 
-    /// <summary>The cell at <paramref name="ordinal"/>.</summary>
     /// <summary>The row's cells, read in place.</summary>
     internal ReadOnlySpan<CellValue> Cells => _cells;
 
@@ -61,6 +60,7 @@ internal sealed class StoredRow
     /// </summary>
     internal CellValue[] OwnedCells => _cells;
 
+    /// <summary>The cell at <paramref name="ordinal"/>.</summary>
     public CellValue this[int ordinal] => _cells[ordinal];
 
     /// <summary>The cell for a column name (case-insensitive).</summary>
@@ -85,10 +85,6 @@ internal sealed class StoredRow
 
     /// <summary>A borrowed, no-copy view over this row's cells. Valid only while this row is alive.</summary>
     public StoredRowView AsView() => new(_schema, _cells);
-
-    /// <summary>A read-only dictionary adapter over this row (legacy/boundary consumers). Boxes on access;
-    /// VECTOR values are cloned, so stored state cannot be mutated through it.</summary>
-    public StoredRowDictionaryView AsDictionary() => new(_schema, _cells);
 }
 
 /// <summary>

@@ -1,4 +1,3 @@
-using DataVo.Core.StorageEngine;
 using DataVo.Core.Parser.AST;
 using DataVo.Core.Runtime.Changes;
 
@@ -6,61 +5,48 @@ namespace DataVo.Core.Runtime.Reactive;
 
 /// <summary>
 /// A single-table linear (L1) reactive query: a <c>SELECT … WHERE</c> over comparisons,
-/// <c>AND</c>/<c>OR</c>, and <c>IS [NOT] NULL</c>.
+/// <c>AND</c>/<c>OR</c>, <c>IS [NOT] NULL</c> and <c>LIKE</c>.
 /// </summary>
 /// <remarks>
-/// The subscription tracks the set of row IDs currently satisfying its predicate. Given a batch of
-/// committed <see cref="RowChange"/>s for its table, it computes the enter/leave/stay transitions
-/// (§4.3 of the design spec) against that match-set and returns a <see cref="QueryChange"/>.
-/// Comparison and NULL semantics are delegated to the same evaluator the batch single-table WHERE
-/// path uses, so reactive results match a full re-execution of the query.
+/// The operator is stateless: each committed change is classified by evaluating the predicate over its
+/// before and after images (the §4.3 enter/leave/stay matrix), which is robust to the engine's out-of-place
+/// <c>UPDATE</c> reassigning row ids. Images are loaded into the table's catalog layout and projected
+/// straight into the delta builder, so the steady state allocates nothing. Comparison and NULL semantics are
+/// delegated to <see cref="ReactivePredicate"/>, which mirrors the batch single-table WHERE path.
 /// </remarks>
-public sealed class ReactiveSubscription : IReactiveQuery
+internal sealed class ReactiveSubscription : IBorrowedReactiveQuery
 {
     private readonly ReactivePredicate _predicate;
-    private readonly bool _selectStar;
-    private readonly List<(string Source, string Output)> _projection = [];
-    private readonly HashSet<RowKey> _matchSet = [];
+    private readonly ReactiveRowLayout _layout;
+    private readonly ReactiveProjection _projection;
+    private readonly CellValue[] _before;
+    private readonly CellValue[] _after;
+    private readonly CellValue[] _beforeRow;
+    private readonly CellValue[] _afterRow;
 
     /// <summary>
-    /// Parses and validates the supplied SQL as a single-table linear reactive query.
+    /// Compiles a parsed single-table linear SELECT.
     /// </summary>
-    /// <param name="sql">The <c>SELECT … WHERE</c> statement to subscribe to.</param>
+    /// <param name="select">The parsed SELECT.</param>
+    /// <param name="engine">The owning engine (catalog access for the table's columns).</param>
+    /// <param name="databaseName">The database that owns the table.</param>
     /// <exception cref="NotSupportedException">
-    /// Thrown when the query uses a construct not supported by the linear (L1) layer, such as joins,
-    /// aggregates, <c>GROUP BY</c>, <c>ORDER BY</c>, <c>LIMIT</c>, <c>DISTINCT</c>, subqueries, or
-    /// multiple tables.
+    /// The query uses a construct outside the linear (L1) layer, such as joins, aggregates, <c>GROUP BY</c>,
+    /// <c>ORDER BY</c>, <c>LIMIT</c>, <c>DISTINCT</c>, computed projections or subqueries.
     /// </exception>
-    public ReactiveSubscription(string sql)
-        : this(ReactiveQueryParser.ParseSingleSelect(sql))
-    {
-    }
-
-    internal ReactiveSubscription(SelectStatement select)
+    public ReactiveSubscription(SelectStatement select, DataVoEngine engine, string databaseName)
     {
         Validate(select);
 
         Table = select.FromTable!.Name;
-
-        foreach (SelectColumnNode column in select.Columns)
-        {
-            if (IsStarColumn(column))
-            {
-                _selectStar = true;
-                continue;
-            }
-
-            string source = ResolveProjectedColumnName(column);
-            string output = ResolveOutputColumnName(column);
-            _projection.Add((source, output));
-        }
-
-        if (_projection.Count == 0)
-        {
-            _selectStar = true;
-        }
-
+        string alias = select.FromAlias?.Name ?? Table;
         _predicate = ReactivePredicate.Compile(select.WhereExpression);
+        _layout = ReactiveTableLayouts.ForTable(engine, Table, databaseName);
+        _projection = ReactiveTableLayouts.Project(select.Columns, _layout, Table, alias);
+        _before = new CellValue[_layout.Count];
+        _after = new CellValue[_layout.Count];
+        _beforeRow = new CellValue[_projection.Ordinals.Length];
+        _afterRow = new CellValue[_projection.Ordinals.Length];
     }
 
     /// <summary>Gets the source table this subscription observes.</summary>
@@ -69,115 +55,68 @@ public sealed class ReactiveSubscription : IReactiveQuery
     /// <inheritdoc />
     public IReadOnlyCollection<string> Tables => [Table];
 
-    /// <summary>
-    /// Evaluates the subscription predicate against a single materialized row.
-    /// </summary>
-    /// <param name="row">The row to test.</param>
-    /// <returns><c>true</c> when the row satisfies the predicate (or there is none).</returns>
-    public bool Matches(IReadOnlyDictionary<string, object?> row)
+    /// <inheritdoc />
+    public ReactiveRowSchema OutputSchema => _projection.Schema;
+
+    /// <inheritdoc />
+    /// <remarks>The linear operator keeps no state: the seed is the baseline the next changes are diffed from.</remarks>
+    public void Seed(string table, IEnumerable<TypedRow> rows)
     {
-        return _predicate.Matches(row);
     }
 
     /// <summary>
-    /// Seeds the match-set from the current table contents without emitting any output.
+    /// Projects <paramref name="row"/> into <paramref name="destination"/> when it satisfies the predicate.
     /// </summary>
-    /// <param name="table">The table whose contents are supplied (always this subscription's table).</param>
-    /// <param name="rows">The current <c>(rowId, row)</c> pairs in the table.</param>
-    public void Seed(string table, IEnumerable<(RowKey RowId, IReadOnlyDictionary<string, object?> Row)> rows)
+    /// <param name="row">A row of <see cref="Table"/>.</param>
+    /// <param name="destination">The output cells; its length must equal the output column count.</param>
+    /// <returns><see langword="true"/> when the row is part of the result.</returns>
+    public bool TryProject(TypedRow row, Span<CellValue> destination)
     {
-        foreach ((RowKey rowId, IReadOnlyDictionary<string, object?> row) in rows)
+        if (!_layout.TryLoad(row, _after) || !Matches(_after))
         {
-            if (Matches(row))
+            return false;
+        }
+
+        _projection.Project(_after, destination);
+        return true;
+    }
+
+    /// <inheritdoc />
+    public void ApplyInto(IReadOnlyList<RowChange> changes, QueryChangeBuilder builder)
+    {
+        for (int i = 0; i < changes.Count; i++)
+        {
+            RowChange change = changes[i];
+            bool beforeMatches = _layout.TryLoadBefore(change, _before) && Matches(_before);
+            bool afterMatches = _layout.TryLoadAfter(change, _after) && Matches(_after);
+
+            if (beforeMatches)
             {
-                _matchSet.Add(rowId);
+                _projection.Project(_before, _beforeRow);
+            }
+
+            if (afterMatches)
+            {
+                _projection.Project(_after, _afterRow);
+            }
+
+            if (beforeMatches && afterMatches)
+            {
+                builder.AddUpdatedBeforeRow(_beforeRow);
+                builder.AddUpdatedRow(_afterRow);
+            }
+            else if (afterMatches)
+            {
+                builder.AddAddedRow(_afterRow);
+            }
+            else if (beforeMatches)
+            {
+                builder.AddRemovedRow(_beforeRow);
             }
         }
     }
 
-    /// <summary>
-    /// Applies a batch of committed row changes (already filtered to <see cref="Table"/>) and returns
-    /// the resulting added/removed/updated rows.
-    /// </summary>
-    /// <param name="tableChanges">The committed changes for this subscription's table.</param>
-    public QueryChange Apply(IReadOnlyList<RowChange> tableChanges)
-    {
-        List<IReadOnlyDictionary<string, object?>> added = [];
-        List<IReadOnlyDictionary<string, object?>> removed = [];
-        List<IReadOnlyDictionary<string, object?>> updated = [];
-        List<IReadOnlyDictionary<string, object?>> updatedBefore = [];
-
-        foreach (RowChange change in tableChanges)
-        {
-            // Base the enter/leave/stay decision on the predicate evaluated over the before/after
-            // images (the §4.3 matrix). This is robust to the engine's out-of-place UPDATE, which
-            // reassigns the physical row id and would otherwise break a row-id-keyed match-set.
-            bool beforeMatches = change.Before is not null && Matches(change.Before);
-            bool afterMatches = change.After is not null && Matches(change.After);
-
-            switch (change.Kind)
-            {
-                case ChangeKind.Insert:
-                    if (afterMatches)
-                    {
-                        _matchSet.Add(change.RowId);
-                        added.Add(Project(change.After!));
-                    }
-
-                    break;
-
-                case ChangeKind.Delete:
-                    _matchSet.Remove(change.RowId);
-                    if (beforeMatches)
-                    {
-                        removed.Add(Project(change.Before!));
-                    }
-
-                    break;
-
-                case ChangeKind.Update:
-                    if (!beforeMatches && afterMatches)
-                    {
-                        _matchSet.Add(change.RowId);
-                        added.Add(Project(change.After!));
-                    }
-                    else if (beforeMatches && !afterMatches)
-                    {
-                        _matchSet.Remove(change.RowId);
-                        removed.Add(Project(change.Before!));
-                    }
-                    else if (beforeMatches && afterMatches)
-                    {
-                        _matchSet.Add(change.RowId);
-                        updatedBefore.Add(Project(change.Before!));
-                        updated.Add(Project(change.After!));
-                    }
-
-                    break;
-            }
-        }
-
-        return new QueryChange(added, removed, updated, updatedBefore);
-    }
-
-    private IReadOnlyDictionary<string, object?> Project(IReadOnlyDictionary<string, object?> row)
-    {
-        if (_selectStar)
-        {
-            return new Dictionary<string, object?>(
-                row.ToDictionary(pair => pair.Key, pair => pair.Value),
-                StringComparer.OrdinalIgnoreCase);
-        }
-
-        var projected = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
-        foreach ((string source, string output) in _projection)
-        {
-            projected[output] = row.TryGetValue(source, out object? value) ? value : null;
-        }
-
-        return projected;
-    }
-
+    private bool Matches(CellValue[] image) => _predicate.Matches(new RowRef(_layout.Schema, image));
 
     private static void Validate(SelectStatement select)
     {
@@ -223,36 +162,10 @@ public sealed class ReactiveSubscription : IReactiveQuery
                 throw new NotSupportedException("Reactive subscriptions do not support aggregate or window functions in the linear (L1) layer.");
             }
 
-            if (column.RawExpression.Contains('(') && !IsStarColumn(column))
+            if (column.RawExpression.Contains('(') && !ReactiveTableLayouts.IsStarColumn(column))
             {
                 throw new NotSupportedException($"Reactive subscriptions do not support computed projection '{column.RawExpression}' in the linear (L1) layer.");
             }
         }
     }
-
-    private static bool IsStarColumn(SelectColumnNode column)
-    {
-        return column.RawExpression.Trim() == "*"
-            || (column.Expression is null && column.RawExpression.Trim().EndsWith("*", StringComparison.Ordinal));
-    }
-
-    private static string ResolveProjectedColumnName(SelectColumnNode column)
-    {
-        if (column.Expression is ColumnRefNode columnRef)
-        {
-            return columnRef.Column;
-        }
-
-        if (column.Expression is ResolvedColumnRefNode resolved)
-        {
-            return resolved.Column;
-        }
-
-        string raw = column.RawExpression.Trim();
-        int dot = raw.LastIndexOf('.');
-        return dot >= 0 ? raw[(dot + 1)..] : raw;
-    }
-
-    private static string ResolveOutputColumnName(SelectColumnNode column) =>
-        column.Alias ?? ResolveProjectedColumnName(column);
 }

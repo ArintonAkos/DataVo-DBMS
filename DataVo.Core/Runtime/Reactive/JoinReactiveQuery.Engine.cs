@@ -43,11 +43,11 @@ internal sealed partial class JoinReactiveQuery
     private readonly List<SideDelta> _rightDeltas = [];
     private readonly HashSet<OutputId> _candidates = [];
 
-    private void SeedSide(string table, IEnumerable<(RowKey RowId, IReadOnlyDictionary<string, object?> Row)> rows)
+    private void SeedSide(string table, IEnumerable<TypedRow> rows)
     {
         JoinSide side = IsLeftTable(table) ? _left : _right;
 
-        foreach ((RowKey _, IReadOnlyDictionary<string, object?> row) in rows)
+        foreach (TypedRow row in rows)
         {
             side.Store(side.LoadStored(row));
         }
@@ -91,7 +91,7 @@ internal sealed partial class JoinReactiveQuery
 
     /// <summary>
     /// Expands one committed change into signed side deltas: Insert -> (After,+1); Delete -> (Before,-1);
-    /// Update -> (Before,-1),(After,+1). A typed after-image is read without materializing its dictionary.
+    /// Update -> (Before,-1),(After,+1). Images are read typed, never as dictionaries.
     /// </summary>
     private void CollectDeltas(RowChange change)
     {
@@ -99,23 +99,14 @@ internal sealed partial class JoinReactiveQuery
         JoinSide side = isLeft ? _left : _right;
         List<SideDelta> target = isLeft ? _leftDeltas : _rightDeltas;
 
-        if (change.Before is not null && change.Kind is ChangeKind.Delete or ChangeKind.Update)
+        if (change.Kind != ChangeKind.Insert && change.TypedBefore is { } before)
         {
-            target.Add(new SideDelta(side.LoadRetracted(change.Before), -1));
+            target.Add(new SideDelta(side.LoadRetracted(before), -1));
         }
 
-        if (change.Kind is not (ChangeKind.Insert or ChangeKind.Update))
+        if (change.Kind != ChangeKind.Delete && change.TypedAfter is { } after)
         {
-            return;
-        }
-
-        if (change.TypedAfter is { } typed)
-        {
-            target.Add(new SideDelta(side.LoadStored(typed), +1));
-        }
-        else if (change.After is not null)
-        {
-            target.Add(new SideDelta(side.LoadStored(change.After), +1));
+            target.Add(new SideDelta(side.LoadStored(after), +1));
         }
     }
 

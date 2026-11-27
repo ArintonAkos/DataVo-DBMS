@@ -9,7 +9,7 @@ namespace DataVo.Core.Runtime.Reactive;
 /// to the stored key, maintained wherever a group is added or dropped, so their steady-state dispatch is
 /// allocation-free too.
 /// </remarks>
-internal sealed partial class AggregateReactiveQuery
+internal sealed partial class ReactiveGroupAggregator
 {
 #if NET9_0_OR_GREATER
     private bool TryGetGroup(ReadOnlySpan<char> keySpan, out string? key, out GroupState? state) =>

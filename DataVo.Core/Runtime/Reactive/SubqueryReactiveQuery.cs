@@ -1,4 +1,3 @@
-using DataVo.Core.Parser.AST;
 using DataVo.Core.Runtime.Changes;
 
 namespace DataVo.Core.Runtime.Reactive;
@@ -11,124 +10,125 @@ namespace DataVo.Core.Runtime.Reactive;
 /// global membership index (a per-IN-value count, or a single EXISTS count). A <em>correlated</em>
 /// subquery (<c>… WHERE S.k = R.k [AND &lt;inner pred&gt;]</c>) indexes the inner relation by the
 /// correlation key, so a change to <c>S</c> re-evaluates only the outer rows whose correlation key was
-/// affected.
+/// affected. Rows are kept typed in each table's catalog layout and keyed by <see cref="PackedKey"/>; outer
+/// rows are identified by their primary key, so the operator is robust to row-id reassignment.
 /// </remarks>
-internal sealed class SubqueryReactiveQuery : IReactiveQuery
+internal sealed class SubqueryReactiveQuery : IBorrowedReactiveQuery
 {
     private readonly SubqueryShape _shape;
     private readonly ReactivePredicate _innerPredicate;
-    private readonly IReadOnlyList<string> _outerPrimaryKeys;
-    private readonly bool _selectStar;
-    private readonly List<string> _projection = [];
-    private readonly Dictionary<string, IReadOnlyDictionary<string, object?>> _outerRows = new(StringComparer.Ordinal);
-    private readonly Dictionary<string, HashSet<string>> _outerByValue = new(StringComparer.Ordinal);
-    private readonly Dictionary<string, int> _innerValues = new(StringComparer.Ordinal);
-    private readonly Dictionary<string, IReadOnlyDictionary<string, object?>> _emitted = new(StringComparer.Ordinal);
+    private readonly ReactiveRowLayout _outerLayout;
+    private readonly ReactiveRowLayout _innerLayout;
+    private readonly ReactiveProjection _projection;
+    private readonly int[] _outerPrimaryKey;
 
-    // Correlated state: inner match counts keyed by correlation key (EXISTS) or (correlationKey, inValue)
-    // (IN), and the outer-row index keyed by the same so an affected key's outer rows can be re-evaluated.
-    private readonly Dictionary<string, int> _innerByKey = new(StringComparer.Ordinal);
-    private readonly Dictionary<string, HashSet<string>> _outerByCorrelation = new(StringComparer.Ordinal);
+    // Membership keys: the IN value, the EXISTS correlation value, or (correlation value, IN value).
+    private readonly int[] _outerMembershipKey;
+    private readonly int[] _innerMembershipKey;
 
+    private readonly Dictionary<PackedKey, CellValue[]> _outerRows = [];
+    private readonly Dictionary<PackedKey, HashSet<PackedKey>> _outerByMembership = [];
+    private readonly Dictionary<PackedKey, int> _innerCounts = [];
+    private readonly Dictionary<PackedKey, CellValue[]> _emitted = [];
     private int _innerExistsCount;
     private bool _seeded;
 
+    // Reused per-batch scratch.
+    private readonly HashSet<PackedKey> _candidates = [];
+    private readonly HashSet<PackedKey> _touchedMembership = [];
+    private readonly CellValue[] _outerImage;
+    private readonly CellValue[] _innerImage;
+    private readonly CellValue[] _row;
+
     /// <summary>
-    /// Compiles the supplied IN/EXISTS subquery shape into an incremental semi/anti-join operator.
+    /// Compiles a validated subquery shape.
     /// </summary>
-    /// <param name="shape">The extracted IN/NOT IN/EXISTS/NOT EXISTS shape.</param>
-    /// <param name="engine">The owning engine (catalog access for the outer table's primary key).</param>
-    /// <param name="databaseName">The database that owns the outer and inner tables.</param>
-    /// <exception cref="NotSupportedException">Thrown when the outer table has no primary key to identify rows across updates.</exception>
+    /// <param name="shape">The extracted IN/EXISTS shape.</param>
+    /// <param name="engine">The owning engine (catalog access for both tables).</param>
+    /// <param name="databaseName">The database that owns both tables.</param>
+    /// <exception cref="NotSupportedException">The outer table has no primary key, or a column does not exist.</exception>
     public SubqueryReactiveQuery(SubqueryShape shape, DataVoEngine engine, string databaseName)
     {
         _shape = shape;
         _innerPredicate = ReactivePredicate.Compile(shape.InnerWhere);
-        _outerPrimaryKeys = engine.Catalog.GetTablePrimaryKeys(shape.OuterTable, databaseName);
-        if (_outerPrimaryKeys.Count == 0)
+        _outerLayout = ReactiveTableLayouts.ForTable(engine, shape.OuterTable, databaseName);
+        _innerLayout = ReactiveTableLayouts.ForTable(engine, shape.InnerTable, databaseName);
+        _projection = ReactiveTableLayouts.Project(shape.OuterColumns, _outerLayout, shape.OuterTable, shape.OuterAlias);
+
+        List<string> primaryKeys = engine.Catalog.GetTablePrimaryKeys(shape.OuterTable, databaseName);
+        if (primaryKeys.Count == 0)
         {
             throw new NotSupportedException(
                 $"Reactive subqueries require a primary key on outer table '{shape.OuterTable}' to identify rows across updates.");
         }
 
-        foreach (SelectColumnNode column in shape.OuterColumns)
-        {
-            if (IsStarColumn(column))
-            {
-                _selectStar = true;
-                continue;
-            }
+        _outerPrimaryKey = primaryKeys.Select(OuterOrdinal).ToArray();
+        _outerMembershipKey = MembershipKey(shape.OuterCorrelationColumn, IsExistsKind ? null : shape.OuterColumn, OuterOrdinal);
+        _innerMembershipKey = MembershipKey(shape.InnerCorrelationColumn, IsExistsKind ? null : shape.InnerColumn, InnerOrdinal);
 
-            _projection.Add(ResolveProjectedColumnName(column));
-        }
-
-        if (_projection.Count == 0)
-        {
-            _selectStar = true;
-        }
+        _outerImage = new CellValue[_outerLayout.Count];
+        _innerImage = new CellValue[_innerLayout.Count];
+        _row = new CellValue[_projection.Ordinals.Length];
     }
 
     /// <inheritdoc />
     public IReadOnlyCollection<string> Tables => [_shape.OuterTable, _shape.InnerTable];
 
+    /// <inheritdoc />
+    public ReactiveRowSchema OutputSchema => _projection.Schema;
+
     private bool IsCorrelated => _shape.IsCorrelated;
 
     private bool IsExistsKind => _shape.Kind is SubqueryKind.Exists or SubqueryKind.NotExists;
 
+    // An uncorrelated EXISTS depends on one global count, so it keeps no per-row membership index.
+    private bool IndexesOuterRows => IsCorrelated || !IsExistsKind;
+
     /// <inheritdoc />
-    public void Seed(string table, IEnumerable<(RowKey RowId, IReadOnlyDictionary<string, object?> Row)> rows)
+    public void Seed(string table, IEnumerable<TypedRow> rows)
     {
         if (IsOuter(table))
         {
-            foreach ((RowKey _, IReadOnlyDictionary<string, object?> row) in rows)
+            foreach (TypedRow row in rows)
             {
-                AddOuter(row);
+                AddOuter(_outerLayout.AdoptOrCopy(row));
             }
         }
         else if (IsInner(table))
         {
-            foreach ((RowKey _, IReadOnlyDictionary<string, object?> row) in rows)
+            foreach (TypedRow row in rows)
             {
-                if (_innerPredicate.Matches(row))
+                if (_innerLayout.TryLoad(row, _innerImage) && InnerMatches())
                 {
-                    AddInner(row, +1);
+                    BumpInner(+1);
                 }
             }
         }
     }
 
     /// <inheritdoc />
-    /// <remarks>
-    /// Outer changes affect only their own row's membership and are added directly as candidates. Inner
-    /// changes shift the membership index: for a correlated or IN subquery only the outer rows indexed
-    /// under the touched correlation/value key are re-evaluated; an <em>uncorrelated</em> EXISTS shares a
-    /// single global count, so any inner change can flip every outer row and forces a full re-evaluation
-    /// of the outer relation. NOT IN / NOT EXISTS are the anti-join
-    /// complement and fall out of the same membership test negated in <see cref="Qualifies"/>.
-    /// </remarks>
-    public QueryChange Apply(IReadOnlyList<RowChange> changes)
+    public void ApplyInto(IReadOnlyList<RowChange> changes, QueryChangeBuilder builder)
     {
         EnsureBaseline();
-        var candidates = new HashSet<string>(StringComparer.Ordinal);
+        _candidates.Clear();
+        _touchedMembership.Clear();
         bool recheckAllOuter = false;
-        HashSet<string> touchedInnerValues = new(StringComparer.Ordinal);
 
-        foreach (RowChange change in changes)
+        for (int i = 0; i < changes.Count; i++)
         {
+            RowChange change = changes[i];
             if (IsOuter(change.Table))
             {
-                if (change.Before is not null && change.Kind is ChangeKind.Delete or ChangeKind.Update)
+                if (_outerLayout.TryLoadBefore(change, _outerImage))
                 {
-                    string pk = Identity(change.Before);
-                    candidates.Add(pk);
-                    RemoveOuter(change.Before);
+                    PackedKey pk = PackedKey.From(_outerImage, _outerPrimaryKey);
+                    _candidates.Add(pk);
+                    RemoveOuter(pk);
                 }
 
-                if (change.After is not null && change.Kind is ChangeKind.Insert or ChangeKind.Update)
+                if (change.Kind != ChangeKind.Delete && change.TypedAfter is { } after)
                 {
-                    string pk = Identity(change.After);
-                    AddOuter(change.After);
-                    candidates.Add(pk);
+                    _candidates.Add(AddOuter(_outerLayout.AdoptOrCopy(after)));
                 }
 
                 continue;
@@ -139,59 +139,39 @@ internal sealed class SubqueryReactiveQuery : IReactiveQuery
                 continue;
             }
 
-            if (change.Before is not null && change.Kind is ChangeKind.Delete or ChangeKind.Update && _innerPredicate.Matches(change.Before))
+            if (_innerLayout.TryLoadBefore(change, _innerImage) && InnerMatches())
             {
-                string? key = AddInner(change.Before, -1);
-                if (key is not null)
-                {
-                    touchedInnerValues.Add(key);
-                }
-
-                recheckAllOuter |= IsExistsKind && !IsCorrelated;
+                recheckAllOuter |= BumpInner(-1);
             }
 
-            if (change.After is not null && change.Kind is ChangeKind.Insert or ChangeKind.Update && _innerPredicate.Matches(change.After))
+            if (_innerLayout.TryLoadAfter(change, _innerImage) && InnerMatches())
             {
-                string? key = AddInner(change.After, +1);
-                if (key is not null)
-                {
-                    touchedInnerValues.Add(key);
-                }
-
-                recheckAllOuter |= IsExistsKind && !IsCorrelated;
+                recheckAllOuter |= BumpInner(+1);
             }
         }
 
         if (recheckAllOuter)
         {
-            foreach (string pk in _outerRows.Keys)
+            foreach (PackedKey pk in _outerRows.Keys)
             {
-                candidates.Add(pk);
+                _candidates.Add(pk);
             }
         }
         else
         {
-            Dictionary<string, HashSet<string>> index = IsCorrelated ? _outerByCorrelation : _outerByValue;
-            foreach (string valueKey in touchedInnerValues)
+            foreach (PackedKey key in _touchedMembership)
             {
-                if (index.TryGetValue(valueKey, out HashSet<string>? pks))
+                if (_outerByMembership.TryGetValue(key, out HashSet<PackedKey>? pks))
                 {
-                    foreach (string pk in pks)
-                    {
-                        candidates.Add(pk);
-                    }
+                    _candidates.UnionWith(pks);
                 }
             }
         }
 
-        return Diff(candidates);
+        DiffInto(builder);
     }
 
-    /// <summary>
-    /// Materializes the qualifying outer rows into the emitted baseline on the first <see cref="Apply"/>
-    /// (after both sides are seeded), so the first delivered delta is diffed against the correct
-    /// starting point. The baseline itself is never delivered.
-    /// </summary>
+    /// <summary>The first Apply records the qualifying outer rows as the baseline (never delivered).</summary>
     private void EnsureBaseline()
     {
         if (_seeded)
@@ -200,313 +180,152 @@ internal sealed class SubqueryReactiveQuery : IReactiveQuery
         }
 
         _seeded = true;
-        foreach ((string pk, IReadOnlyDictionary<string, object?> row) in _outerRows)
+        foreach (KeyValuePair<PackedKey, CellValue[]> outer in _outerRows)
         {
-            if (Qualifies(row))
+            if (Qualifies(outer.Value))
             {
-                _emitted[pk] = Project(row);
+                _emitted[outer.Key] = ProjectCopy(outer.Value);
             }
         }
     }
 
-    /// <summary>
-    /// Re-evaluates each candidate outer row's qualification from final state and diffs it against the
-    /// currently emitted set, producing the exact added/removed/updated output.
-    /// </summary>
-    private QueryChange Diff(HashSet<string> candidates)
+    private void DiffInto(QueryChangeBuilder builder)
     {
-        List<IReadOnlyDictionary<string, object?>> added = [];
-        List<IReadOnlyDictionary<string, object?>> removed = [];
-        List<IReadOnlyDictionary<string, object?>> updated = [];
-        List<IReadOnlyDictionary<string, object?>> updatedBefore = [];
-
-        foreach (string pk in candidates)
+        foreach (PackedKey pk in _candidates)
         {
-            IReadOnlyDictionary<string, object?>? current = null;
-            if (_outerRows.TryGetValue(pk, out IReadOnlyDictionary<string, object?>? row) && Qualifies(row))
-            {
-                current = Project(row);
-            }
-
-            bool wasEmitted = _emitted.TryGetValue(pk, out IReadOnlyDictionary<string, object?>? previous);
-            if (current is null)
+            bool exists = _outerRows.TryGetValue(pk, out CellValue[]? row) && Qualifies(row!);
+            bool wasEmitted = _emitted.TryGetValue(pk, out CellValue[]? previous);
+            if (!exists)
             {
                 if (wasEmitted)
                 {
                     _emitted.Remove(pk);
-                    removed.Add(previous!);
+                    builder.AddRemovedRow(previous);
                 }
 
                 continue;
             }
 
+            _projection.Project(row!, _row);
             if (!wasEmitted)
             {
-                _emitted[pk] = current;
-                added.Add(current);
+                _emitted[pk] = _row.ToArray();
+                builder.AddAddedRow(_row);
             }
-            else if (!RowsEqual(previous!, current))
+            else if (!ReactiveCellOrdering.RowsEqual(previous, _row))
             {
-                _emitted[pk] = current;
-                updatedBefore.Add(previous!);
-                updated.Add(current);
+                builder.AddUpdatedBeforeRow(previous);
+                builder.AddUpdatedRow(_row);
+                _emitted[pk] = _row.ToArray();
             }
         }
-
-        return new QueryChange(added, removed, updated, updatedBefore);
     }
 
-    private void AddOuter(IReadOnlyDictionary<string, object?> row)
+    private PackedKey AddOuter(CellValue[] row)
     {
-        string pk = Identity(row);
-        if (_outerRows.TryGetValue(pk, out IReadOnlyDictionary<string, object?>? existing))
+        PackedKey pk = PackedKey.From(row, _outerPrimaryKey);
+        RemoveOuter(pk);
+        _outerRows[pk] = row;
+        if (IndexesOuterRows)
         {
-            RemoveOuterIndex(pk, existing);
+            PackedKey key = PackedKey.From(row, _outerMembershipKey);
+            if (!_outerByMembership.TryGetValue(key, out HashSet<PackedKey>? pks))
+            {
+                pks = [];
+                _outerByMembership[key] = pks;
+            }
+
+            pks.Add(pk);
         }
 
-        IReadOnlyDictionary<string, object?> copy = Copy(row);
-        _outerRows[pk] = copy;
-        AddOuterIndex(pk, copy);
+        return pk;
     }
 
-    private void RemoveOuter(IReadOnlyDictionary<string, object?> row)
+    private void RemoveOuter(PackedKey pk)
     {
-        string pk = Identity(row);
-        if (_outerRows.TryGetValue(pk, out IReadOnlyDictionary<string, object?>? existing))
-        {
-            RemoveOuterIndex(pk, existing);
-            _outerRows.Remove(pk);
-        }
-    }
-
-    private void AddOuterIndex(string pk, IReadOnlyDictionary<string, object?> row)
-    {
-        if (IsCorrelated)
-        {
-            AddToIndex(_outerByCorrelation, OuterCorrelationKey(row), pk);
-            return;
-        }
-
-        if (IsExistsKind)
+        if (!_outerRows.Remove(pk, out CellValue[]? existing) || !IndexesOuterRows)
         {
             return;
         }
 
-        AddToIndex(_outerByValue, OuterValueKey(row), pk);
-    }
-
-    private void RemoveOuterIndex(string pk, IReadOnlyDictionary<string, object?> row)
-    {
-        if (IsCorrelated)
-        {
-            RemoveFromIndex(_outerByCorrelation, OuterCorrelationKey(row), pk);
-            return;
-        }
-
-        if (IsExistsKind)
-        {
-            return;
-        }
-
-        RemoveFromIndex(_outerByValue, OuterValueKey(row), pk);
-    }
-
-    private static void AddToIndex(Dictionary<string, HashSet<string>> index, string key, string pk)
-    {
-        if (!index.TryGetValue(key, out HashSet<string>? pks))
-        {
-            pks = new HashSet<string>(StringComparer.Ordinal);
-            index[key] = pks;
-        }
-
-        pks.Add(pk);
-    }
-
-    private static void RemoveFromIndex(Dictionary<string, HashSet<string>> index, string key, string pk)
-    {
-        if (index.TryGetValue(key, out HashSet<string>? pks))
+        PackedKey key = PackedKey.From(existing, _outerMembershipKey);
+        if (_outerByMembership.TryGetValue(key, out HashSet<PackedKey>? pks))
         {
             pks.Remove(pk);
             if (pks.Count == 0)
             {
-                index.Remove(key);
+                _outerByMembership.Remove(key);
             }
         }
     }
 
-    private string? AddInner(IReadOnlyDictionary<string, object?> row, int weight)
+    /// <summary>Applies one matching inner row (loaded in the inner image) with the given weight.</summary>
+    /// <returns><see langword="true"/> when every outer row must be re-evaluated (an uncorrelated EXISTS).</returns>
+    private bool BumpInner(int weight)
     {
-        if (IsCorrelated)
-        {
-            string key = InnerCorrelationKey(row);
-            Bump(_innerByKey, key, weight);
-            return key;
-        }
-
-        if (IsExistsKind)
+        if (!IndexesOuterRows)
         {
             _innerExistsCount += weight;
-            return null;
+            return true;
         }
 
-        string valueKey = InnerValueKey(row);
-        Bump(_innerValues, valueKey, weight);
-        return valueKey;
-    }
-
-    private static void Bump(Dictionary<string, int> counts, string key, int weight)
-    {
-        int next = counts.GetValueOrDefault(key) + weight;
+        PackedKey key = PackedKey.From(_innerImage, _innerMembershipKey);
+        int next = (_innerCounts.TryGetValue(key, out int count) ? count : 0) + weight;
         if (next <= 0)
         {
-            counts.Remove(key);
+            _innerCounts.Remove(key);
         }
         else
         {
-            counts[key] = next;
+            _innerCounts[key] = next;
         }
+
+        _touchedMembership.Add(key);
+        return false;
     }
 
-    /// <summary>
-    /// Decides whether an outer row belongs in the result: tests membership against the maintained inner
-    /// index (correlated → per-correlation-key count; uncorrelated EXISTS → global count; IN →
-    /// per-value count), then negates the test for the NOT IN / NOT EXISTS anti-join variants.
-    /// </summary>
-    private bool Qualifies(IReadOnlyDictionary<string, object?> outerRow)
+    private bool Qualifies(CellValue[] outerRow)
     {
-        bool contains;
-        if (IsCorrelated)
+        bool contains = IndexesOuterRows
+            ? _innerCounts.ContainsKey(PackedKey.From(outerRow, _outerMembershipKey))
+            : _innerExistsCount > 0;
+
+        return _shape.Kind is SubqueryKind.NotIn or SubqueryKind.NotExists ? !contains : contains;
+    }
+
+    private bool InnerMatches() => _innerPredicate.Matches(new RowRef(_innerLayout.Schema, _innerImage));
+
+    private CellValue[] ProjectCopy(CellValue[] outerRow)
+    {
+        _projection.Project(outerRow, _row);
+        return _row.ToArray();
+    }
+
+    private int OuterOrdinal(string column) =>
+        ReactiveTableLayouts.RequireOrdinal(_outerLayout, _shape.OuterTable, _shape.OuterAlias, null, column);
+
+    private int InnerOrdinal(string column) =>
+        ReactiveTableLayouts.RequireOrdinal(_innerLayout, _shape.InnerTable, _shape.InnerAlias, null, column);
+
+    // The ordinals of the correlation column and/or the IN value column, in that order (empty for an
+    // uncorrelated EXISTS, which never builds a membership key).
+    private static int[] MembershipKey(string? correlationColumn, string? valueColumn, Func<string, int> ordinal)
+    {
+        var ordinals = new List<int>(2);
+        if (correlationColumn is not null)
         {
-            contains = _innerByKey.GetValueOrDefault(OuterCorrelationKey(outerRow)) > 0;
+            ordinals.Add(ordinal(correlationColumn));
         }
-        else if (IsExistsKind)
+
+        if (!string.IsNullOrEmpty(valueColumn))
         {
-            contains = _innerExistsCount > 0;
-        }
-        else
-        {
-            contains = _innerValues.GetValueOrDefault(OuterValueKey(outerRow)) > 0;
+            ordinals.Add(ordinal(valueColumn!));
         }
 
-        return _shape.Kind is SubqueryKind.NotIn or SubqueryKind.NotExists
-            ? !contains
-            : contains;
-    }
-
-    private string OuterValueKey(IReadOnlyDictionary<string, object?> row)
-    {
-        return ValueKeyOf(row, _shape.OuterColumn);
-    }
-
-    private string InnerValueKey(IReadOnlyDictionary<string, object?> row)
-    {
-        return _shape.InnerColumn is null ? string.Empty : ValueKeyOf(row, _shape.InnerColumn);
-    }
-
-    /// <summary>
-    /// Builds the correlation key for an outer row: the outer correlation column value for EXISTS, or the
-    /// (correlation, IN value) compound key for IN.
-    /// </summary>
-    private string OuterCorrelationKey(IReadOnlyDictionary<string, object?> row)
-    {
-        string correlation = ValueKeyOf(row, _shape.OuterCorrelationColumn!);
-        return IsExistsKind ? correlation : Compound(correlation, ValueKeyOf(row, _shape.OuterColumn));
-    }
-
-    /// <summary>
-    /// Builds the correlation key for an inner row: the inner correlation column value for EXISTS, or the
-    /// (correlation, projected IN value) compound key for IN — aligned with <see cref="OuterCorrelationKey"/>.
-    /// </summary>
-    private string InnerCorrelationKey(IReadOnlyDictionary<string, object?> row)
-    {
-        string correlation = ValueKeyOf(row, _shape.InnerCorrelationColumn!);
-        return IsExistsKind ? correlation : Compound(correlation, InnerValueKey(row));
-    }
-
-    private static string Compound(string correlation, string value) =>
-        correlation.Length.ToString(System.Globalization.CultureInfo.InvariantCulture) + ":" + correlation + value;
-
-    private static string ValueKeyOf(IReadOnlyDictionary<string, object?> row, string column)
-    {
-        object? value = row.TryGetValue(column, out object? candidate) ? candidate : null;
-        return DistinctReactiveQuery.ValueKey(value);
-    }
-
-    private string Identity(IReadOnlyDictionary<string, object?> row)
-    {
-        return string.Join(
-            "",
-            _outerPrimaryKeys.Select(column =>
-            {
-                object? value = row.TryGetValue(column, out object? v) ? v : null;
-                return DistinctReactiveQuery.ValueKey(value);
-            }));
-    }
-
-    private IReadOnlyDictionary<string, object?> Project(IReadOnlyDictionary<string, object?> row)
-    {
-        if (_selectStar)
-        {
-            return Copy(row);
-        }
-
-        var projected = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
-        foreach (string column in _projection)
-        {
-            projected[column] = row.TryGetValue(column, out object? value) ? value : null;
-        }
-
-        return projected;
-    }
-
-    private static IReadOnlyDictionary<string, object?> Copy(IReadOnlyDictionary<string, object?> row) =>
-        new Dictionary<string, object?>(
-            row.ToDictionary(pair => pair.Key, pair => pair.Value),
-            StringComparer.OrdinalIgnoreCase);
-
-    private static bool RowsEqual(IReadOnlyDictionary<string, object?> a, IReadOnlyDictionary<string, object?> b)
-    {
-        if (a.Count != b.Count)
-        {
-            return false;
-        }
-
-        foreach ((string key, object? value) in a)
-        {
-            if (!b.TryGetValue(key, out object? other)
-                || ReactiveValueComparer.Instance.Compare(value, other) != 0)
-            {
-                return false;
-            }
-        }
-
-        return true;
+        return [.. ordinals];
     }
 
     private bool IsOuter(string table) => table.Equals(_shape.OuterTable, StringComparison.OrdinalIgnoreCase);
 
     private bool IsInner(string table) => table.Equals(_shape.InnerTable, StringComparison.OrdinalIgnoreCase);
-
-    private static bool IsStarColumn(SelectColumnNode column)
-    {
-        return column.RawExpression.Trim() == "*"
-            || (column.Expression is null && column.RawExpression.Trim().EndsWith("*", StringComparison.Ordinal));
-    }
-
-    private static string ResolveProjectedColumnName(SelectColumnNode column)
-    {
-        if (column.Expression is ColumnRefNode columnRef)
-        {
-            return columnRef.Column;
-        }
-
-        if (column.Expression is ResolvedColumnRefNode resolved)
-        {
-            return resolved.Column;
-        }
-
-        string raw = column.RawExpression.Trim();
-        int dot = raw.LastIndexOf('.');
-        return dot >= 0 ? raw[(dot + 1)..] : raw;
-    }
 }

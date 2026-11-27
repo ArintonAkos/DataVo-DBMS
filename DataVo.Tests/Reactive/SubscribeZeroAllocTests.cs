@@ -7,7 +7,7 @@ namespace DataVo.Tests.Reactive;
 
 public class SubscribeZeroAllocTests
 {
-    // Exact shape of the benchmark's ComplexVipSql.Query (proven to route to VipExposureReactiveQuery).
+    // Exact shape of the benchmark's ComplexVipSql.Query (routes to JoinAggregateReactiveQuery).
     private const string VipSql =
         "SELECT m.Category, SUM(o.Stake) AS TotalExposure " +
         "FROM Orders o " +
@@ -35,13 +35,13 @@ public class SubscribeZeroAllocTests
         using DataVoContext ctx = NewVipContext();
 
         string? category = null;
-        decimal total = 0m;
+        long total = 0;
         using IDisposable sub = ctx.SubscribeZeroAlloc(VipSql, (in QueryChangeRef change) =>
         {
             for (int i = 0; i < change.Added.Count; i++)
             {
                 category = change.Added[i]["Category"].AsString();
-                total = change.Added[i]["TotalExposure"].AsDecimal();
+                total = change.Added[i]["TotalExposure"].AsInt64(); // SUM over an INT column is a BIGINT
             }
         });
 
@@ -49,7 +49,7 @@ public class SubscribeZeroAllocTests
         ctx.DispatchPendingNotifications();
 
         Assert.Equal("sports", category);
-        Assert.Equal(250m, total);
+        Assert.Equal(250L, total);
     }
 
     [Fact]
@@ -57,8 +57,11 @@ public class SubscribeZeroAllocTests
     {
         using DataVoContext ctx = NewVipContext();
 
+        // Outer joins under GROUP BY are outside the reactive join-aggregate subset.
         Assert.Throws<NotSupportedException>(() =>
-            ctx.SubscribeZeroAlloc("SELECT Id FROM Orders WHERE Stake > 0", (in QueryChangeRef _) => { }));
+            ctx.SubscribeZeroAlloc(
+                "SELECT a.Id, COUNT(*) AS Cnt FROM Accounts a LEFT JOIN Orders o ON o.AccountId = a.Id GROUP BY a.Id",
+                (in QueryChangeRef _) => { }));
 
         // No side effect: a subsequent owned Subscribe + dispatch still works (cap not consumed, no
         // stale registration delivering). One insert, one delivered owned change.
@@ -67,6 +70,26 @@ public class SubscribeZeroAllocTests
         ctx.Execute("INSERT INTO Orders VALUES (5, 1, 1, 10)");
         ctx.DispatchPendingNotifications();
         Assert.Equal(1, deliveries);
+    }
+
+    [Fact]
+    public void SubscribeZeroAlloc_LinearFilter_DeliversBorrowedRows()
+    {
+        using DataVoContext ctx = NewVipContext();
+        var stakes = new List<int>();
+        using IDisposable sub = ctx.SubscribeZeroAlloc("SELECT Id, Stake FROM Orders WHERE Stake > 0", (in QueryChangeRef change) =>
+        {
+            for (int i = 0; i < change.Added.Count; i++)
+            {
+                stakes.Add(change.Added[i]["Stake"].AsInt32());
+            }
+        });
+
+        ctx.Execute("INSERT INTO Orders VALUES (5, 1, 1, 10)");
+        ctx.Execute("INSERT INTO Orders VALUES (6, 1, 1, 0)");
+        ctx.DispatchPendingNotifications();
+
+        Assert.Equal([10], stakes);
     }
 
     [Fact]

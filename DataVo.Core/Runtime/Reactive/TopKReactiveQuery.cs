@@ -1,4 +1,3 @@
-using DataVo.Core.Models.Catalog;
 using DataVo.Core.Parser.AST;
 using DataVo.Core.Runtime.Changes;
 
@@ -12,12 +11,12 @@ namespace DataVo.Core.Runtime.Reactive;
 /// ties by the row's <b>primary key</b>. The primary key (not the storage row id) provides stable
 /// per-row identity across the engine's out-of-place <c>UPDATE</c>, which reassigns the physical row
 /// id. The current window is the first <c>k</c> entries (after any <c>OFFSET</c>); each
-/// <see cref="Apply"/> updates the index, recomputes the window, and emits the diff against the
+/// <see cref="ApplyInto"/> updates the index, recomputes the window, and emits the diff against the
 /// previous window: rows entering are Added, rows leaving are Removed, and rows that stay but whose
 /// projected values changed are Updated.
 /// <para>
-/// The arrangement is typed: each entry keeps only the columns the view reads (sort keys, primary key and
-/// output columns) as unboxed <see cref="CellValue"/> cells, identified by a <see cref="PackedKey"/>. Entries
+/// The arrangement is typed: each entry keeps the row's catalog columns as unboxed <see cref="CellValue"/>
+/// cells (so the WHERE can be evaluated on change images), identified by a <see cref="PackedKey"/>. Entries
 /// are pooled and reused once they leave both the index and the delivered window, so a steady stream of
 /// updates allocates no dictionaries, identity strings or boxed values during dispatch.
 /// </para>
@@ -64,7 +63,6 @@ internal sealed class TopKReactiveQuery : IBorrowedReactiveQuery
     private Dictionary<PackedKey, Entry> _spareWindowByKey = [];
 
     private readonly ReactiveRowSchema _outputSchema;
-    private readonly QueryChangeBuilder _legacyBuilder;
     private readonly CellValue[] _rowScratch;
 
     /// <summary>
@@ -84,7 +82,9 @@ internal sealed class TopKReactiveQuery : IBorrowedReactiveQuery
         _skip = Math.Max(0, select.LimitExpression!.SkipTarget);
         _take = Math.Max(0, select.LimitExpression!.TakeTarget);
 
-        List<string> projection = ResolveProjection(select, out bool selectStar);
+        string alias = select.FromAlias?.Name ?? Table;
+        _layout = ReactiveTableLayouts.ForTable(engine, Table, databaseName);
+        ReactiveProjection projection = ReactiveTableLayouts.Project(select.Columns, _layout, Table, alias);
         List<string> primaryKeys = engine.Catalog.GetTablePrimaryKeys(Table, databaseName);
         if (primaryKeys.Count == 0)
         {
@@ -92,29 +92,20 @@ internal sealed class TopKReactiveQuery : IBorrowedReactiveQuery
                 $"Reactive top-K requires a primary key on table '{Table}' to identify rows across updates.");
         }
 
-        // Output schema: the explicit projection columns, or the table's catalog columns for SELECT *.
-        // A SELECT * top-K carries no schema in the SQL, so the borrowed fast lane takes it from the
-        // catalog here (the same catalog access already used for the primary key above).
-        string[] outputColumns = selectStar
-            ? engine.Catalog.GetTableColumns(Table, databaseName).Select(c => c.Name).ToArray()
-            : projection.ToArray();
-
-        List<string> sortColumns = select.OrderByExpression!.Columns
-            .Select(column => StripQualifier(column.Column.Name))
-            .ToList();
-        _layout = new ReactiveRowLayout(DistinctColumns(outputColumns, sortColumns, primaryKeys));
-        _outputOrdinals = outputColumns.Select(_layout.OrdinalOf).ToArray();
+        _outputOrdinals = projection.Ordinals;
         _primaryKeyOrdinals = primaryKeys.Select(_layout.OrdinalOf).ToArray();
-        for (int i = 0; i < sortColumns.Count; i++)
+        foreach (OrderByColumnNode column in select.OrderByExpression!.Columns)
         {
-            _sortKeys.Add(new SortKey(_layout.OrdinalOf(sortColumns[i]), select.OrderByExpression.Columns[i].IsAscending));
+            (string? qualifier, string name) = ReactiveGroupAggregator.SplitQualified(column.Column.Name);
+            _sortKeys.Add(new SortKey(
+                ReactiveTableLayouts.RequireOrdinal(_layout, Table, alias, qualifier, name),
+                column.IsAscending));
         }
 
         _imageScratch = new CellValue[_layout.Count];
         _index = new SortedSet<Entry>(new EntryComparer(_sortKeys));
-        _outputSchema = new ReactiveRowSchema(outputColumns);
-        _rowScratch = new CellValue[outputColumns.Length];
-        _legacyBuilder = new QueryChangeBuilder(_outputSchema);
+        _outputSchema = projection.Schema;
+        _rowScratch = new CellValue[_outputOrdinals.Length];
     }
 
     /// <summary>Gets the source table this top-K observes.</summary>
@@ -124,15 +115,18 @@ internal sealed class TopKReactiveQuery : IBorrowedReactiveQuery
     public IReadOnlyCollection<string> Tables => [Table];
 
     /// <inheritdoc />
-    public void Seed(string table, IEnumerable<(RowKey RowId, IReadOnlyDictionary<string, object?> Row)> rows)
+    public void Seed(string table, IEnumerable<TypedRow> rows)
     {
-        foreach ((RowKey _, IReadOnlyDictionary<string, object?> row) in rows)
+        foreach (TypedRow row in rows)
         {
-            if (_predicate.Matches(row))
+            Entry entry = RentEntry();
+            if (_layout.TryLoad(row, entry.Cells) && Matches(entry.Cells))
             {
-                Entry entry = RentEntry();
-                _layout.Load(row, entry.Cells);
                 AddEntry(entry);
+            }
+            else
+            {
+                _pool.Push(entry);
             }
         }
 
@@ -146,15 +140,6 @@ internal sealed class TopKReactiveQuery : IBorrowedReactiveQuery
     /// <inheritdoc />
     public ReactiveRowSchema OutputSchema => _outputSchema;
 
-    /// <summary>Owned path: build the borrowed delta into our own arena, then materialize. Behavior-
-    /// identical to the pre-migration <c>Apply</c> (same <see cref="QueryChange"/> shape and values).</summary>
-    public QueryChange Apply(IReadOnlyList<RowChange> tableChanges)
-    {
-        _legacyBuilder.Reset();
-        ApplyInto(tableChanges, _legacyBuilder);
-        return _legacyBuilder.Build().Materialize();
-    }
-
     /// <inheritdoc />
     public void ApplyInto(IReadOnlyList<RowChange> tableChanges, QueryChangeBuilder builder)
     {
@@ -162,16 +147,19 @@ internal sealed class TopKReactiveQuery : IBorrowedReactiveQuery
         for (int i = 0; i < tableChanges.Count; i++)
         {
             RowChange change = tableChanges[i];
-            if (change.Kind is ChangeKind.Delete or ChangeKind.Update
-                && change.Before is not null
-                && _predicate.Matches(change.Before))
+            if (_layout.TryLoadBefore(change, _imageScratch) && Matches(_imageScratch))
             {
-                RemoveEntry(change.Before);
+                RemoveEntry(PackedKey.From(_imageScratch, _primaryKeyOrdinals));
             }
 
-            if (change.Kind is ChangeKind.Insert or ChangeKind.Update)
+            Entry entry = RentEntry();
+            if (_layout.TryLoadAfter(change, entry.Cells) && Matches(entry.Cells))
             {
-                ApplyAfterImage(change);
+                AddEntry(entry);
+            }
+            else
+            {
+                _pool.Push(entry);
             }
         }
 
@@ -180,26 +168,7 @@ internal sealed class TopKReactiveQuery : IBorrowedReactiveQuery
         SwapWindows();
     }
 
-    /// <summary>Indexes a change's after-image when it matches, reading the typed image when one was captured.</summary>
-    private void ApplyAfterImage(RowChange change)
-    {
-        if (change.TypedAfter is { } typed)
-        {
-            RowRef row = typed.AsRowRef();
-            if (_predicate.Matches(row))
-            {
-                Entry entry = RentEntry();
-                _layout.Load(row, typed.Schema, entry.Cells);
-                AddEntry(entry);
-            }
-        }
-        else if (change.After is { } after && _predicate.Matches(after))
-        {
-            Entry entry = RentEntry();
-            _layout.Load(after, entry.Cells);
-            AddEntry(entry);
-        }
-    }
+    private bool Matches(CellValue[] image) => _predicate.Matches(new RowRef(_layout.Schema, image));
 
     /// <summary>
     /// Emits the window diff: rows entering the window are Added, rows that stayed but changed value are
@@ -304,10 +273,8 @@ internal sealed class TopKReactiveQuery : IBorrowedReactiveQuery
         _byKey[entry.Key] = entry;
     }
 
-    private void RemoveEntry(IReadOnlyDictionary<string, object?> row)
+    private void RemoveEntry(PackedKey key)
     {
-        _layout.Load(row, _imageScratch);
-        PackedKey key = PackedKey.From(_imageScratch, _primaryKeyOrdinals);
         if (_byKey.TryGetValue(key, out Entry? existing))
         {
             _byKey.Remove(key);
@@ -348,43 +315,6 @@ internal sealed class TopKReactiveQuery : IBorrowedReactiveQuery
             target.Add(entry);
             targetByKey[entry.Key] = entry;
         }
-    }
-
-    private static List<string> DistinctColumns(params IEnumerable<string>[] groups)
-    {
-        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var columns = new List<string>();
-        foreach (IEnumerable<string> group in groups)
-        {
-            foreach (string column in group)
-            {
-                if (seen.Add(column))
-                {
-                    columns.Add(column);
-                }
-            }
-        }
-
-        return columns;
-    }
-
-    private static List<string> ResolveProjection(SelectStatement select, out bool selectStar)
-    {
-        selectStar = false;
-        var projection = new List<string>();
-        foreach (SelectColumnNode column in select.Columns)
-        {
-            if (IsStarColumn(column))
-            {
-                selectStar = true;
-                continue;
-            }
-
-            projection.Add(ResolveProjectedColumnName(column));
-        }
-
-        selectStar |= projection.Count == 0;
-        return projection;
     }
 
     private sealed class EntryComparer(List<SortKey> sortKeys) : IComparer<Entry>
@@ -463,32 +393,5 @@ internal sealed class TopKReactiveQuery : IBorrowedReactiveQuery
                 throw new NotSupportedException("Reactive top-K does not support aggregate or window functions.");
             }
         }
-    }
-
-    private static bool IsStarColumn(SelectColumnNode column)
-    {
-        return column.RawExpression.Trim() == "*"
-            || (column.Expression is null && column.RawExpression.Trim().EndsWith("*", StringComparison.Ordinal));
-    }
-
-    private static string ResolveProjectedColumnName(SelectColumnNode column)
-    {
-        if (column.Expression is ColumnRefNode columnRef)
-        {
-            return columnRef.Column;
-        }
-
-        if (column.Expression is ResolvedColumnRefNode resolved)
-        {
-            return resolved.Column;
-        }
-
-        return StripQualifier(column.RawExpression.Trim());
-    }
-
-    private static string StripQualifier(string name)
-    {
-        int dot = name.LastIndexOf('.');
-        return dot >= 0 ? name[(dot + 1)..] : name;
     }
 }
