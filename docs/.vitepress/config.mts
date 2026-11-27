@@ -53,11 +53,6 @@ function appendMetaIfMissing(
 const head: HeadConfig[] = [
   ["link", { rel: "icon", type: "image/svg+xml", href: "/DataVo-DBMS/favicon.svg" }],
   ["link", { rel: "icon", type: "image/x-icon", href: "/DataVo-DBMS/favicon.ico" }],
-  [
-    "script",
-    {},
-    `(function(){var p=location.pathname;try{p=decodeURIComponent(p)}catch(e){}if(/[):]+$/.test(p)){var c=p.replace(/[):]+$/,'');if(c&&c!==p){location.replace(c+location.search+location.hash)}}})();`,
-  ],
 ];
 
 if (isProdBuild) {
@@ -131,8 +126,6 @@ export default withMermaid(
     },
     srcExclude: [
       "public/**",
-      "features/**",
-      "superpowers/**",
       "research/**",
     ],
     themeConfig: {
@@ -146,6 +139,7 @@ export default withMermaid(
         { text: "Fundamentals", link: "/manual/fundamentals/storage-modes" },
         { text: "Client APIs", link: "/manual/client-interfaces/datavo-context-api" },
         { text: "SQL Reference", link: "/manual/sql/compatibility" },
+        { text: "Playground", link: "/manual/getting-started/playground" },
         { text: "Blog", link: "/blog/" },
       ],
       sidebar: {
@@ -158,6 +152,7 @@ export default withMermaid(
               { text: "Installation & Packages", link: "/manual/getting-started/installation" },
               { text: "Quickstart", link: "/manual/getting-started/quickstart" },
               { text: "Choosing an Interface", link: "/manual/getting-started/choosing-an-interface" },
+              { text: "SQL Playground", link: "/manual/getting-started/playground" },
               { text: "Status & Roadmap", link: "/manual/getting-started/roadmap" },
             ],
           },
@@ -220,6 +215,7 @@ export default withMermaid(
               { text: "Query Planner & Fast Paths", link: "/manual/internals/query-planner" },
               { text: "Zero-Allocation Rows", link: "/manual/internals/zero-allocation-rows" },
               { text: "Compiled Scan Kernels", link: "/manual/internals/compiled-scan-kernels" },
+              { text: "INSERT Intent & Key Locking", link: "/manual/internals/insert-intent-row-locking" },
               { text: "DataVo vs SQLite", link: "/manual/performance/datavo-vs-sqlite" },
               { text: "Benchmarks", link: "/manual/performance/benchmarks" },
               { text: "Reproducing Benchmarks", link: "/manual/performance/reproducing-benchmarks" },

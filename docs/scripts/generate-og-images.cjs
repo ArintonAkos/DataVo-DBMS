@@ -17,11 +17,10 @@ const SITE_WORDMARK = "DataVo-DBMS";
 const SITE_DISPLAY_URL = "arintonakos.github.io/DataVo-DBMS";
 const DEFAULT_TITLE = "C#-native embedded database";
 const DEFAULT_DESCRIPTION =
-  "In-process SQL, LSM storage, vector search, and live Z-set reactive views for .NET 10.";
+  "In-process SQL, LSM storage, vector search, and live Z-set reactive views for .NET 8, 9 and 10.";
 
 const EXCLUDED_TOP_DIRS = new Set([
   ".vitepress",
-  "features",
   "mcp",
   "mcp-worker",
   "node_modules",
@@ -29,7 +28,6 @@ const EXCLUDED_TOP_DIRS = new Set([
   "research",
   "scripts",
   "src",
-  "superpowers",
   "test-results",
   "tests",
 ]);

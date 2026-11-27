@@ -1,7 +1,7 @@
 /**
- * Old manual URLs and the pages that replaced them. The theme redirects in-app navigation to these paths, and the
- * build writes a static redirect page at each old path (see `writeLegacyRedirectPages`), so a bookmarked or
- * externally linked old URL gets a 200 page that forwards immediately instead of the 404 page.
+ * Pre-reorg manual URLs (and two mistyped roadmap links that circulate externally) mapped to the pages that replaced
+ * them. The build writes one static redirect page per old path (see `writeLegacyRedirectPages`), so a bookmarked or
+ * externally linked old URL forwards immediately instead of hitting the 404 page. No site page links to these paths.
  */
 export const LEGACY_REDIRECTS: Record<string, string> = {
   '/manual/preface/what-is-datavo': '/manual/getting-started/introduction',
