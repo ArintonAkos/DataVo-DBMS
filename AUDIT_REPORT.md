@@ -389,7 +389,7 @@ Before listing removable legacy items, the following compatibility seams were au
 
 ### Subsystem: `docs/`
 
-#### `BC-30` — Entire Superseded `docs/features/` Directory (22 of 23 Files, ~3,617 Lines of v0.2 Docs)
+#### [DONE] `BC-30` — Entire Superseded `docs/features/` Directory (22 of 23 Files, ~3,617 Lines of v0.2 Docs)
 - **Exact Location(s):**
   - `docs/features/*.md` (22 legacy files; **exception:** `docs/features/insert-intent-row-locking.md` is an active v0.5.1 engineering note!)
   - `docs/.vitepress/config.mts:134`, `docs/scripts/generate-og-images.cjs:24`, `docs/mcp/datavo-docs-server.cjs:18`
@@ -397,8 +397,9 @@ Before listing removable legacy items, the following compatibility seams were au
 - **Proposed Action:** Relocate `docs/features/insert-intent-row-locking.md` to `docs/manual/internals/` (or an ADR directory), delete the 22 obsolete files under `docs/features/`, and remove `"features/**"` exclusion entries (also update `scripts/check-unity-support-status.sh` if it checks `docs/features/unity-and-godot.md`).
 - **Risk / Dependencies:** Low (already excluded from VitePress & MCP; check `scripts/check-doc-api-samples.sh` & `scripts/check-unity-support-status.sh` references).
 - **Effort Estimate:** `S`
+- **Resolution (Phase 6):** `insert-intent-row-locking.md` moved to `docs/manual/internals/` (frontmatter, sidebar, `public-manual.cjs`); the other 22 `docs/features/` files deleted; `features/**`/`superpowers/**` dropped from `config.mts` `srcExclude` and `generate-og-images.cjs`; `check-unity-support-status.sh` now checks `roadmap.md`, `installation.md` (TFM row) and `README.md` instead.
 
-#### `BC-31` — `CLAUDE.md` & `README.md` Claim Removed `StorageMode.Disk` / `DiskStorageEngine` Still Exists as "Deprecated/Legacy"
+#### [DONE] `BC-31` — `CLAUDE.md` & `README.md` Claim Removed `StorageMode.Disk` / `DiskStorageEngine` Still Exists as "Deprecated/Legacy"
 - **Exact Location(s):**
   - `CLAUDE.md:8`
   - `README.md:169`
@@ -406,16 +407,18 @@ Before listing removable legacy items, the following compatibility seams were au
 - **Proposed Action:** Update `CLAUDE.md:8` (and line 12 to include `DataVo.VectorData` in AOT-locked projects) and `README.md:169` to reflect that `Disk` was removed in v0.5.
 - **Risk / Dependencies:** None.
 - **Effort Estimate:** `XS`
+- **Resolution (Phase 6):** `CLAUDE.md` states `Disk`/`DiskStorageEngine` were removed in v0.5.0 and lists `DataVo.VectorData` among the AOT-locked projects; `README.md` says the paged engine was removed in v0.5.
 
-#### `BC-32` — `README.md` Self-Contradiction on Multi-Target Packages ("Planned for v0.5" vs. Already Shipped)
+#### [DONE] `BC-32` — `README.md` Self-Contradiction on Multi-Target Packages ("Planned for v0.5" vs. Already Shipped)
 - **Exact Location(s):**
   - `README.md:8,81,176,178`
 - **What it is & Why it's there:** Line 8 says `.NET 10`; line 81 says current release is `0.5.1`; line 176 claims *"The published DataVo.Core package currently ships a net10.0 asset; multi-target packages (net8.0, net9.0, net10.0, netstandard2.1) are planned for v0.5"*, directly contradicting line 178 (*"the package ships a netstandard2.1 asset (alongside net8.0, net9.0 and net10.0)"*, which also has lowercase typo `runtime. the package`).
 - **Proposed Action:** Reconcile `README.md:8,176,178` with actual shipped v0.5.1 TFMs per package and fix the capitalization typo.
 - **Risk / Dependencies:** None.
 - **Effort Estimate:** `XS`
+- **Resolution (Phase 6):** `README.md` tagline says .NET 8, 9 and 10; the Platforms section gives the real per-package TFMs (Core/Data incl. `netstandard2.1`, VectorData `net8`–`net10`, EF `net10.0`, Generators `netstandard2.0`); the lowercase typo is gone.
 
-#### `BC-33` — Legacy VitePress URL Redirects & Duplicated Trailing-Punctuation Stripping Hacks
+#### [DONE] `BC-33` — Legacy VitePress URL Redirects & Duplicated Trailing-Punctuation Stripping Hacks
 - **Exact Location(s):**
   - `docs/.vitepress/legacy-redirects.ts:6-37` (30 pre-reorg routes + 2 typo routes `/manual/getting-started/roadmap)` and `roadmap))` at `:11-12`)
   - `docs/.vitepress/config.mts:6,57-60,129-131`
@@ -424,8 +427,9 @@ Before listing removable legacy items, the following compatibility seams were au
 - **Proposed Action:** Delete `legacy-redirects.ts`, its `buildEnd` hook in `config.mts`, and the redirect/punctuation interceptors in `theme/index.ts` (or keep only if external backlink analytics still show significant traffic).
 - **Risk / Dependencies:** Medium if external links on Reddit/HN/blogs still point to pre-reorg URLs (will 404 on GitHub Pages); zero code risk.
 - **Effort Estimate:** `XS`
+- **Resolution (Phase 6):** The client-side redirect interceptor in `theme/index.ts` and the trailing-punctuation `<head>` script in `config.mts` are deleted. `legacy-redirects.ts` + its `buildEnd` hook are kept as the single mechanism (static redirect pages, so external pre-reorg links still land on a page; verified in Playwright: `/manual/preface/roadmap` → `/manual/getting-started/roadmap`).
 
-#### `BC-34` — Stale `v0.4` / `v0.4.0-rc.1` Version Strings Across AI Generator, Generated Exports & 15+ Manual Pages
+#### [DONE] `BC-34` — Stale `v0.4` / `v0.4.0-rc.1` Version Strings Across AI Generator, Generated Exports & 15+ Manual Pages
 - **Exact Location(s):**
   - `docs/scripts/generate-ai-docs.cjs:121,150,174` (propagated into tracked `docs/public/llms.txt:3`, `docs/public/mcp/datavo-docs.json:3`, `docs/public/mcp/remote-docs.json:3`)
   - `docs/manual/getting-started/introduction.md:3,78`, `docs/manual/reference/limits.md:3,8,12,44`, `docs/manual/reference/ai-access.md:3,8,67`
@@ -435,8 +439,9 @@ Before listing removable legacy items, the following compatibility seams were au
 - **Proposed Action:** Bump `generate-ai-docs.cjs` and manual pages to `v0.5` (or remove version tags from evergreen SQL docs) and regenerate `npm run docs:ai`.
 - **Risk / Dependencies:** Low.
 - **Effort Estimate:** `S`
+- **Resolution (Phase 6):** `generate-ai-docs.cjs` reads the release label from `<DataVoVersion>` in `Directory.Build.props` (exports now say `v0.5.1`); the SQL statement/function/type pages, `limits.md`, `ai-access.md` and `introduction.md` say `v0.5`/`0.5.1`. Each "not supported" claim was re-checked against `Parser.cs` first. Historical benchmark rows keep their v0.4 run labels. `npm run docs:ai` regenerated.
 
-#### `BC-35` — Stale `--prerelease` Install Flags & `.NET 10`-Only Phrasing Across v0.5 Docs
+#### [DONE] `BC-35` — Stale `--prerelease` Install Flags & `.NET 10`-Only Phrasing Across v0.5 Docs
 - **Exact Location(s):**
   - `--prerelease`: `docs/manual/getting-started/quickstart.md:43`, `docs/manual/client-interfaces/dapper.md:32`, `docs/manual/client-interfaces/vector-data.md:13`
   - `.NET 10`-only phrasing: `docs/index.md:34`, `docs/scripts/generate-og-images.cjs:20`, `docs/manual/getting-started/{introduction.md:3,8,78, quickstart.md:8, choosing-an-interface.md:3,31-32}`, `docs/manual/client-interfaces/{native-aot.md:3,8, source-generators.md:89}`, `docs/manual/sql/data-types.md:46`, `docs/blog/part-2-packed-buffers-aot-and-roslyn-codegen.md:424`
@@ -444,8 +449,9 @@ Before listing removable legacy items, the following compatibility seams were au
 - **Proposed Action:** Remove `--prerelease` from the 3 install snippets and update `.NET 10`-only copy to `.NET 8, 9, and 10` (keeping `.NET 10` only for EF Core, Browser, and benchmark environments).
 - **Risk / Dependencies:** None.
 - **Effort Estimate:** `XS`
+- **Resolution (Phase 6):** `--prerelease` removed from `quickstart.md`, `dapper.md`, `vector-data.md`; `.NET 10`-only copy now says .NET 8, 9 and 10 (`index.md`, `introduction.md`, `quickstart.md`, `choosing-an-interface.md`, `native-aot.md`, `data-types.md` and `source-generators.md` `DateOnly` adapters on `net8.0`+, OG default description, `blog/index.md`); Part 2 has an update note on the multi-target AOT fence.
 
-#### `BC-36` — Unused Vue Components (`BenchmarkChart.vue`, `SqlEditor.vue`), 17 MB of Stale March 2026 WASM Binaries in Git, & Dead Playwright Spec Stub
+#### [DONE] `BC-36` — Unused Vue Components (`BenchmarkChart.vue`, `SqlEditor.vue`), 17 MB of Stale March 2026 WASM Binaries in Git, & Dead Playwright Spec Stub
 - **Exact Location(s):**
   - `docs/src/components/BenchmarkChart.vue` (0 usages; registered in `docs/.vitepress/theme/index.ts:8,81`, stripped in `docs/scripts/generate-ai-docs.cjs:21-23,50`)
   - `docs/src/components/SqlEditor.vue` (0 usages across all `.md` files; registered in `docs/.vitepress/theme/index.ts:6,80` — contradicts `README.md:179` & `roadmap.md:31` claiming a live docs playground!)
@@ -455,8 +461,9 @@ Before listing removable legacy items, the following compatibility seams were au
 - **Proposed Action:** Delete `BenchmarkChart.vue` (and its theme/AI-script hooks) and `datavo-wasm-needs-specific.spec.ts`. Decide whether to (a) wire `SqlEditor.vue` onto a real playground page + stop committing compiled `datavo-wasm/` binaries to git (build in `deploy-docs.yml` instead), or (b) remove `SqlEditor.vue` and `docs/public/datavo-wasm/` and update `README.md:179`/`roadmap.md:31`.
 - **Risk / Dependencies:** Medium if local Playwright browser tests expect prebuilt `docs/public/datavo-wasm/` without running `scripts/deploy-browser-wasm.sh`.
 - **Effort Estimate:** `S`
+- **Resolution (Phase 6):** Option (a): `SqlEditor.vue` is mounted on a new `/manual/getting-started/playground` page (nav + sidebar), so the README/roadmap claim is true. `docs/public/datavo-wasm/` stays committed because the Playwright browser suites use it, and it was rebuilt from current source (`DataDirectory` present, `DiskStoragePath` gone). `BenchmarkChart.vue` (+ theme registration and AI-script hook) and `datavo-wasm-needs-specific.spec.ts` are deleted. Playground verified in headless Chromium (script runs, rows returned).
 
-#### `BC-37` — Obsolete Pre-Reorg Paths & Nonexistent Directories in MCP Server & VitePress Config
+#### [DONE] `BC-37` — Obsolete Pre-Reorg Paths & Nonexistent Directories in MCP Server & VitePress Config
 - **Exact Location(s):**
   - `docs/mcp/datavo-docs-server.cjs:14-24,119` (`deniedPathFragments` lists nonexistent `"architecture/"`, `"audit/"`, `"datavo.core/"`, `"superpowers/"`; `get_doc` schema gives broken pre-reorg examples `/quickstart`, `quickstart.md`, `datavo-docs://page/quickstart`)
   - `docs/manual/reference/ai-access.md:37` (cites deleted `architecture/index-manager.md`)
@@ -465,6 +472,7 @@ Before listing removable legacy items, the following compatibility seams were au
 - **Proposed Action:** Update `datavo-docs-server.cjs:119` to match `worker.js:101` (`/manual/getting-started/quickstart`), prune nonexistent directories from `deniedPathFragments`/`config.mts`/`generate-og-images.cjs`, and update `ai-access.md:37`.
 - **Risk / Dependencies:** None.
 - **Effort Estimate:** `XS`
+- **Resolution (Phase 6):** MCP `deniedPathFragments` pruned to existing dirs (`research/`, `.vitepress/`, `node_modules/`, `public/`, `src/`); `get_doc` schema examples use `/manual/getting-started/quickstart`; `ai-access.md` denial example uses `research/feature-bibliography.md`; `superpowers/**` removed from `config.mts` and `generate-og-images.cjs`.
 
 ---
 
@@ -1128,7 +1136,7 @@ Before listing removable legacy items, the following compatibility seams were au
 
 ### Subsystem: `docs/`
 
-#### `LE-46` — `configuration.md` Documents Removed `CheckpointStateFilePath` & Misplaces `DataVoAuthUser` Properties on `DataVoConfig`
+#### [DONE] `LE-46` — `configuration.md` Documents Removed `CheckpointStateFilePath` & Misplaces `DataVoAuthUser` Properties on `DataVoConfig`
 - **Exact Location(s):**
   - `docs/manual/reference/configuration.md:32,42,74-75`
   - `DataVo.Core/StorageEngine/Config/DataVoConfig.cs:8-40,341`
@@ -1136,8 +1144,9 @@ Before listing removable legacy items, the following compatibility seams were au
 - **Proposed Action:** Remove `CheckpointStateFilePath`, split `DataVoAuthUser` into its own subsection/table, and update `EnableZeroAllocCompiledUpdate` docs in both `configuration.md:42` and `DataVoConfig.cs:341`.
 - **Risk / Dependencies:** High user friction; zero risk to fix.
 - **Effort Estimate:** `XS`
+- **Resolution (Phase 6):** `configuration.md` drops `CheckpointStateFilePath`, moves `Username`/`Password`/`PasswordHash`/`PasswordSalt`/`Role`/`Roles` into a separate `DataVoAuthUser` table with a sample, and documents the `InMemory` zero-dict path of `EnableZeroAllocCompiledUpdate` (doc comment in `DataVoConfig.cs` too). `check-doc-api-samples.sh` now rejects `CheckpointStateFilePath`.
 
-#### `LE-47` — Factual API Errors in `ado-net.md` & `installation.md`
+#### [DONE] `LE-47` — Factual API Errors in `ado-net.md` & `installation.md`
 - **Exact Location(s):**
   - `docs/manual/client-interfaces/ado-net.md:29,47` (claims "three supported keys" above a 2-row table; claims `DataVoConnectionStringBuilder` inherits `DbConnectionStringBuilder` — false per `DataVoConnectionStringBuilder.cs:19`)
   - `docs/manual/getting-started/installation.md:3,28-35,39-41` (omits `DataVo.VectorData` from combinations & AOT list; falsely claims all packages ship `net8.0/net9.0/net10.0/netstandard2.1` when `VectorData` lacks `netstandard2.1`, `EntityFrameworkCore` is `net10.0`-only, and `Generators` is `netstandard2.0`; claims `DataVo.Generators` ships `.props` when it ships `.targets`)
@@ -1145,8 +1154,9 @@ Before listing removable legacy items, the following compatibility seams were au
 - **Proposed Action:** Fix `ado-net.md` (or inherit `DbConnectionStringBuilder` per `LE-18`) and update `installation.md` with an accurate per-package TFM/AOT table and `.targets` correction.
 - **Risk / Dependencies:** Low.
 - **Effort Estimate:** `XS`
+- **Resolution (Phase 6):** `ado-net.md` documents all three keys (`StorageMode`, `DataSource`, `Database`), `ChangeDatabase`, `DataVoException : DbException` and `DataVoFactory`; its `DbConnectionStringBuilder` claim is now true (LE-18). `installation.md` has a per-package TFM/AOT table, a VectorData combination row, and correctly says `.targets` (`build/` + `buildTransitive/`). Stale "no `DbProviderFactory`" claims also fixed in `roadmap.md`, `choosing-an-interface.md` and `limits.md`.
 
-#### `LE-48` — `DataVo.VectorData` Omitted from `public-manual.cjs` (AI/MCP Exports) & 5 Core Overview Pages
+#### [DONE] `LE-48` — `DataVo.VectorData` Omitted from `public-manual.cjs` (AI/MCP Exports) & 5 Core Overview Pages
 - **Exact Location(s):**
   - `docs/scripts/public-manual.cjs:18-26` (missing `manual/client-interfaces/vector-data.md` → absent from `llms.txt`, `llms-full.txt`, `ai/index.json`, `mcp/datavo-docs.json`, `mcp/remote-docs.json`, local/remote MCP servers, and `CopyAiMarkdown.vue` button!)
   - `docs/manual/reference/ai-access.md:14` (hardcodes "45 public manual and blog pages")
@@ -1156,8 +1166,9 @@ Before listing removable legacy items, the following compatibility seams were au
 - **Proposed Action:** Add `manual/client-interfaces/vector-data.md` to `public-manual.cjs`, run `npm run docs:ai`, update page count to 46 in `ai-access.md:14`, and add `DataVo.VectorData` to the 5 overview tables.
 - **Risk / Dependencies:** Low; high discoverability win for users and AI agents.
 - **Effort Estimate:** `XS`
+- **Resolution (Phase 6):** `vector-data.md` (and the relocated locking note) are in `public-manual.cjs`: 47 exported pages; `ai-access.md` names the count. `DataVo.VectorData` added to `introduction.md` packages, `choosing-an-interface.md`, the `roadmap.md` subsystem table, the `native-aot.md` compatibility table and `index.md`.
 
-#### `LE-49` — Unimplemented Roadmap Features (`roadmap.md:61` Track A Native Interop Unlabeled) & Planned-Feature Drift
+#### [DONE] `LE-49` — Unimplemented Roadmap Features (`roadmap.md:61` Track A Native Interop Unlabeled) & Planned-Feature Drift
 - **Exact Location(s):**
   - `docs/manual/getting-started/roadmap.md:40,60-61,67`
   - `docs/blog/index.md:20-26` (`### Planned` Parts 3–7)
@@ -1166,8 +1177,9 @@ Before listing removable legacy items, the following compatibility seams were au
 - **Proposed Action:** Immediately label Track A as `*Planned (post-0.5):*` or move it into a `Future / v0.6+` section so readers don't think a C ABI / Arrow export / Python binding shipped in 0.5.1.
 - **Risk / Dependencies:** High expectation mismatch if left unlabeled; zero risk to fix.
 - **Effort Estimate:** `XS`
+- **Resolution (Phase 6):** Track A (C ABI, Arrow export, Python binding) moved out of the v0.5 milestone into a new **Future (post-0.5, unscheduled)** section with `*Planned:*` labels, alongside WGS84 points, `DataVo.Server`, the full EF provider, the browser npm package and Windows IL2CPP. Blog "Planned" parts were already labeled.
 
-#### `LE-50` — Internal Contradictions Across 7 Documentation Pages
+#### [DONE] `LE-50` — Internal Contradictions Across 7 Documentation Pages
 - **Exact Location(s):**
   - `docs/manual/performance/datavo-vs-sqlite.md:8,37` vs `:102` (line 37 claims nullable keys require null-flag pass on LSM; line 102 says LSM indexes now hold NULL keys)
   - `docs/manual/sql/statements/create-table.md:34,104` (omits `DATETIME`; claims scalar indexes omit NULL keys, contradicting `indexes.md:59`)
@@ -1180,8 +1192,9 @@ Before listing removable legacy items, the following compatibility seams were au
 - **Proposed Action:** Reconcile all 7 pages with v0.5.1 implementation and latest benchmark numbers.
 - **Risk / Dependencies:** None.
 - **Effort Estimate:** `S`
+- **Resolution (Phase 6):** `datavo-vs-sqlite.md` NULL-key rule matches the v0.5.0 note; `create-table.md` lists `DATETIME` and no longer says indexes omit NULL keys; `indexes.md` COLUMNAR types include `DATETIME`; `functions.md` MIN/MAX and comparison tables include `DATETIME`; `compiled-scan-kernels.md` covers `DateTime`/`DateTimeOffset` and the v0.5.0 timings; Part 1 has update notes (EXPLAIN operator reporting since 0.5.0, writer-stall fixes); `README.md` and `choosing-an-interface.md` use the v0.5.0 `44.1 ns`/`218.0 ns` and `27.3–91.1 µs` figures.
 
-#### `LE-51` — `generate-ci-benchmark-plots.py` Fails on Fresh Clones Because `.log` Inputs Are Gitignored
+#### [DONE] `LE-51` — `generate-ci-benchmark-plots.py` Fails on Fresh Clones Because `.log` Inputs Are Gitignored
 - **Exact Location(s):**
   - `docs/scripts/generate-ci-benchmark-plots.py:4-5,94-95`
   - `docs/manual/performance/reproducing-benchmarks.md:111`
@@ -1191,8 +1204,9 @@ Before listing removable legacy items, the following compatibility seams were au
 - **Proposed Action:** Either add `!docs/public/benchmarks/**/*.log` (or rename the CI input logs to `.txt`) and commit the required CI logs, and align `README.md:75` wording.
 - **Risk / Dependencies:** Low.
 - **Effort Estimate:** `XS`
+- **Resolution (Phase 6):** `.gitignore` re-includes `docs/public/benchmarks/**/*.log`; all 25 benchmark logs are committed. `generate-ci-benchmark-plots.py` verified on the committed inputs; README wording now says "raw logs and reports".
 
-#### `LE-52` — Local vs. Remote MCP Server Drift, Wrong `docs/package.json` License, & Stray Local Files in `docs/`
+#### [DONE] `LE-52` — Local vs. Remote MCP Server Drift, Wrong `docs/package.json` License, & Stray Local Files in `docs/`
 - **Exact Location(s):**
   - `docs/mcp/datavo-docs-server.cjs` vs `docs/mcp-worker/worker.js:161,197-198` (local server lacks `ping` RPC handler and doesn't match `page.title` in `search_docs`)
   - `docs/package.json:23` (`"license": "ISC"` instead of `"MIT"`)
@@ -1201,6 +1215,7 @@ Before listing removable legacy items, the following compatibility seams were au
 - **Proposed Action:** Port `ping` and title-matching to `datavo-docs-server.cjs`, change `docs/package.json` license to `"MIT"`, and clean up local stray files (`docs/Parser.cs.tmp`, etc.).
 - **Risk / Dependencies:** None.
 - **Effort Estimate:** `XS`
+- **Resolution (Phase 6):** Local MCP server gained `ping` and title matching in `search_docs` (smoke-tested over stdio); `docs/package.json`/lockfile license is `MIT`; local strays (`Parser.cs.tmp`, `test-results/`, stale March `generated/*.json`, `.DS_Store`) deleted.
 
 ---
 
