@@ -1,0 +1,11 @@
+[16:46:53] DataVo [DataVo.Core net10.0]: concurrent ops — preloading 100,000 records, then 8 readers + 2 writers for 5s...
+[16:46:58] DataVo [DataVo.Core net10.0]: 5,214,990 reads + 224,522 writes, 1,087,329 OPS
+[16:46:58] SQLite: concurrent ops — preloading 100,000 records, then 8 readers + 2 writers for 5s...
+[16:47:03] SQLite: 1,914,864 reads + 2 writes, 381,982 OPS
+[16:47:03] SQLite (WAL,normal): concurrent ops — preloading 100,000 records, then 8 readers + 2 writers for 5s...
+[16:47:09] SQLite (WAL,normal): 1,857,503 reads + 91,458 writes, 389,341 OPS
+| Engine Name | Total Execution Time (ms) | OPS | Read P99 Latency (ms) | Write P99 Latency (ms) | Total GC Allocated (MB) |
+|---|---:|---:|---:|---:|---:|
+| DataVo [DataVo.Core net10.0] | 5002.638 | 1087328.660 | 0.189708 | 0.619834 | 2460.431 |
+| SQLite | 5012.975 | 381981.980 | 0.110959 | 5011.840208 | 1054.680 |
+| SQLite (WAL,normal) | 5005.792 | 389341.211 | 0.142208 | 1.299083 | 1075.223 |

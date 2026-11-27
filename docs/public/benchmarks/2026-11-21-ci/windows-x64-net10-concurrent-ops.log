@@ -1,0 +1,135 @@
+DataVo benchmark matrix (windows-x64-net10)
+DataVo.Core target: net10.0
+Date: 2026-11-21T15:03:01Z
+System: MINGW64_NT-10.0-26100 runnervmbpeip 3.6.10-5a1665c8.x86_64 2026-09-28 10:40 UTC x86_64 Msys
+Host DLL: demos/Research.Benchmark/src/Research.Benchmark.Host/bin/Release/net10.0/Research.Benchmark.Host.dll
+sqlite-vec: 0.1.9 (sqlite-vec-0.1.9-loadable-windows-x86_64.tar.gz, sha256:51581189d52066b4dfc6631f6d7a3eab7dedc2260656ab09ca97ab3fb8165983)
+SQLITE_VEC_PATH: D:\a\_temp\sqlite-vec\vec0.dll
+.NET SDK:
+ Version:           11.0.100
+ Commit:            297acf930f
+ Workload version:  11.0.100-manifests.5d612b92
+ MSBuild version:   18.12.2-1.26529.118+297acf930
+
+Runtime Environment:
+ OS Name:     Windows
+ OS Version:  10.0.26100
+ OS Platform: Windows
+ RID:         win-x64
+ Base Path:   C:\Program Files\dotnet\sdk\11.0.100
+
+.NET workloads installed:
+ [maui-windows]
+   Installation Source: VS 18.12.12405.243
+   Manifest Version:    11.0.0/11.0.100
+   Manifest Path:       C:\Program Files\dotnet\sdk-manifests\11.0.100\microsoft.net.sdk.maui\11.0.0\WorkloadManifest.json
+   Install Type:              Msi
+
+ [maccatalyst]
+   Installation Source: VS 18.12.12405.243
+   Manifest Version:    27.2.11039/11.0.100
+   Manifest Path:       C:\Program Files\dotnet\sdk-manifests\11.0.100\microsoft.net.sdk.maccatalyst\27.2.11039\WorkloadManifest.json
+   Install Type:              Msi
+
+ [ios]
+   Installation Source: VS 18.12.12405.243
+   Manifest Version:    27.2.11039/11.0.100
+   Manifest Path:       C:\Program Files\dotnet\sdk-manifests\11.0.100\microsoft.net.sdk.ios\27.2.11039\WorkloadManifest.json
+   Install Type:              Msi
+
+ [android]
+   Installation Source: VS 18.12.12405.243
+   Manifest Version:    37.2.29/11.0.100
+   Manifest Path:       C:\Program Files\dotnet\sdk-manifests\11.0.100\microsoft.net.sdk.android\37.2.29\WorkloadManifest.json
+   Install Type:              Msi
+
+ [wasm-tools]
+   Installation Source: VS 18.12.12405.243
+   Manifest Version:    11.0.100/11.0.100
+   Manifest Path:       C:\Program Files\dotnet\sdk-manifests\11.0.100\microsoft.net.workload.mono.toolchain.current\11.0.100\WorkloadManifest.json
+   Install Type:              Msi
+
+Configured to use workload sets when installing new manifests.
+No workload sets are installed. Run "dotnet workload restore" to install a workload set.
+
+Host:
+  Version:      11.0.0
+  Architecture: x64
+  Commit:       297acf930f
+
+.NET SDKs installed:
+  8.0.134 [C:\Program Files\dotnet\sdk]
+  8.0.206 [C:\Program Files\dotnet\sdk]
+  8.0.319 [C:\Program Files\dotnet\sdk]
+  8.0.428 [C:\Program Files\dotnet\sdk]
+  9.0.124 [C:\Program Files\dotnet\sdk]
+  9.0.205 [C:\Program Files\dotnet\sdk]
+  9.0.321 [C:\Program Files\dotnet\sdk]
+  10.0.115 [C:\Program Files\dotnet\sdk]
+  10.0.204 [C:\Program Files\dotnet\sdk]
+  10.0.303 [C:\Program Files\dotnet\sdk]
+  10.0.404 [C:\Program Files\dotnet\sdk]
+  11.0.100 [C:\Program Files\dotnet\sdk]
+
+.NET runtimes installed:
+  Microsoft.AspNetCore.App 8.0.6 [C:\Program Files\dotnet\shared\Microsoft.AspNetCore.App]
+  Microsoft.AspNetCore.App 8.0.22 [C:\Program Files\dotnet\shared\Microsoft.AspNetCore.App]
+  Microsoft.AspNetCore.App 8.0.34 [C:\Program Files\dotnet\shared\Microsoft.AspNetCore.App]
+  Microsoft.AspNetCore.App 9.0.6 [C:\Program Files\dotnet\shared\Microsoft.AspNetCore.App]
+  Microsoft.AspNetCore.App 9.0.23 [C:\Program Files\dotnet\shared\Microsoft.AspNetCore.App]
+  Microsoft.AspNetCore.App 10.0.8 [C:\Program Files\dotnet\shared\Microsoft.AspNetCore.App]
+  Microsoft.AspNetCore.App 10.0.11 [C:\Program Files\dotnet\shared\Microsoft.AspNetCore.App]
+  Microsoft.AspNetCore.App 10.0.15 [C:\Program Files\dotnet\shared\Microsoft.AspNetCore.App]
+  Microsoft.AspNetCore.App 11.0.0 [C:\Program Files\dotnet\shared\Microsoft.AspNetCore.App]
+  Microsoft.NETCore.App 8.0.6 [C:\Program Files\dotnet\shared\Microsoft.NETCore.App]
+  Microsoft.NETCore.App 8.0.22 [C:\Program Files\dotnet\shared\Microsoft.NETCore.App]
+  Microsoft.NETCore.App 8.0.34 [C:\Program Files\dotnet\shared\Microsoft.NETCore.App]
+  Microsoft.NETCore.App 9.0.6 [C:\Program Files\dotnet\shared\Microsoft.NETCore.App]
+  Microsoft.NETCore.App 9.0.23 [C:\Program Files\dotnet\shared\Microsoft.NETCore.App]
+  Microsoft.NETCore.App 10.0.8 [C:\Program Files\dotnet\shared\Microsoft.NETCore.App]
+  Microsoft.NETCore.App 10.0.11 [C:\Program Files\dotnet\shared\Microsoft.NETCore.App]
+  Microsoft.NETCore.App 10.0.15 [C:\Program Files\dotnet\shared\Microsoft.NETCore.App]
+  Microsoft.NETCore.App 11.0.0 [C:\Program Files\dotnet\shared\Microsoft.NETCore.App]
+  Microsoft.WindowsDesktop.App 8.0.6 [C:\Program Files\dotnet\shared\Microsoft.WindowsDesktop.App]
+  Microsoft.WindowsDesktop.App 8.0.22 [C:\Program Files\dotnet\shared\Microsoft.WindowsDesktop.App]
+  Microsoft.WindowsDesktop.App 8.0.34 [C:\Program Files\dotnet\shared\Microsoft.WindowsDesktop.App]
+  Microsoft.WindowsDesktop.App 9.0.6 [C:\Program Files\dotnet\shared\Microsoft.WindowsDesktop.App]
+  Microsoft.WindowsDesktop.App 9.0.23 [C:\Program Files\dotnet\shared\Microsoft.WindowsDesktop.App]
+  Microsoft.WindowsDesktop.App 10.0.8 [C:\Program Files\dotnet\shared\Microsoft.WindowsDesktop.App]
+  Microsoft.WindowsDesktop.App 10.0.11 [C:\Program Files\dotnet\shared\Microsoft.WindowsDesktop.App]
+  Microsoft.WindowsDesktop.App 10.0.15 [C:\Program Files\dotnet\shared\Microsoft.WindowsDesktop.App]
+  Microsoft.WindowsDesktop.App 11.0.0 [C:\Program Files\dotnet\shared\Microsoft.WindowsDesktop.App]
+
+Other architectures found:
+  x86   [C:\Program Files (x86)\dotnet]
+    registered at [HKLM\SOFTWARE\dotnet\Setup\InstalledVersions\x86\InstallLocation]
+
+Environment variables:
+  DOTNET_MULTILEVEL_LOOKUP                 [0]
+  DOTNET_NOLOGO                            [1]
+  DOTNET_ROOT                              [C:\Program Files\dotnet]
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE        [1]
+
+global.json file:
+  Not found
+
+Learn more:
+  https://aka.ms/dotnet/info
+
+Download .NET:
+  https://aka.ms/dotnet/download
+
+========================================
+SCENARIO: concurrent-ops
+========================================
+[15:03:04] DataVo [DataVo.Core net10.0]: concurrent ops — preloading 100,000 records, then 8 readers + 2 writers for 5s...
+[15:03:14] DataVo [DataVo.Core net10.0]: 17,477,611 reads + 0 writes, 1,879,968 OPS
+[15:03:14] SQLite: concurrent ops — preloading 100,000 records, then 8 readers + 2 writers for 5s...
+[15:03:21] SQLite: 3,855,821 reads + 1 writes, 613,042 OPS
+[15:03:21] SQLite (WAL,normal): concurrent ops — preloading 100,000 records, then 8 readers + 2 writers for 5s...
+[15:03:28] SQLite (WAL,normal): 2,375,126 reads + 20,592 writes, 339,416 OPS
+| Engine Name | Total Execution Time (ms) | OPS | Read P99 Latency (ms) | Write P99 Latency (ms) | Total GC Allocated (MB) |
+|---|---:|---:|---:|---:|---:|
+| DataVo [DataVo.Core net10.0] | 9296.761 | 1879967.866 | 0.006300 | 0.000000 | 1221.277 |
+| SQLite | 6289.653 | 613042.126 | 0.011800 | 6286.278600 | 2175.616 |
+| SQLite (WAL,normal) | 7058.352 | 339416.042 | 0.206100 | 3.796100 | 1326.304 |

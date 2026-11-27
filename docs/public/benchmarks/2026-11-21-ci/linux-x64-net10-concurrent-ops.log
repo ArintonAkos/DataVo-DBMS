@@ -1,0 +1,96 @@
+DataVo benchmark matrix (linux-x64-net10)
+DataVo.Core target: net10.0
+Date: 2026-11-21T15:02:51Z
+System: Linux ip-10-0-137-67 7.0.0-1016-aws #17-Ubuntu SMP PREEMPT Mon Oct 19 17:36:33 UTC 2026 x86_64 GNU/Linux
+Host DLL: demos/Research.Benchmark/src/Research.Benchmark.Host/bin/Release/net10.0/Research.Benchmark.Host.dll
+sqlite-vec: 0.1.9 (sqlite-vec-0.1.9-loadable-linux-x86_64.tar.gz, sha256:b959baa1d8dc88861b1edb337b8587178cdcb12d60b4998f9d10b6a82052d5d7)
+SQLITE_VEC_PATH: /home/runner/work/_temp/sqlite-vec/vec0.so
+.NET SDK:
+ Version:           11.0.100
+ Commit:            297acf930f
+ Workload version:  11.0.100-manifests.08e30c08
+ MSBuild version:   18.12.2-1.26529.118+297acf930
+
+Runtime Environment:
+ OS Name:     ubuntu
+ OS Version:  26.04
+ OS Platform: Linux
+ RID:         linux-x64
+ Base Path:   /usr/share/dotnet/sdk/11.0.100
+
+.NET workloads installed:
+There are no installed workloads to display.
+Configured to use workload sets when installing new manifests.
+No workload sets are installed. Run "dotnet workload restore" to install a workload set.
+
+Host:
+  Version:      11.0.0
+  Architecture: x64
+  Commit:       297acf930f
+
+.NET SDKs installed:
+  8.0.134 [/usr/share/dotnet/sdk]
+  8.0.206 [/usr/share/dotnet/sdk]
+  8.0.319 [/usr/share/dotnet/sdk]
+  8.0.428 [/usr/share/dotnet/sdk]
+  9.0.124 [/usr/share/dotnet/sdk]
+  9.0.205 [/usr/share/dotnet/sdk]
+  9.0.321 [/usr/share/dotnet/sdk]
+  10.0.115 [/usr/share/dotnet/sdk]
+  10.0.204 [/usr/share/dotnet/sdk]
+  10.0.303 [/usr/share/dotnet/sdk]
+  10.0.404 [/usr/share/dotnet/sdk]
+  11.0.100 [/usr/share/dotnet/sdk]
+
+.NET runtimes installed:
+  Microsoft.AspNetCore.App 8.0.6 [/usr/share/dotnet/shared/Microsoft.AspNetCore.App]
+  Microsoft.AspNetCore.App 8.0.22 [/usr/share/dotnet/shared/Microsoft.AspNetCore.App]
+  Microsoft.AspNetCore.App 8.0.34 [/usr/share/dotnet/shared/Microsoft.AspNetCore.App]
+  Microsoft.AspNetCore.App 9.0.6 [/usr/share/dotnet/shared/Microsoft.AspNetCore.App]
+  Microsoft.AspNetCore.App 9.0.23 [/usr/share/dotnet/shared/Microsoft.AspNetCore.App]
+  Microsoft.AspNetCore.App 10.0.8 [/usr/share/dotnet/shared/Microsoft.AspNetCore.App]
+  Microsoft.AspNetCore.App 10.0.11 [/usr/share/dotnet/shared/Microsoft.AspNetCore.App]
+  Microsoft.AspNetCore.App 10.0.15 [/usr/share/dotnet/shared/Microsoft.AspNetCore.App]
+  Microsoft.AspNetCore.App 11.0.0 [/usr/share/dotnet/shared/Microsoft.AspNetCore.App]
+  Microsoft.NETCore.App 8.0.6 [/usr/share/dotnet/shared/Microsoft.NETCore.App]
+  Microsoft.NETCore.App 8.0.22 [/usr/share/dotnet/shared/Microsoft.NETCore.App]
+  Microsoft.NETCore.App 8.0.34 [/usr/share/dotnet/shared/Microsoft.NETCore.App]
+  Microsoft.NETCore.App 9.0.6 [/usr/share/dotnet/shared/Microsoft.NETCore.App]
+  Microsoft.NETCore.App 9.0.23 [/usr/share/dotnet/shared/Microsoft.NETCore.App]
+  Microsoft.NETCore.App 10.0.8 [/usr/share/dotnet/shared/Microsoft.NETCore.App]
+  Microsoft.NETCore.App 10.0.11 [/usr/share/dotnet/shared/Microsoft.NETCore.App]
+  Microsoft.NETCore.App 10.0.15 [/usr/share/dotnet/shared/Microsoft.NETCore.App]
+  Microsoft.NETCore.App 11.0.0 [/usr/share/dotnet/shared/Microsoft.NETCore.App]
+
+Other architectures found:
+  None
+
+Environment variables:
+  DOTNET_MULTILEVEL_LOOKUP                 [0]
+  DOTNET_NOLOGO                            [1]
+  DOTNET_ROOT                              [/usr/share/dotnet]
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE        [1]
+
+global.json file:
+  Not found
+
+Learn more:
+  https://aka.ms/dotnet/info
+
+Download .NET:
+  https://aka.ms/dotnet/download
+
+========================================
+SCENARIO: concurrent-ops
+========================================
+[15:02:53] DataVo [DataVo.Core net10.0]: concurrent ops — preloading 100,000 records, then 8 readers + 2 writers for 5s...
+[15:03:00] DataVo [DataVo.Core net10.0]: 7,719,876 reads + 50,986 writes, 1,552,810 OPS
+[15:03:00] SQLite: concurrent ops — preloading 100,000 records, then 8 readers + 2 writers for 5s...
+[15:03:06] SQLite: 1,721,428 reads + 2 writes, 336,952 OPS
+[15:03:06] SQLite (WAL,normal): concurrent ops — preloading 100,000 records, then 8 readers + 2 writers for 5s...
+[15:03:11] SQLite (WAL,normal): 4,048,881 reads + 49,367 writes, 819,171 OPS
+| Engine Name | Total Execution Time (ms) | OPS | Read P99 Latency (ms) | Write P99 Latency (ms) | Total GC Allocated (MB) |
+|---|---:|---:|---:|---:|---:|
+| DataVo [DataVo.Core net10.0] | 5004.387 | 1552809.809 | 0.005835 | 0.212443 | 1045.075 |
+| SQLite | 5108.829 | 336951.951 | 0.094631 | 5105.391351 | 956.031 |
+| SQLite (WAL,normal) | 5002.924 | 819170.565 | 0.178383 | 2.515437 | 2259.116 |

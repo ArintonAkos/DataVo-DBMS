@@ -1,0 +1,37 @@
+[13:24:44] hybrid-vector: generating 20,000 x 1536 clustered embeddings and the exact filtered top-10...
+[13:24:45] DataVo Flat [DataVo.Core net10.0]: loaded 20,000 x 1536-dim documents (index build included) in 481 ms
+[13:24:48] DataVo Flat [DataVo.Core net10.0]: V0Unfiltered p50 6.06 ms p99 27.23 ms recall 100.0% (min 100%) short 0 invalid 0 | vector index 200/200; candidates (top-k) median 10 (max 10); expansion passes mean 0.00; full table scan 0/200; routes: hybrid.orderby.accept 200/200, hybrid.orderby.initial_topk.baseline 200/200
+[13:24:52] DataVo Flat [DataVo.Core net10.0]: V1Selective p50 9.70 ms p99 20.78 ms recall 100.0% (min 100%) short 0 invalid 0 | vector index 200/200; candidates (top-k) median 286 (max 572); expansion passes mean 0.12; full table scan 0/200; routes: hybrid.orderby.accept 200/200, hybrid.orderby.initial_topk.adaptive 200/200
+[13:24:55] DataVo Flat [DataVo.Core net10.0]: V2Broad p50 6.83 ms p99 11.98 ms recall 100.0% (min 100%) short 0 invalid 0 | vector index 200/200; candidates (top-k) median 29 (max 58); expansion passes mean 0.02; full table scan 0/200; routes: hybrid.orderby.accept 200/200, hybrid.orderby.initial_topk.adaptive 200/200
+[13:24:58] DataVo Flat [DataVo.Core net10.0]: V3JoinDocFilter p50 4.72 ms p99 10.30 ms recall 5.5% (min 0%) short 200 invalid 0 | vector index 200/200; candidates (top-k) median 10 (max 10); expansion passes mean 0.00; full table scan 92/200; routes: hybrid.orderby.accept 200/200, hybrid.orderby.initial_topk.baseline 200/200
+[13:25:01] DataVo Flat [DataVo.Core net10.0]: V4JoinAuthorFilter p50 7.38 ms p99 10.43 ms recall 11.1% (min 0%) short 0 invalid 1779 | vector index 200/200; candidates (top-k) median 10 (max 10); expansion passes mean 0.00; full table scan 200/200; routes: hybrid.orderby.accept 200/200, hybrid.orderby.initial_topk.baseline 200/200
+[13:25:03] DataVo HNSW [DataVo.Core net10.0]: loaded 20,000 x 1536-dim documents (index build included) in 1,862 ms
+[13:25:04] DataVo HNSW [DataVo.Core net10.0]: V0Unfiltered p50 2.22 ms p99 2.58 ms recall 86.8% (min 0%) short 0 invalid 0 | vector index 200/200; candidates (top-k) median 10 (max 10); expansion passes mean 0.00; full table scan 0/200; routes: hybrid.orderby.accept 200/200, hybrid.orderby.initial_topk.baseline 200/200
+[13:25:09] DataVo HNSW [DataVo.Core net10.0]: V1Selective p50 11.92 ms p99 29.30 ms recall 89.9% (min 0%) short 18 invalid 0 | vector index 200/200; candidates (top-k) median 286 (max 1144); expansion passes mean 0.37; full table scan 0/200; routes: hybrid.orderby.accept 200/200, hybrid.orderby.initial_topk.adaptive 200/200
+[13:25:11] DataVo HNSW [DataVo.Core net10.0]: V2Broad p50 3.64 ms p99 6.21 ms recall 88.4% (min 0%) short 0 invalid 0 | vector index 200/200; candidates (top-k) median 29 (max 58); expansion passes mean 0.02; full table scan 0/200; routes: hybrid.orderby.accept 200/200, hybrid.orderby.initial_topk.adaptive 200/200
+[13:25:11] DataVo HNSW [DataVo.Core net10.0]: V3JoinDocFilter p50 884.4 µs p99 6.21 ms recall 5.2% (min 0%) short 200 invalid 0 | vector index 200/200; candidates (top-k) median 10 (max 10); expansion passes mean 0.00; full table scan 97/200; routes: hybrid.orderby.accept 200/200, hybrid.orderby.initial_topk.baseline 200/200
+[13:25:13] DataVo HNSW [DataVo.Core net10.0]: V4JoinAuthorFilter p50 3.75 ms p99 5.98 ms recall 10.0% (min 0%) short 0 invalid 1786 | vector index 200/200; candidates (top-k) median 10 (max 10); expansion passes mean 0.00; full table scan 200/200; routes: hybrid.orderby.accept 200/200, hybrid.orderby.initial_topk.baseline 200/200
+[13:25:17] SQLite + sqlite-vec: loaded 20,000 x 1536-dim documents (index build included) in 4,011 ms
+[13:25:24] SQLite + sqlite-vec: V0Unfiltered p50 32.72 ms p99 35.46 ms recall 100.0% (min 100%) short 0 invalid 0
+[13:25:27] SQLite + sqlite-vec: V1Selective p50 16.09 ms p99 17.80 ms recall 100.0% (min 100%) short 0 invalid 0
+[13:25:33] SQLite + sqlite-vec: V2Broad p50 24.22 ms p99 25.43 ms recall 100.0% (min 100%) short 0 invalid 0
+[13:25:36] SQLite + sqlite-vec: V3JoinDocFilter p50 16.06 ms p99 17.05 ms recall 100.0% (min 100%) short 0 invalid 0
+[13:25:40] SQLite + sqlite-vec: V4JoinAuthorFilter p50 18.17 ms p99 19.21 ms recall 100.0% (min 100%) short 0 invalid 0
+       56.30 real        51.58 user        17.20 sys
+          1157136384  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+              225709  page reclaims
+                   2  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   0  messages sent
+                   0  messages received
+                  12  signals received
+                 747  voluntary context switches
+               23795  involuntary context switches
+        924644542221  instructions retired
+        272012363846  cycles elapsed
+          1122289152  peak memory footprint

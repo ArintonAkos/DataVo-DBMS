@@ -1,0 +1,450 @@
+DataVo benchmark matrix (windows-x64-net10)
+DataVo.Core target: net10.0
+Date: 2026-11-12T09:11:53Z
+System: MINGW64_NT-10.0-26100 runnervmm7ud1 3.6.10-5a1665c8.x86_64 2026-09-28 10:40 UTC x86_64 Msys
+Host DLL: demos/Research.Benchmark/src/Research.Benchmark.Host/bin/Release/net10.0/Research.Benchmark.Host.dll
+sqlite-vec: 0.1.9 (sqlite-vec-0.1.9-loadable-windows-x86_64.tar.gz, sha256:51581189d52066b4dfc6631f6d7a3eab7dedc2260656ab09ca97ab3fb8165983)
+SQLITE_VEC_PATH: D:\a\_temp\sqlite-vec\vec0.dll
+.NET SDK:
+ Version:           10.0.404
+ Commit:            2ab2854867
+ Workload version:  10.0.400-manifests.899c35d8
+ MSBuild version:   18.9.15+2ab285486
+
+Runtime Environment:
+ OS Name:     Windows
+ OS Version:  10.0.26100
+ OS Platform: Windows
+ RID:         win-x64
+ Base Path:   C:\Program Files\dotnet\sdk\10.0.404\
+
+.NET workloads installed:
+ [maui-windows]
+   Installation Source: VS 18.11.12328.437
+   Manifest Version:    10.0.110/10.0.100
+   Manifest Path:       C:\Program Files\dotnet\sdk-manifests\10.0.100\microsoft.net.sdk.maui\10.0.110\WorkloadManifest.json
+   Install Type:              Msi
+
+ [maccatalyst]
+   Installation Source: VS 18.11.12328.437
+   Manifest Version:    26.5.10315/10.0.100
+   Manifest Path:       C:\Program Files\dotnet\sdk-manifests\10.0.100\microsoft.net.sdk.maccatalyst\26.5.10315\WorkloadManifest.json
+   Install Type:              Msi
+
+ [ios]
+   Installation Source: VS 18.11.12328.437
+   Manifest Version:    26.5.10315/10.0.100
+   Manifest Path:       C:\Program Files\dotnet\sdk-manifests\10.0.100\microsoft.net.sdk.ios\26.5.10315\WorkloadManifest.json
+   Install Type:              Msi
+
+ [android]
+   Installation Source: VS 18.11.12328.437
+   Manifest Version:    36.1.118/10.0.100
+   Manifest Path:       C:\Program Files\dotnet\sdk-manifests\10.0.100\microsoft.net.sdk.android\36.1.118\WorkloadManifest.json
+   Install Type:              Msi
+
+ [wasm-tools]
+   Installation Source: VS 18.11.12328.437
+   Manifest Version:    10.0.114/10.0.100
+   Manifest Path:       C:\Program Files\dotnet\sdk-manifests\10.0.100\microsoft.net.workload.mono.toolchain.current\10.0.114\WorkloadManifest.json
+   Install Type:              Msi
+
+Configured to use workload sets when installing new manifests.
+No workload sets are installed. Run "dotnet workload restore" to install a workload set.
+
+Host:
+  Version:      10.0.15
+  Architecture: x64
+  Commit:       8e0f8ed231
+
+.NET SDKs installed:
+  8.0.133 [C:\Program Files\dotnet\sdk]
+  8.0.206 [C:\Program Files\dotnet\sdk]
+  8.0.319 [C:\Program Files\dotnet\sdk]
+  8.0.427 [C:\Program Files\dotnet\sdk]
+  9.0.123 [C:\Program Files\dotnet\sdk]
+  9.0.205 [C:\Program Files\dotnet\sdk]
+  9.0.320 [C:\Program Files\dotnet\sdk]
+  10.0.114 [C:\Program Files\dotnet\sdk]
+  10.0.204 [C:\Program Files\dotnet\sdk]
+  10.0.303 [C:\Program Files\dotnet\sdk]
+  10.0.403 [C:\Program Files\dotnet\sdk]
+  10.0.404 [C:\Program Files\dotnet\sdk]
+
+.NET runtimes installed:
+  Microsoft.AspNetCore.App 8.0.6 [C:\Program Files\dotnet\shared\Microsoft.AspNetCore.App]
+  Microsoft.AspNetCore.App 8.0.22 [C:\Program Files\dotnet\shared\Microsoft.AspNetCore.App]
+  Microsoft.AspNetCore.App 8.0.33 [C:\Program Files\dotnet\shared\Microsoft.AspNetCore.App]
+  Microsoft.AspNetCore.App 9.0.6 [C:\Program Files\dotnet\shared\Microsoft.AspNetCore.App]
+  Microsoft.AspNetCore.App 9.0.22 [C:\Program Files\dotnet\shared\Microsoft.AspNetCore.App]
+  Microsoft.AspNetCore.App 10.0.8 [C:\Program Files\dotnet\shared\Microsoft.AspNetCore.App]
+  Microsoft.AspNetCore.App 10.0.11 [C:\Program Files\dotnet\shared\Microsoft.AspNetCore.App]
+  Microsoft.AspNetCore.App 10.0.14 [C:\Program Files\dotnet\shared\Microsoft.AspNetCore.App]
+  Microsoft.AspNetCore.App 10.0.15 [C:\Program Files\dotnet\shared\Microsoft.AspNetCore.App]
+  Microsoft.NETCore.App 8.0.6 [C:\Program Files\dotnet\shared\Microsoft.NETCore.App]
+  Microsoft.NETCore.App 8.0.22 [C:\Program Files\dotnet\shared\Microsoft.NETCore.App]
+  Microsoft.NETCore.App 8.0.33 [C:\Program Files\dotnet\shared\Microsoft.NETCore.App]
+  Microsoft.NETCore.App 9.0.6 [C:\Program Files\dotnet\shared\Microsoft.NETCore.App]
+  Microsoft.NETCore.App 9.0.22 [C:\Program Files\dotnet\shared\Microsoft.NETCore.App]
+  Microsoft.NETCore.App 10.0.8 [C:\Program Files\dotnet\shared\Microsoft.NETCore.App]
+  Microsoft.NETCore.App 10.0.11 [C:\Program Files\dotnet\shared\Microsoft.NETCore.App]
+  Microsoft.NETCore.App 10.0.14 [C:\Program Files\dotnet\shared\Microsoft.NETCore.App]
+  Microsoft.NETCore.App 10.0.15 [C:\Program Files\dotnet\shared\Microsoft.NETCore.App]
+  Microsoft.WindowsDesktop.App 8.0.6 [C:\Program Files\dotnet\shared\Microsoft.WindowsDesktop.App]
+  Microsoft.WindowsDesktop.App 8.0.22 [C:\Program Files\dotnet\shared\Microsoft.WindowsDesktop.App]
+  Microsoft.WindowsDesktop.App 8.0.33 [C:\Program Files\dotnet\shared\Microsoft.WindowsDesktop.App]
+  Microsoft.WindowsDesktop.App 9.0.6 [C:\Program Files\dotnet\shared\Microsoft.WindowsDesktop.App]
+  Microsoft.WindowsDesktop.App 9.0.22 [C:\Program Files\dotnet\shared\Microsoft.WindowsDesktop.App]
+  Microsoft.WindowsDesktop.App 10.0.8 [C:\Program Files\dotnet\shared\Microsoft.WindowsDesktop.App]
+  Microsoft.WindowsDesktop.App 10.0.11 [C:\Program Files\dotnet\shared\Microsoft.WindowsDesktop.App]
+  Microsoft.WindowsDesktop.App 10.0.14 [C:\Program Files\dotnet\shared\Microsoft.WindowsDesktop.App]
+  Microsoft.WindowsDesktop.App 10.0.15 [C:\Program Files\dotnet\shared\Microsoft.WindowsDesktop.App]
+
+Other architectures found:
+  x86   [C:\Program Files (x86)\dotnet]
+    registered at [HKLM\SOFTWARE\dotnet\Setup\InstalledVersions\x86\InstallLocation]
+
+Environment variables:
+  DOTNET_MULTILEVEL_LOOKUP                 [0]
+  DOTNET_NOLOGO                            [1]
+  DOTNET_ROOT                              [C:\Program Files\dotnet]
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE        [1]
+
+global.json file:
+  Not found
+
+Learn more:
+  https://aka.ms/dotnet/info
+
+Download .NET:
+  https://aka.ms/dotnet/download
+
+========================================
+SCENARIO: simple-exposure
+========================================
+[09:11:56] DataVo [DataVo.Core net10.0]: preloading 10,000 baseline orders...
+[09:11:56] DataVo [DataVo.Core net10.0]: measuring 50,000 insert+read iterations...
+[09:11:56] DataVo [DataVo.Core net10.0]: 10,000/50,000 iterations, elapsed 0.6s
+[09:11:57] DataVo [DataVo.Core net10.0]: 20,000/50,000 iterations, elapsed 0.8s
+[09:11:57] DataVo [DataVo.Core net10.0]: 30,000/50,000 iterations, elapsed 1.0s
+[09:11:57] DataVo [DataVo.Core net10.0]: 40,000/50,000 iterations, elapsed 1.1s
+[09:11:57] DataVo [DataVo.Core net10.0]: 50,000/50,000 iterations, elapsed 1.3s
+[09:11:57] DuckDB: preloading 10,000 baseline orders...
+[09:12:27] DuckDB: measuring 50,000 insert+read iterations...
+[09:13:07] DuckDB: 10,000/50,000 iterations, elapsed 40.1s
+[09:13:47] DuckDB: 20,000/50,000 iterations, elapsed 80.4s
+[09:14:28] DuckDB: 30,000/50,000 iterations, elapsed 121.0s
+[09:15:10] DuckDB: 40,000/50,000 iterations, elapsed 162.6s
+[09:15:52] DuckDB: 50,000/50,000 iterations, elapsed 204.7s
+[09:15:52] SQLite: preloading 10,000 baseline orders...
+[09:15:52] SQLite: measuring 50,000 insert+read iterations...
+[09:15:52] SQLite: 10,000/50,000 iterations, elapsed 0.4s
+[09:15:53] SQLite: 20,000/50,000 iterations, elapsed 0.7s
+[09:15:53] SQLite: 30,000/50,000 iterations, elapsed 1.0s
+[09:15:53] SQLite: 40,000/50,000 iterations, elapsed 1.3s
+[09:15:53] SQLite: 50,000/50,000 iterations, elapsed 1.6s
+| Engine Name | Total Execution Time (ms) | P50 Latency (ms) | P99 Latency (ms) | Total GC Allocated (MB) |
+|---|---:|---:|---:|---:|
+| DataVo [DataVo.Core net10.0] | 1259.744 | 0.016600 | 0.091100 | 364.515 |
+| DuckDB | 204714.716 | 4.022300 | 5.736100 | 208.302 |
+| SQLite | 1563.437 | 0.023800 | 0.083800 | 199.414 |
+
+========================================
+SCENARIO: complex-vip
+========================================
+[09:15:54] DataVo [DataVo.Core net10.0]: preloading 10,000 orders, 1,000 accounts, 50 markets...
+[09:15:54] DataVo [DataVo.Core net10.0]: measuring 50,000 complex JOIN+GROUP BY insert+read iterations...
+[09:15:54] DataVo [DataVo.Core net10.0]: 10,000/50,000 iterations, elapsed 0.1s
+[09:15:54] DataVo [DataVo.Core net10.0]: 20,000/50,000 iterations, elapsed 0.2s
+[09:15:54] DataVo [DataVo.Core net10.0]: 30,000/50,000 iterations, elapsed 0.3s
+[09:15:54] DataVo [DataVo.Core net10.0]: 40,000/50,000 iterations, elapsed 0.4s
+[09:15:54] DataVo [DataVo.Core net10.0]: 50,000/50,000 iterations, elapsed 0.5s
+[09:15:54] DuckDB: preloading 10,000 orders, 1,000 accounts, 50 markets...
+[09:16:00] DuckDB: measuring 50,000 complex JOIN+GROUP BY insert+read iterations...
+[09:16:24] DuckDB: 10,000/50,000 iterations, elapsed 24.6s
+[09:16:50] DuckDB: 20,000/50,000 iterations, elapsed 49.9s
+[09:17:16] DuckDB: 30,000/50,000 iterations, elapsed 76.3s
+[09:17:44] DuckDB: 40,000/50,000 iterations, elapsed 104.8s
+[09:18:14] DuckDB: 50,000/50,000 iterations, elapsed 134.4s
+[09:18:14] SQLite: preloading 10,000 orders, 1,000 accounts, 50 markets...
+[09:18:14] SQLite: measuring 50,000 complex JOIN+GROUP BY insert+read iterations...
+[09:18:35] SQLite: 10,000/50,000 iterations, elapsed 20.5s
+[09:19:09] SQLite: 20,000/50,000 iterations, elapsed 54.8s
+[09:19:58] SQLite: 30,000/50,000 iterations, elapsed 103.6s
+[09:21:05] SQLite: 40,000/50,000 iterations, elapsed 171.1s
+[09:22:24] SQLite: 50,000/50,000 iterations, elapsed 249.8s
+| Engine Name | Total Execution Time (ms) | P50 Latency (ms) | P99 Latency (ms) | Total GC Allocated (MB) |
+|---|---:|---:|---:|---:|
+| DataVo [DataVo.Core net10.0] | 506.016 | 0.008100 | 0.019400 | 106.627 |
+| DuckDB | 134356.045 | 2.622800 | 3.896800 | 131.237 |
+| SQLite | 249796.150 | 4.869300 | 9.711700 | 115.605 |
+
+========================================
+SCENARIO: flat-crud
+========================================
+[09:22:24] DataVo [DataVo.Core net10.0]: flat CRUD — inserting 50,000 records then 50,000 point lookups...
+[09:22:24] DataVo [DataVo.Core net10.0]: inserted 10,000/50,000, elapsed 0.0s
+[09:22:24] DataVo [DataVo.Core net10.0]: inserted 20,000/50,000, elapsed 0.0s
+[09:22:24] DataVo [DataVo.Core net10.0]: inserted 30,000/50,000, elapsed 0.0s
+[09:22:24] DataVo [DataVo.Core net10.0]: inserted 40,000/50,000, elapsed 0.0s
+[09:22:24] DataVo [DataVo.Core net10.0]: inserted 50,000/50,000, elapsed 0.0s
+[09:22:24] DataVo [DataVo.Core net10.0]: insert phase complete in 0.1s; starting 50,000 lookups...
+[09:22:24] DataVo [DataVo.Core net10.0]: 10,000/50,000 lookups, elapsed 0.1s
+[09:22:24] DataVo [DataVo.Core net10.0]: 20,000/50,000 lookups, elapsed 0.1s
+[09:22:24] DataVo [DataVo.Core net10.0]: 30,000/50,000 lookups, elapsed 0.1s
+[09:22:24] DataVo [DataVo.Core net10.0]: 40,000/50,000 lookups, elapsed 0.2s
+[09:22:24] DataVo [DataVo.Core net10.0]: 50,000/50,000 lookups, elapsed 0.2s
+[09:22:24] LiteDB: flat CRUD — inserting 50,000 records then 50,000 point lookups...
+[09:22:25] LiteDB: inserted 10,000/50,000, elapsed 0.4s
+[09:22:25] LiteDB: inserted 20,000/50,000, elapsed 0.7s
+[09:22:25] LiteDB: inserted 30,000/50,000, elapsed 0.8s
+[09:22:25] LiteDB: inserted 40,000/50,000, elapsed 0.8s
+[09:22:25] LiteDB: inserted 50,000/50,000, elapsed 0.9s
+[09:22:25] LiteDB: insert phase complete in 0.9s; starting 50,000 lookups...
+[09:22:26] LiteDB: 10,000/50,000 lookups, elapsed 1.7s
+[09:22:27] LiteDB: 20,000/50,000 lookups, elapsed 2.3s
+[09:22:27] LiteDB: 30,000/50,000 lookups, elapsed 2.5s
+[09:22:27] LiteDB: 40,000/50,000 lookups, elapsed 2.7s
+[09:22:27] LiteDB: 50,000/50,000 lookups, elapsed 2.8s
+[09:22:27] SQLite: flat CRUD — inserting 50,000 records then 50,000 point lookups...
+[09:22:27] SQLite: inserted 10,000/50,000, elapsed 0.0s
+[09:22:28] SQLite: inserted 20,000/50,000, elapsed 0.1s
+[09:22:28] SQLite: inserted 30,000/50,000, elapsed 0.1s
+[09:22:28] SQLite: inserted 40,000/50,000, elapsed 0.1s
+[09:22:28] SQLite: inserted 50,000/50,000, elapsed 0.2s
+[09:22:28] SQLite: insert phase complete in 0.2s; starting 50,000 lookups...
+[09:22:28] SQLite: 10,000/50,000 lookups, elapsed 0.2s
+[09:22:28] SQLite: 20,000/50,000 lookups, elapsed 0.2s
+[09:22:28] SQLite: 30,000/50,000 lookups, elapsed 0.3s
+[09:22:28] SQLite: 40,000/50,000 lookups, elapsed 0.3s
+[09:22:28] SQLite: 50,000/50,000 lookups, elapsed 0.3s
+| Engine Name | Total Execution Time (ms) | P50 Latency (ms) | P99 Latency (ms) | Insert GC Allocated (MB) | Lookup GC Allocated (MB) | Total GC Allocated (MB) |
+|---|---:|---:|---:|---:|---:|---:|
+| DataVo [DataVo.Core net10.0] | 164.159 | 0.001300 | 0.002300 | 20.641 | 2.290 | 22.931 |
+| LiteDB | 2845.046 | 0.021800 | 0.113400 | 636.989 | 1833.407 | 2470.397 |
+| SQLite | 311.650 | 0.002900 | 0.004800 | 31.285 | 30.824 | 62.109 |
+
+========================================
+SCENARIO: disk-crud-wal
+========================================
+[09:22:28] DataVo (LSM Production) [DataVo.Core net10.0]: disk CRUD (WAL) — inserting 50,000 records then 50,000 durable point updates...
+[09:22:28] DataVo (LSM Production) [DataVo.Core net10.0]: inserted 10,000/50,000, elapsed 0.0s
+[09:22:28] DataVo (LSM Production) [DataVo.Core net10.0]: inserted 20,000/50,000, elapsed 0.0s
+[09:22:28] DataVo (LSM Production) [DataVo.Core net10.0]: inserted 30,000/50,000, elapsed 0.0s
+[09:22:28] DataVo (LSM Production) [DataVo.Core net10.0]: inserted 40,000/50,000, elapsed 0.0s
+[09:22:28] DataVo (LSM Production) [DataVo.Core net10.0]: inserted 50,000/50,000, elapsed 0.0s
+[09:22:28] DataVo (LSM Production) [DataVo.Core net10.0]: insert phase complete in 0.25s; starting 50,000 point updates...
+[09:22:55] DataVo (LSM Production) [DataVo.Core net10.0]: 10,000/50,000 updates, elapsed 26.4s
+[09:23:21] DataVo (LSM Production) [DataVo.Core net10.0]: 20,000/50,000 updates, elapsed 52.5s
+[09:23:47] DataVo (LSM Production) [DataVo.Core net10.0]: 30,000/50,000 updates, elapsed 78.6s
+[09:24:12] DataVo (LSM Production) [DataVo.Core net10.0]: 40,000/50,000 updates, elapsed 104.2s
+[09:24:38] DataVo (LSM Production) [DataVo.Core net10.0]: 50,000/50,000 updates, elapsed 130.3s
+[09:24:38] DataVo (LSM Production) [DataVo.Core net10.0]: insert 0.25s | update 130.05s | update p50 2.4168ms p99 5.7209ms
+[09:24:38] DataVo (LSM Production) [DataVo.Core net10.0]: UPDATE alloc 45.94 MB total = 963.4 B/op | UPDATE cpu 2,601.05 us/op | insert alloc 27.79 MB
+[09:24:39] DataVo (LSM Relaxed) [DataVo.Core net10.0]: disk CRUD (WAL) — inserting 50,000 records then 50,000 durable point updates...
+[09:24:39] DataVo (LSM Relaxed) [DataVo.Core net10.0]: inserted 10,000/50,000, elapsed 0.0s
+[09:24:39] DataVo (LSM Relaxed) [DataVo.Core net10.0]: inserted 20,000/50,000, elapsed 0.0s
+[09:24:39] DataVo (LSM Relaxed) [DataVo.Core net10.0]: inserted 30,000/50,000, elapsed 0.0s
+[09:24:39] DataVo (LSM Relaxed) [DataVo.Core net10.0]: inserted 40,000/50,000, elapsed 0.0s
+[09:24:39] DataVo (LSM Relaxed) [DataVo.Core net10.0]: inserted 50,000/50,000, elapsed 0.0s
+[09:24:39] DataVo (LSM Relaxed) [DataVo.Core net10.0]: insert phase complete in 0.07s; starting 50,000 point updates...
+[09:24:39] DataVo (LSM Relaxed) [DataVo.Core net10.0]: 10,000/50,000 updates, elapsed 0.4s
+[09:24:39] DataVo (LSM Relaxed) [DataVo.Core net10.0]: 20,000/50,000 updates, elapsed 0.7s
+[09:24:40] DataVo (LSM Relaxed) [DataVo.Core net10.0]: 30,000/50,000 updates, elapsed 1.0s
+[09:24:40] DataVo (LSM Relaxed) [DataVo.Core net10.0]: 40,000/50,000 updates, elapsed 1.3s
+[09:24:40] DataVo (LSM Relaxed) [DataVo.Core net10.0]: 50,000/50,000 updates, elapsed 1.5s
+[09:24:40] DataVo (LSM Relaxed) [DataVo.Core net10.0]: insert 0.07s | update 1.47s | update p50 0.0268ms p99 0.0634ms
+[09:24:40] DataVo (LSM Relaxed) [DataVo.Core net10.0]: UPDATE alloc 36.63 MB total = 768.2 B/op | UPDATE cpu 29.44 us/op | insert alloc 23.79 MB
+[09:24:40] SQLite (WAL,normal): disk CRUD (WAL) — inserting 50,000 records then 50,000 durable point updates...
+[09:24:40] SQLite (WAL,normal): inserted 10,000/50,000, elapsed 0.0s
+[09:24:40] SQLite (WAL,normal): inserted 20,000/50,000, elapsed 0.1s
+[09:24:40] SQLite (WAL,normal): inserted 30,000/50,000, elapsed 0.1s
+[09:24:41] SQLite (WAL,normal): inserted 40,000/50,000, elapsed 0.1s
+[09:24:41] SQLite (WAL,normal): inserted 50,000/50,000, elapsed 0.2s
+[09:24:41] SQLite (WAL,normal): insert phase complete in 0.18s; starting 50,000 point updates...
+[09:24:41] SQLite (WAL,normal): 10,000/50,000 updates, elapsed 0.9s
+[09:24:42] SQLite (WAL,normal): 20,000/50,000 updates, elapsed 1.5s
+[09:24:42] SQLite (WAL,normal): 30,000/50,000 updates, elapsed 2.1s
+[09:24:43] SQLite (WAL,normal): 40,000/50,000 updates, elapsed 2.7s
+[09:24:44] SQLite (WAL,normal): 50,000/50,000 updates, elapsed 3.3s
+[09:24:44] SQLite (WAL,normal): insert 0.18s | update 3.08s | update p50 0.0137ms p99 0.0465ms
+[09:24:44] SQLite (WAL,normal): UPDATE alloc 24.67 MB total = 517.4 B/op | UPDATE cpu 61.54 us/op | insert alloc 31.29 MB
+[09:24:44] SQLite (WAL,full): disk CRUD (WAL) — inserting 50,000 records then 50,000 durable point updates...
+[09:24:44] SQLite (WAL,full): inserted 10,000/50,000, elapsed 0.0s
+[09:24:44] SQLite (WAL,full): inserted 20,000/50,000, elapsed 0.0s
+[09:24:44] SQLite (WAL,full): inserted 30,000/50,000, elapsed 0.1s
+[09:24:44] SQLite (WAL,full): inserted 40,000/50,000, elapsed 0.1s
+[09:24:44] SQLite (WAL,full): inserted 50,000/50,000, elapsed 0.1s
+[09:24:44] SQLite (WAL,full): insert phase complete in 0.11s; starting 50,000 point updates...
+[09:25:13] SQLite (WAL,full): 10,000/50,000 updates, elapsed 29.3s
+[09:25:41] SQLite (WAL,full): 20,000/50,000 updates, elapsed 56.9s
+[09:26:09] SQLite (WAL,full): 30,000/50,000 updates, elapsed 85.4s
+[09:26:37] SQLite (WAL,full): 40,000/50,000 updates, elapsed 112.8s
+[09:27:04] SQLite (WAL,full): 50,000/50,000 updates, elapsed 140.8s
+[09:27:04] SQLite (WAL,full): insert 0.11s | update 140.66s | update p50 2.5144ms p99 6.4867ms
+[09:27:04] SQLite (WAL,full): UPDATE alloc 24.42 MB total = 512.1 B/op | UPDATE cpu 2,813.13 us/op | insert alloc 29.00 MB
+| Engine Name | Total Execution Time (ms) | P50 Latency (ms) | P99 Latency (ms) | Total GC Allocated (MB) |
+|---|---:|---:|---:|---:|
+| DataVo (LSM Production) [DataVo.Core net10.0] | 130298.783 | 2.416800 | 5.720900 | 73.735 |
+| DataVo (LSM Relaxed) [DataVo.Core net10.0] | 1539.709 | 0.026800 | 0.063400 | 60.419 |
+| SQLite (WAL,normal) | 3258.143 | 0.013700 | 0.046500 | 55.958 |
+| SQLite (WAL,full) | 140766.810 | 2.514400 | 6.486700 | 53.414 |
+
+========================================
+SCENARIO: deep-document
+========================================
+[09:27:05] DataVo [DataVo.Core net10.0]: deep document — saving 5,000 nested orders (5 items, 2 addresses each) then loading 5,000...
+[09:27:05] DataVo [DataVo.Core net10.0]: saved 5,000/5,000, elapsed 0.0s
+[09:27:05] DataVo [DataVo.Core net10.0]: save phase complete in 0.1s; starting 5,000 loads...
+[09:27:05] DataVo [DataVo.Core net10.0]: 5,000/5,000 loads, elapsed 0.2s
+[09:27:05] LiteDB: deep document — saving 5,000 nested orders (5 items, 2 addresses each) then loading 5,000...
+[09:27:05] LiteDB: saved 5,000/5,000, elapsed 0.4s
+[09:27:05] LiteDB: save phase complete in 0.4s; starting 5,000 loads...
+[09:27:06] LiteDB: 5,000/5,000 loads, elapsed 1.3s
+[09:27:06] SQLite: deep document — saving 5,000 nested orders (5 items, 2 addresses each) then loading 5,000...
+[09:27:07] SQLite: saved 5,000/5,000, elapsed 0.2s
+[09:27:07] SQLite: save phase complete in 0.2s; starting 5,000 loads...
+[09:27:07] SQLite: 5,000/5,000 loads, elapsed 0.3s
+| Engine Name | Total Execution Time (ms) | P50 Latency (ms) | P99 Latency (ms) | Total GC Allocated (MB) |
+|---|---:|---:|---:|---:|
+| DataVo [DataVo.Core net10.0] | 183.582 | 0.010800 | 0.016500 | 24.964 |
+| LiteDB | 1283.018 | 0.156800 | 0.264800 | 332.252 |
+| SQLite | 334.437 | 0.017200 | 0.038700 | 46.048 |
+
+========================================
+SCENARIO: concurrent-ops
+========================================
+[09:27:07] DataVo [DataVo.Core net10.0]: concurrent ops — preloading 100,000 records, then 8 readers + 2 writers for 5s...
+[09:27:17] DataVo [DataVo.Core net10.0]: 21,911,755 reads + 0 writes, 2,368,875 OPS
+[09:27:17] SQLite: concurrent ops — preloading 100,000 records, then 8 readers + 2 writers for 5s...
+[09:27:24] SQLite: 2,815,518 reads + 1 writes, 454,083 OPS
+| Engine Name | Total Execution Time (ms) | OPS | Read P99 Latency (ms) | Write P99 Latency (ms) | Total GC Allocated (MB) |
+|---|---:|---:|---:|---:|---:|
+| DataVo [DataVo.Core net10.0] | 9249.858 | 2368874.718 | 0.005200 | 0.000000 | 1746.118 |
+| SQLite | 6200.449 | 454083.105 | 0.069500 | 6196.903500 | 1606.383 |
+
+========================================
+SCENARIO: vector-search
+========================================
+[09:27:24] DataVo [DataVo.Core net10.0]: vector search — inserting 10,000 x 1536-dim vectors then 100 top-10 queries...
+[09:27:25] DataVo [DataVo.Core net10.0]: inserted 10,000/10,000, elapsed 0.0s
+[09:27:32] DataVo [DataVo.Core net10.0]: insert phase complete in 7.0s; starting 100 top-10 queries...
+[09:27:32] DataVo [DataVo.Core net10.0]: 100/100 queries, elapsed 7.3s
+[09:27:32] DataVo-HNSW-Diversity [DataVo.Core net10.0]: vector search — inserting 10,000 x 1536-dim vectors then 100 top-10 queries...
+[09:27:32] DataVo-HNSW-Diversity [DataVo.Core net10.0]: inserted 10,000/10,000, elapsed 0.0s
+[09:27:43] DataVo-HNSW-Diversity [DataVo.Core net10.0]: insert phase complete in 10.2s; starting 100 top-10 queries...
+[09:27:43] DataVo-HNSW-Diversity [DataVo.Core net10.0]: 100/100 queries, elapsed 10.6s
+[09:27:43] DataVo-HNSW-Diversity [DataVo.Core net10.0]: HNSW build diagnostics — searchLayerCalls=15869, searchLayerNeighborVisits=28480660, edgeAddCalls=410949, edgeDuplicateSkips=0, edgeAppends=1417, fullNeighborPrunes=14905, selectNeighborsCalls=30674, selectNeighborCandidates=1401893, diversityComparisons=20426328, diversityOcclusions=619193, incrementalDiversityPrunes=394627, nonDiverseReplacementScans=0, nonDiverseReplacements=0, distanceToOrdinalCalls=20747068, distanceBetweenOrdinalCalls=33485856
+[09:27:43] DataVo-Flat [DataVo.Core net10.0]: vector search — inserting 10,000 x 1536-dim vectors then 100 top-10 queries...
+[09:27:43] DataVo-Flat [DataVo.Core net10.0]: inserted 10,000/10,000, elapsed 0.0s
+[09:27:43] DataVo-Flat [DataVo.Core net10.0]: insert phase complete in 0.2s; starting 100 top-10 queries...
+[09:27:44] DataVo-Flat [DataVo.Core net10.0]: 100/100 queries, elapsed 0.8s
+[09:27:44] LiteDB: vector search — inserting 10,000 x 1536-dim vectors then 100 top-10 queries...
+[09:27:46] LiteDB: inserted 10,000/10,000, elapsed 2.1s
+[09:27:47] LiteDB: insert phase complete in 2.4s; starting 100 top-10 queries...
+[09:30:04] LiteDB: 100/100 queries, elapsed 139.8s
+[09:30:04] SQLite: vector search — inserting 10,000 x 1536-dim vectors then 100 top-10 queries...
+[09:30:05] SQLite: inserted 10,000/10,000, elapsed 0.5s
+[09:30:05] SQLite: insert phase complete in 0.5s; starting 100 top-10 queries...
+[09:30:07] SQLite: 100/100 queries, elapsed 2.7s
+| Engine Name | Total Execution Time (ms) | P50 Latency (ms) | P99 Latency (ms) | Total GC Allocated (MB) |
+|---|---:|---:|---:|---:|
+| DataVo [DataVo.Core net10.0] | 7316.931 | 3.537100 | 4.533100 | 63.120 |
+| DataVo-HNSW-Diversity [DataVo.Core net10.0] | 10565.504 | 3.398000 | 3.575200 | 61.836 |
+| DataVo-Flat [DataVo.Core net10.0] | 812.316 | 6.131700 | 13.575400 | 61.656 |
+| LiteDB | 139845.370 | 1369.576500 | 1416.289000 | 208915.394 |
+| SQLite | 2680.519 | 22.084700 | 24.581300 | 63.227 |
+
+========================================
+SCENARIO: thread-scaling
+========================================
+[09:30:07] DataVo (LSM Production) [DataVo.Core net10.0]: thread scaling — preloading 100,000 records, then 100,000 reads + 10,000 updates at 1..32 threads...
+[09:30:34] DataVo (LSM Production) [DataVo.Core net10.0]: 1 threads completed 110,000 ops in 26,791.4ms (4,106 OPS)
+[09:31:01] DataVo (LSM Production) [DataVo.Core net10.0]: 2 threads completed 110,000 ops in 26,822.7ms (4,101 OPS)
+[09:31:25] DataVo (LSM Production) [DataVo.Core net10.0]: 4 threads completed 110,000 ops in 23,549.7ms (4,671 OPS)
+[09:31:48] DataVo (LSM Production) [DataVo.Core net10.0]: 8 threads completed 110,000 ops in 22,864.2ms (4,811 OPS)
+[09:32:11] DataVo (LSM Production) [DataVo.Core net10.0]: 16 threads completed 110,000 ops in 22,993.0ms (4,784 OPS)
+[09:32:34] DataVo (LSM Production) [DataVo.Core net10.0]: 32 threads completed 110,000 ops in 23,067.1ms (4,769 OPS)
+[09:32:34] DataVo (LSM Relaxed) [DataVo.Core net10.0]: thread scaling — preloading 100,000 records, then 100,000 reads + 10,000 updates at 1..32 threads...
+[09:32:34] DataVo (LSM Relaxed) [DataVo.Core net10.0]: 1 threads completed 110,000 ops in 399.3ms (275,452 OPS)
+[09:32:35] DataVo (LSM Relaxed) [DataVo.Core net10.0]: 2 threads completed 110,000 ops in 653.8ms (168,248 OPS)
+[09:32:36] DataVo (LSM Relaxed) [DataVo.Core net10.0]: 4 threads completed 110,000 ops in 654.6ms (168,042 OPS)
+[09:32:36] DataVo (LSM Relaxed) [DataVo.Core net10.0]: 8 threads completed 110,000 ops in 660.9ms (166,447 OPS)
+[09:32:37] DataVo (LSM Relaxed) [DataVo.Core net10.0]: 16 threads completed 110,000 ops in 667.8ms (164,726 OPS)
+[09:32:38] DataVo (LSM Relaxed) [DataVo.Core net10.0]: 32 threads completed 110,000 ops in 671.3ms (163,871 OPS)
+[09:32:38] SQLite (WAL,normal): thread scaling — preloading 100,000 records, then 100,000 reads + 10,000 updates at 1..32 threads...
+[09:32:43] SQLite (WAL,normal): 1 threads completed 110,000 ops in 4,354.4ms (25,262 OPS)
+[09:32:44] SQLite (WAL,normal): 2 threads completed 110,000 ops in 1,071.5ms (102,658 OPS)
+[09:32:45] SQLite (WAL,normal): 4 threads completed 110,000 ops in 1,370.9ms (80,240 OPS)
+[09:32:46] SQLite (WAL,normal): 8 threads completed 110,000 ops in 937.3ms (117,363 OPS)
+[09:32:47] SQLite (WAL,normal): 16 threads completed 110,000 ops in 996.8ms (110,355 OPS)
+[09:32:48] SQLite (WAL,normal): 32 threads completed 110,000 ops in 1,114.6ms (98,694 OPS)
+[09:32:48] LiteDB: thread scaling — preloading 100,000 records, then 100,000 reads + 10,000 updates at 1..32 threads...
+[09:33:00] LiteDB: 1 threads completed 110,000 ops in 10,559.0ms (10,418 OPS)
+[09:33:12] LiteDB: 2 threads completed 110,000 ops in 12,102.7ms (9,089 OPS)
+[09:33:24] LiteDB: 4 threads completed 110,000 ops in 11,923.4ms (9,226 OPS)
+[09:33:36] LiteDB: 8 threads completed 110,000 ops in 11,952.8ms (9,203 OPS)
+[09:33:48] LiteDB: 16 threads completed 110,000 ops in 11,956.9ms (9,200 OPS)
+[09:34:00] LiteDB: 32 threads completed 110,000 ops in 11,837.8ms (9,292 OPS)
+| Engine Name | Total Execution Time (ms) | OPS | Read P99 Latency (ms) | Write P99 Latency (ms) | Total GC Allocated (MB) |
+|---|---:|---:|---:|---:|---:|
+| DataVo (LSM Production) [DataVo.Core net10.0] (1 threads) | 26791.409 | 4105.794 | n/a | n/a | 33.951 |
+| DataVo (LSM Production) [DataVo.Core net10.0] (2 threads) | 26822.692 | 4101.005 | n/a | n/a | 33.917 |
+| DataVo (LSM Production) [DataVo.Core net10.0] (4 threads) | 23549.670 | 4670.978 | n/a | n/a | 34.847 |
+| DataVo (LSM Production) [DataVo.Core net10.0] (8 threads) | 22864.208 | 4811.013 | n/a | n/a | 33.860 |
+| DataVo (LSM Production) [DataVo.Core net10.0] (16 threads) | 22993.007 | 4784.063 | n/a | n/a | 34.902 |
+| DataVo (LSM Production) [DataVo.Core net10.0] (32 threads) | 23067.099 | 4768.697 | n/a | n/a | 33.920 |
+| DataVo (LSM Relaxed) [DataVo.Core net10.0] (1 threads) | 399.344 | 275452.086 | n/a | n/a | 32.428 |
+| DataVo (LSM Relaxed) [DataVo.Core net10.0] (2 threads) | 653.798 | 168247.608 | n/a | n/a | 32.428 |
+| DataVo (LSM Relaxed) [DataVo.Core net10.0] (4 threads) | 654.599 | 168041.860 | n/a | n/a | 32.429 |
+| DataVo (LSM Relaxed) [DataVo.Core net10.0] (8 threads) | 660.869 | 166447.460 | n/a | n/a | 32.431 |
+| DataVo (LSM Relaxed) [DataVo.Core net10.0] (16 threads) | 667.776 | 164725.970 | n/a | n/a | 32.434 |
+| DataVo (LSM Relaxed) [DataVo.Core net10.0] (32 threads) | 671.258 | 163871.466 | n/a | n/a | 32.445 |
+| SQLite (WAL,normal) (1 threads) | 4354.413 | 25261.729 | n/a | n/a | 62.036 |
+| SQLite (WAL,normal) (2 threads) | 1071.522 | 102657.744 | n/a | n/a | 62.036 |
+| SQLite (WAL,normal) (4 threads) | 1370.884 | 80240.201 | n/a | n/a | 62.042 |
+| SQLite (WAL,normal) (8 threads) | 937.264 | 117362.865 | n/a | n/a | 62.054 |
+| SQLite (WAL,normal) (16 threads) | 996.779 | 110355.433 | n/a | n/a | 62.076 |
+| SQLite (WAL,normal) (32 threads) | 1114.551 | 98694.425 | n/a | n/a | 62.037 |
+| LiteDB (1 threads) | 10558.982 | 10417.671 | n/a | n/a | 4363.360 |
+| LiteDB (2 threads) | 12102.729 | 9088.859 | n/a | n/a | 4350.725 |
+| LiteDB (4 threads) | 11923.380 | 9225.572 | n/a | n/a | 4350.939 |
+| LiteDB (8 threads) | 11952.808 | 9202.858 | n/a | n/a | 4350.498 |
+| LiteDB (16 threads) | 11956.883 | 9199.722 | n/a | n/a | 4350.915 |
+| LiteDB (32 threads) | 11837.765 | 9292.295 | n/a | n/a | 4350.987 |
+
+========================================
+SCENARIO: ycsb-mixed
+========================================
+[09:34:01] DataVo (LSM Production) [DataVo.Core net10.0]: YCSB mixed — preloading 100,000, then 80,000 reads + 20,000 updates across 4 threads...
+[09:34:49] DataVo (LSM Production) [DataVo.Core net10.0]: YCSB completed in 47,773.4ms (2,093 OPS), read p99 0.0058ms write p99 31.8806ms
+[09:34:49] DataVo (LSM Relaxed) [DataVo.Core net10.0]: YCSB mixed — preloading 100,000, then 80,000 reads + 20,000 updates across 4 threads...
+[09:34:51] DataVo (LSM Relaxed) [DataVo.Core net10.0]: YCSB completed in 1,287.5ms (77,669 OPS), read p99 0.0036ms write p99 1.1022ms
+[09:34:51] SQLite (WAL,normal): YCSB mixed — preloading 100,000, then 80,000 reads + 20,000 updates across 4 threads...
+[09:34:54] SQLite (WAL,normal): YCSB completed in 2,756.7ms (36,275 OPS), read p99 0.0511ms write p99 2.0690ms
+[09:34:54] LiteDB: YCSB mixed — preloading 100,000, then 80,000 reads + 20,000 updates across 4 threads...
+[09:35:14] LiteDB: YCSB completed in 19,120.1ms (5,230 OPS), read p99 2.0763ms write p99 6.1801ms
+| Engine Name | Total Execution Time (ms) | OPS | Read P99 Latency (ms) | Write P99 Latency (ms) | Total GC Allocated (MB) |
+|---|---:|---:|---:|---:|---:|
+| DataVo (LSM Production) [DataVo.Core net10.0] | 47773.427 | 2093.214 | 0.005800 | 31.880600 | 37.686 |
+| DataVo (LSM Relaxed) [DataVo.Core net10.0] | 1287.508 | 77669.420 | 0.003600 | 1.102200 | 34.745 |
+| SQLite (WAL,normal) | 2756.731 | 36274.855 | 0.051100 | 2.069000 | 55.517 |
+| LiteDB | 19120.075 | 5230.105 | 2.076300 | 6.180100 | 4272.517 |
+
+========================================
+SCENARIO: space-and-recovery
+========================================
+[09:35:15] DataVo (LSM Production) [DataVo.Core net10.0]: space/recovery — inserting 1,000,000 records, measuring footprint and cold-open RTO...
+[09:35:17] DataVo (LSM Production) [DataVo.Core net10.0]: insert 1,595.3ms | size 28.15 MB | recovery 14.6ms | first read after recovery 12.9ms
+[09:35:17] DataVo (LSM Relaxed) [DataVo.Core net10.0]: space/recovery — inserting 1,000,000 records, measuring footprint and cold-open RTO...
+[09:35:18] DataVo (LSM Relaxed) [DataVo.Core net10.0]: insert 1,029.8ms | size 28.15 MB | recovery 2.9ms | first read after recovery 0.0ms
+[09:35:18] SQLite (WAL,normal): space/recovery — inserting 1,000,000 records, measuring footprint and cold-open RTO...
+[09:35:20] SQLite (WAL,normal): insert 1,971.2ms | size 29.08 MB | recovery 1.5ms | first read after recovery 5.1ms
+[09:35:20] LiteDB: space/recovery — inserting 1,000,000 records, measuring footprint and cold-open RTO...
+[09:35:28] LiteDB: insert 7,322.8ms | size 154.46 MB | recovery 1.9ms | first read after recovery 34.7ms
+| Engine Name | Insert Execution Time (ms) | Disk Size (MB) | Recovery Time (ms) | Total GC Allocated (MB) |
+|---|---:|---:|---:|---:|
+| DataVo (LSM Production) [DataVo.Core net10.0] | 1595.322 | 28.155 | 14.603 | 442.733 |
+| DataVo (LSM Relaxed) [DataVo.Core net10.0] | 1029.839 | 28.155 | 2.918 | 343.088 |
+| SQLite (WAL,normal) | 1971.242 | 29.082 | 1.485 | 629.114 |
+| LiteDB | 7322.779 | 154.461 | 1.930 | 15106.349 |

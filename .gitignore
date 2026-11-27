@@ -110,6 +110,8 @@ StyleCopReport.xml
 *.tmp_proj
 *_wpftmp.csproj
 *.log
+# Benchmark run outputs are checked-in inputs for docs/scripts/*-plots.py and cited by the docs.
+!docs/public/benchmarks/**/*.log
 *.vspscc
 *.vssscc
 .builds

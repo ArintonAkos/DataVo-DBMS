@@ -1,0 +1,138 @@
+[22:06:58] sql-matrix: generating 1 000 000 orders and computing the oracle's answers...
+[22:07:03] DataVo (LSM) [DataVo.Core net10.0]: loaded 1 000 000 orders in 3 564 ms
+[22:07:05] DataVo (LSM) [DataVo.Core net10.0]: J1 p50 70.16 ms p99 82.86 ms alloc 40.5 KB/call
+[22:07:05] DataVo (LSM) [DataVo.Core net10.0]: J2 p50 21.92 ms p99 23.43 ms alloc 1.0 MB/call
+[22:07:06] DataVo (LSM) [DataVo.Core net10.0]: J3 p50 16.10 ms p99 19.98 ms alloc 5.2 MB/call
+[22:07:06] DataVo (LSM) [DataVo.Core net10.0]: J4 p50 68.29 ms p99 78.91 ms alloc 34.1 KB/call
+[22:07:07] DataVo (LSM) [DataVo.Core net10.0]: J5 p50 39.07 ms p99 39.34 ms alloc 30.9 KB/call
+[22:07:09] DataVo (LSM) [DataVo.Core net10.0]: J6 p50 130.33 ms p99 140.66 ms alloc 21.3 MB/call
+[22:07:09] DataVo (LSM) [DataVo.Core net10.0]: J7 p50 6.70 ms p99 9.62 ms alloc 28.9 KB/call
+[22:07:09] DataVo (LSM) [DataVo.Core net10.0]: W1 p50 341.4 µs p99 658.0 µs alloc 329.1 KB/call
+[22:07:10] DataVo (LSM) [DataVo.Core net10.0]: W2 p50 30.46 ms p99 33.38 ms alloc 318.2 KB/call
+[22:07:11] DataVo (LSM) [DataVo.Core net10.0]: W3 p50 64.01 ms p99 66.05 ms alloc 22.7 KB/call
+[22:07:12] DataVo (LSM) [DataVo.Core net10.0]: W4 p50 74.19 ms p99 78.13 ms alloc 23.7 KB/call
+[22:07:13] DataVo (LSM) [DataVo.Core net10.0]: W5 p50 47.58 ms p99 48.05 ms alloc 16.4 KB/call
+[22:07:14] DataVo (LSM) [DataVo.Core net10.0]: W6 p50 68.71 ms p99 70.30 ms alloc 16.4 KB/call
+[22:07:14] DataVo (LSM) [DataVo.Core net10.0]: R1 p50 13.6 µs p99 20.5 µs alloc 31.1 KB/call
+[22:07:14] DataVo (LSM) [DataVo.Core net10.0]: R2 p50 12.9 µs p99 19.3 µs alloc 31.1 KB/call
+[22:07:14] DataVo (LSM) [DataVo.Core net10.0]: R3 p50 1.01 ms p99 12.00 ms alloc 3.0 MB/call
+[22:07:15] DataVo (LSM) [DataVo.Core net10.0]: R4 p50 990.9 µs p99 11.89 ms alloc 3.0 MB/call
+[22:07:16] DataVo (LSM) [DataVo.Core net10.0]: G1 p50 50.54 ms p99 50.74 ms alloc 26.7 KB/call
+[22:07:16] DataVo (LSM) [DataVo.Core net10.0]: G2 p50 63.38 ms p99 65.94 ms alloc 2.1 MB/call
+[22:07:17] DataVo (LSM) [DataVo.Core net10.0]: G3 p50 44.17 ms p99 48.06 ms alloc 928.7 KB/call
+[22:07:18] DataVo (LSM) [DataVo.Core net10.0]: C1 p50 53.50 ms p99 56.15 ms alloc 16.5 KB/call
+[22:07:19] DataVo (LSM) [DataVo.Core net10.0]: C2 p50 67.19 ms p99 68.07 ms alloc 16.9 KB/call
+[22:07:20] DataVo (LSM) [DataVo.Core net10.0]: C3 p50 65.13 ms p99 68.86 ms alloc 16.9 KB/call
+[22:07:21] DataVo (LSM) [DataVo.Core net10.0]: C4 p50 86.69 ms p99 89.75 ms alloc 24.3 KB/call
+[22:07:21] DataVo (LSM) [DataVo.Core net10.0]: C5 p50 40.05 ms p99 40.89 ms alloc 17.6 KB/call
+[22:07:22] DataVo (LSM) [DataVo.Core net10.0]: C6 p50 64.08 ms p99 64.88 ms alloc 17.5 KB/call
+[22:07:23] DataVo (LSM) [DataVo.Core net10.0]: C7 p50 63.06 ms p99 67.21 ms alloc 2.1 MB/call
+[22:07:24] DataVo (LSM) [DataVo.Core net10.0]: C8 p50 52.98 ms p99 53.59 ms alloc 48.6 KB/call
+[22:07:24] DataVo (LSM) [DataVo.Core net10.0]: columnar index created in 317 ms
+[22:07:24] DataVo (LSM) [DataVo.Core net10.0]: C1+columnar p50 3.18 ms p99 3.28 ms alloc 16.3 KB/call [pushed]
+[22:07:24] DataVo (LSM) [DataVo.Core net10.0]: C2+columnar p50 3.44 ms p99 3.51 ms alloc 16.6 KB/call [pushed]
+[22:07:25] DataVo (LSM) [DataVo.Core net10.0]: C3+columnar p50 65.89 ms p99 67.77 ms alloc 16.9 KB/call [row scan]
+[22:07:25] DataVo (LSM) [DataVo.Core net10.0]: C4+columnar p50 11.91 ms p99 11.99 ms alloc 23.8 KB/call [pushed]
+[22:07:26] DataVo (LSM) [DataVo.Core net10.0]: C5+columnar p50 39.94 ms p99 40.90 ms alloc 17.6 KB/call [row scan]
+[22:07:26] DataVo (LSM) [DataVo.Core net10.0]: C6+columnar p50 4.77 ms p99 4.83 ms alloc 17.2 KB/call [pushed]
+[22:07:27] DataVo (LSM) [DataVo.Core net10.0]: C7+columnar p50 63.23 ms p99 74.75 ms alloc 2.1 MB/call [row scan]
+[22:07:28] DataVo (LSM) [DataVo.Core net10.0]: C8+columnar p50 52.89 ms p99 54.45 ms alloc 48.6 KB/call [row scan]
+[22:07:28] DataVo (InMemory) [DataVo.Core net10.0]: loaded 1 000 000 orders in 536 ms
+[22:07:30] DataVo (InMemory) [DataVo.Core net10.0]: J1 p50 90.19 ms p99 96.15 ms alloc 35.7 KB/call
+[22:07:30] DataVo (InMemory) [DataVo.Core net10.0]: J2 p50 10.84 ms p99 11.16 ms alloc 1.0 MB/call
+[22:07:30] DataVo (InMemory) [DataVo.Core net10.0]: J3 p50 12.77 ms p99 15.86 ms alloc 4.7 MB/call
+[22:07:31] DataVo (InMemory) [DataVo.Core net10.0]: J4 p50 93.08 ms p99 93.57 ms alloc 33.0 KB/call
+[22:07:32] DataVo (InMemory) [DataVo.Core net10.0]: J5 p50 81.77 ms p99 89.76 ms alloc 29.6 KB/call
+[22:07:35] DataVo (InMemory) [DataVo.Core net10.0]: J6 p50 195.14 ms p99 209.47 ms alloc 21.3 MB/call
+[22:07:35] DataVo (InMemory) [DataVo.Core net10.0]: J7 p50 6.20 ms p99 7.31 ms alloc 20.6 KB/call
+[22:07:35] DataVo (InMemory) [DataVo.Core net10.0]: W1 p50 183.7 µs p99 479.4 µs alloc 312.7 KB/call
+[22:07:36] DataVo (InMemory) [DataVo.Core net10.0]: W2 p50 66.51 ms p99 69.17 ms alloc 318.2 KB/call
+[22:07:38] DataVo (InMemory) [DataVo.Core net10.0]: W3 p50 76.26 ms p99 77.08 ms alloc 21.6 KB/call
+[22:07:39] DataVo (InMemory) [DataVo.Core net10.0]: W4 p50 84.70 ms p99 89.01 ms alloc 22.7 KB/call
+[22:07:39] DataVo (InMemory) [DataVo.Core net10.0]: W5 p50 33.22 ms p99 34.53 ms alloc 15.4 KB/call
+[22:07:40] DataVo (InMemory) [DataVo.Core net10.0]: W6 p50 41.94 ms p99 42.27 ms alloc 15.4 KB/call
+[22:07:40] DataVo (InMemory) [DataVo.Core net10.0]: R1 p50 22.9 µs p99 45.2 µs alloc 35.1 KB/call
+[22:07:40] DataVo (InMemory) [DataVo.Core net10.0]: R2 p50 23.0 µs p99 31.6 µs alloc 35.1 KB/call
+[22:07:41] DataVo (InMemory) [DataVo.Core net10.0]: R3 p50 2.13 ms p99 15.21 ms alloc 3.4 MB/call
+[22:07:41] DataVo (InMemory) [DataVo.Core net10.0]: R4 p50 1.99 ms p99 13.69 ms alloc 3.4 MB/call
+[22:07:42] DataVo (InMemory) [DataVo.Core net10.0]: G1 p50 66.99 ms p99 67.87 ms alloc 25.7 KB/call
+[22:07:43] DataVo (InMemory) [DataVo.Core net10.0]: G2 p50 51.43 ms p99 54.68 ms alloc 2.1 MB/call
+[22:07:43] DataVo (InMemory) [DataVo.Core net10.0]: G3 p50 16.70 ms p99 22.40 ms alloc 920.2 KB/call
+[22:07:44] DataVo (InMemory) [DataVo.Core net10.0]: C1 p50 47.66 ms p99 48.39 ms alloc 15.5 KB/call
+[22:07:44] DataVo (InMemory) [DataVo.Core net10.0]: C2 p50 46.57 ms p99 48.40 ms alloc 15.9 KB/call
+[22:07:45] DataVo (InMemory) [DataVo.Core net10.0]: C3 p50 50.47 ms p99 51.69 ms alloc 15.9 KB/call
+[22:07:46] DataVo (InMemory) [DataVo.Core net10.0]: C4 p50 69.71 ms p99 71.25 ms alloc 23.3 KB/call
+[22:07:47] DataVo (InMemory) [DataVo.Core net10.0]: C5 p50 45.71 ms p99 47.12 ms alloc 16.6 KB/call
+[22:07:47] DataVo (InMemory) [DataVo.Core net10.0]: C6 p50 57.38 ms p99 58.83 ms alloc 16.5 KB/call
+[22:07:48] DataVo (InMemory) [DataVo.Core net10.0]: C7 p50 51.07 ms p99 54.45 ms alloc 2.1 MB/call
+[22:07:49] DataVo (InMemory) [DataVo.Core net10.0]: C8 p50 46.90 ms p99 47.99 ms alloc 47.6 KB/call
+[22:07:49] DataVo (InMemory) [DataVo.Core net10.0]: columnar index created in 188 ms
+[22:07:49] DataVo (InMemory) [DataVo.Core net10.0]: C1+columnar p50 3.27 ms p99 3.43 ms alloc 15.3 KB/call [pushed]
+[22:07:49] DataVo (InMemory) [DataVo.Core net10.0]: C2+columnar p50 3.73 ms p99 3.84 ms alloc 15.6 KB/call [pushed]
+[22:07:49] DataVo (InMemory) [DataVo.Core net10.0]: C3+columnar p50 3.05 ms p99 3.23 ms alloc 15.7 KB/call [pushed]
+[22:07:49] DataVo (InMemory) [DataVo.Core net10.0]: C4+columnar p50 8.48 ms p99 12.04 ms alloc 22.8 KB/call [pushed]
+[22:07:50] DataVo (InMemory) [DataVo.Core net10.0]: C5+columnar p50 45.92 ms p99 47.62 ms alloc 16.6 KB/call [row scan]
+[22:07:50] DataVo (InMemory) [DataVo.Core net10.0]: C6+columnar p50 496.6 µs p99 666.2 µs alloc 16.2 KB/call [pushed]
+[22:07:51] DataVo (InMemory) [DataVo.Core net10.0]: C7+columnar p50 50.88 ms p99 52.01 ms alloc 2.1 MB/call [row scan]
+[22:07:51] DataVo (InMemory) [DataVo.Core net10.0]: C8+columnar p50 46.71 ms p99 48.04 ms alloc 47.6 KB/call [row scan]
+[22:07:56] SQLite: loaded 1 000 000 orders in 4 952 ms
+[22:08:06] SQLite: J1 p50 721.36 ms p99 739.95 ms alloc 432 B/call
+[22:08:07] SQLite: J2 p50 84.38 ms p99 87.44 ms alloc 696 B/call
+[22:08:08] SQLite: J3 p50 84.04 ms p99 85.24 ms alloc 6.5 KB/call
+[22:08:12] SQLite: J4 p50 237.89 ms p99 238.79 ms alloc 456 B/call
+[22:08:12] SQLite: J5 p50 36.58 ms p99 36.87 ms alloc 408 B/call
+[22:08:22] SQLite: J6 p50 764.43 ms p99 773.73 ms alloc 1.0 KB/call
+[22:08:22] SQLite: J7 p50 15.31 ms p99 15.68 ms alloc 560 B/call
+[22:08:23] SQLite: W1 p50 824.6 µs p99 920.1 µs alloc 48.6 KB/call
+[22:08:24] SQLite: W2 p50 28.65 ms p99 30.86 ms alloc 48.7 KB/call
+[22:08:25] SQLite: W3 p50 61.11 ms p99 62.68 ms alloc 688 B/call
+[22:08:25] SQLite: W4 p50 63.28 ms p99 65.32 ms alloc 816 B/call
+[22:08:26] SQLite: W5 p50 42.23 ms p99 43.38 ms alloc 552 B/call
+[22:08:27] SQLite: W6 p50 50.71 ms p99 51.37 ms alloc 552 B/call
+[22:08:27] SQLite: R1 p50 18.5 µs p99 24.6 µs alloc 5.3 KB/call
+[22:08:27] SQLite: R2 p50 18.2 µs p99 23.5 µs alloc 5.3 KB/call
+[22:08:27] SQLite: R3 p50 1.76 ms p99 1.95 ms alloc 469.4 KB/call
+[22:08:27] SQLite: R4 p50 1.74 ms p99 1.85 ms alloc 469.4 KB/call
+[22:08:31] SQLite: G1 p50 237.49 ms p99 239.25 ms alloc 720 B/call
+[22:08:33] SQLite: G2 p50 209.16 ms p99 224.66 ms alloc 70.7 KB/call
+[22:08:34] SQLite: G3 p50 30.54 ms p99 32.21 ms alloc 5.2 KB/call
+[22:08:34] SQLite: C1 p50 43.66 ms p99 44.12 ms alloc 664 B/call
+[22:08:35] SQLite: C2 p50 36.66 ms p99 37.10 ms alloc 536 B/call
+[22:08:35] SQLite: C3 p50 39.91 ms p99 40.72 ms alloc 536 B/call
+[22:08:36] SQLite: C4 p50 57.38 ms p99 58.92 ms alloc 608 B/call
+[22:08:37] SQLite: C5 p50 42.67 ms p99 43.72 ms alloc 672 B/call
+[22:08:37] SQLite: C6 p50 35.56 ms p99 35.99 ms alloc 536 B/call
+[22:08:40] SQLite: C7 p50 200.16 ms p99 202.23 ms alloc 70.7 KB/call
+[22:08:40] SQLite: C8 p50 41.57 ms p99 42.75 ms alloc 864 B/call
+[22:08:41] DuckDB: loaded 1 000 000 orders in 1 014 ms
+[22:08:42] DuckDB: J1 p50 2.11 ms p99 2.45 ms alloc 1.3 KB/call
+[22:08:42] DuckDB: J2 p50 1.51 ms p99 1.71 ms alloc 1.7 KB/call
+[22:08:42] DuckDB: J3 p50 1.86 ms p99 2.07 ms alloc 10.3 KB/call
+[22:08:42] DuckDB: J4 p50 3.37 ms p99 3.52 ms alloc 1.5 KB/call
+[22:08:42] DuckDB: J5 p50 3.30 ms p99 3.41 ms alloc 1.1 KB/call
+[22:08:42] DuckDB: J6 p50 3.40 ms p99 3.51 ms alloc 2.5 KB/call
+[22:08:42] DuckDB: J7 p50 1.05 ms p99 1.10 ms alloc 1.5 KB/call
+[22:08:43] DuckDB: W1 p50 1.13 ms p99 1.36 ms alloc 97.5 KB/call
+[22:08:43] DuckDB: W2 p50 553.1 µs p99 611.5 µs alloc 98.1 KB/call
+[22:08:43] DuckDB: W3 p50 2.11 ms p99 2.21 ms alloc 1.7 KB/call
+[22:08:43] DuckDB: W4 p50 2.08 ms p99 2.16 ms alloc 1.9 KB/call
+[22:08:43] DuckDB: W5 p50 2.85 ms p99 2.94 ms alloc 1.3 KB/call
+[22:08:43] DuckDB: W6 p50 4.16 ms p99 4.62 ms alloc 1.3 KB/call
+[22:08:44] DuckDB: R1 p50 177.5 µs p99 2.43 ms alloc 10.8 KB/call
+[22:08:44] DuckDB: R2 p50 179.9 µs p99 280.8 µs alloc 10.8 KB/call
+[22:08:44] DuckDB: R3 p50 588.3 µs p99 760.4 µs alloc 939.2 KB/call
+[22:08:44] DuckDB: R4 p50 587.7 µs p99 1.15 ms alloc 939.2 KB/call
+[22:08:44] DuckDB: G1 p50 1.12 ms p99 1.23 ms alloc 1.9 KB/call
+[22:08:44] DuckDB: G2 p50 727.2 µs p99 795.5 µs alloc 142.0 KB/call
+[22:08:44] DuckDB: G3 p50 4.40 ms p99 4.54 ms alloc 10.8 KB/call
+[22:08:44] DuckDB: C1 p50 1.13 ms p99 1.24 ms alloc 1.5 KB/call
+[22:08:44] DuckDB: C2 p50 414.5 µs p99 456.3 µs alloc 1.3 KB/call
+[22:08:44] DuckDB: C3 p50 459.4 µs p99 543.9 µs alloc 1.3 KB/call
+[22:08:44] DuckDB: C4 p50 1.38 ms p99 1.45 ms alloc 2.1 KB/call
+[22:08:44] DuckDB: C5 p50 984.5 µs p99 1.12 ms alloc 1.5 KB/call
+[22:08:44] DuckDB: C6 p50 1.69 ms p99 1.90 ms alloc 1.3 KB/call
+[22:08:45] DuckDB: C7 p50 744.2 µs p99 935.4 µs alloc 126.4 KB/call
+[22:08:45] DuckDB: C8 p50 1.31 ms p99 1.63 ms alloc 2.1 KB/call
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
