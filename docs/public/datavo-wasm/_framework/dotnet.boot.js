@@ -1,7 +1,7 @@
 export const config = /*json-start*/{
   "mainAssemblyName": "DataVo.Browser.dll",
   "resources": {
-    "hash": "sha256-jB8p0pMS98ZsFkThosGLaWRBaIWrYl2xiwhY+6FMx8U=",
+    "hash": "sha256-EYuAy56pndEnXYlOfawSCWxSTAIMbWRu9RMRxYbji64=",
     "jsModuleNative": [
       {
         "name": "dotnet.native.js"
@@ -15,7 +15,7 @@ export const config = /*json-start*/{
     "wasmNative": [
       {
         "name": "dotnet.native.wasm",
-        "integrity": "sha256-A5Hznez/PTZIHL9QuOjZMYJMkvNoDOGISVJPVqJR7hQ="
+        "integrity": "sha256-fxH/zxXtlSOjJNKQY4kZzPeFDadKGMvVlsiJXVx1w9M="
       }
     ],
     "wasmSymbols": [
@@ -27,7 +27,7 @@ export const config = /*json-start*/{
       {
         "virtualPath": "System.Private.CoreLib.wasm",
         "name": "System.Private.CoreLib.wasm",
-        "integrity": "sha256-Tp4LKfy2PCz8J7yWpmcWqAU2dRgVXNkthWepriBpI8E="
+        "integrity": "sha256-5i1neV3RmnN1DGJIIzV6z1EB2jnlgAtoTvcLQdVuSo4="
       },
       {
         "virtualPath": "System.Runtime.InteropServices.JavaScript.wasm",
@@ -39,12 +39,12 @@ export const config = /*json-start*/{
       {
         "virtualPath": "DataVo.Browser.wasm",
         "name": "DataVo.Browser.wasm",
-        "integrity": "sha256-7caiCW9xJLCpxMEvjf9MWY5PagOqKPpKosOr8d6UODE="
+        "integrity": "sha256-baMxR3jZK8Yww9xpyRh+l4TVSHjkp48HidTwCu2tHaU="
       },
       {
         "virtualPath": "DataVo.Core.wasm",
         "name": "DataVo.Core.wasm",
-        "integrity": "sha256-CE/eGQzrWI+7BYOr3qhZcrRcEhVtaXR+US+wNqQNI9M="
+        "integrity": "sha256-s9lY0KjCgdFa43D/x7yEXgOOpeBF8eH69FwxRlxGN8I="
       },
       {
         "virtualPath": "Microsoft.Win32.Primitives.wasm",
