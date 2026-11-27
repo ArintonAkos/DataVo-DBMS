@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Generate the cross-platform figures from the GitHub Actions run of 12 November 2026.
+"""Generate the cross-platform figures from the GitHub Actions runs of 27 November 2026 (v0.5.1).
 
-Inputs, all checked in under docs/public/benchmarks/2026-11-12/:
+Inputs, all checked in under docs/public/benchmarks/2026-11-27-v051/:
   ci/linux-x64/benchmark.log, ci/windows-x64/benchmark.log   Research.Benchmark.Host output
   ci/<platform>/bdn/*.csv                                      BenchmarkDotNet reports
   disk-crud-wal.md, vector-search.md, bdn/*.csv                the local Apple M4 Pro run, for contrast
@@ -24,7 +24,7 @@ import numpy as np
 from matplotlib.ticker import FuncFormatter, LogLocator
 
 OUT = HERE.parent / "public" / "benchmarks"
-RAW = OUT / "2026-11-12"
+RAW = OUT / "2026-11-27-v051"
 
 mpl.rcParams.update({
     "figure.dpi": 150, "savefig.dpi": 220, "font.family": "DejaVu Sans",
@@ -40,8 +40,8 @@ COLOR = {
     "DataVo HNSW": "#56B4E9", "SQLite": "#E69F00", "SQLite full": "#B07400",
     "DuckDB 1 thread": "#F0A27A",
 }
-CAPTION = ("Linux: GitHub-hosted AMD EPYC 7763, 4 vCPU. Windows: AMD EPYC 9V74, 4 vCPU. M1 VM: GitHub-hosted macOS runner. "
-           "macOS: Apple M4 Pro, local. Single run each; data: docs/public/benchmarks/2026-11-12/")
+CAPTION = ("BenchmarkDotNet: Linux on Intel Xeon Platinum 8370C (4 vCPU), Windows on AMD EPYC 9V45 (4 vCPU), M1 VM (3 vCPU), "
+           "GitHub-hosted. macOS: Apple M4 Pro, local. Single run each; data: docs/public/benchmarks/2026-11-27-v051/")
 
 
 def logaxis(ax) -> None:

@@ -21,7 +21,7 @@ import matplotlib as mpl
 import matplotlib.pyplot as plt
 import numpy as np
 
-RUN = "2026-11-12"
+RUN = "2026-11-27-v051"
 OUT = HERE.parent / "public" / "benchmarks"
 RAW = OUT / RUN
 CAPTION = "Apple M4 Pro, macOS 26.3, .NET 10.0.3, single run"
@@ -144,12 +144,13 @@ def vector_total():
 
 
 def vector_recall():
-    rx = re.compile(r"N=\s*(\d+) (\w+)\s+build flat\s+(\d+) ms hnsw\s+(\d+) ms \| query mean flat\s+([\d.]+) ms hnsw\s+([\d.]+) ms \| HNSW recall@10 vs exact ([\d.]+) %")
+    rx = re.compile(r"N=\s*(\d+) (\w+)\s+build flat\s+(\d+) ms hnsw\s+(\d+) ms \| query mean flat\s+([\d.,]+) ms hnsw\s+([\d.,]+) ms \| HNSW recall@10 vs exact ([\d.,]+) %")
     data: dict[str, list[tuple]] = {"uniform": [], "clustered": []}
     for line in (RAW / "vector-recall-experiment.txt").read_text().splitlines():
         m = rx.search(line)
         if m:
-            n, kind, bf, bh, qf, qh, rec = m.groups()
+            # The tool prints with the current culture, so accept a decimal comma too.
+            n, kind, bf, bh, qf, qh, rec = (g.replace(",", ".") for g in m.groups())
             data[kind].append((int(n), float(qf), float(qh), float(rec)))
     fig, axes = plt.subplots(1, 2, figsize=(11, 4.6), sharey=True)
     titles = {"uniform": "Uniform random vectors (the benchmark's data)",

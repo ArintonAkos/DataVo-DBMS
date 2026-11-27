@@ -126,22 +126,22 @@ def plot_total_time(
 if __name__ == "__main__":
     plot_total_time(
         title="IVM Simple Exposure: Total Time",
-        subtitle="50,000 insert+read iterations after 10,000 baseline rows (M4 Pro, 2026-11-12)",
+        subtitle="50,000 insert+read iterations after 10,000 baseline rows (M4 Pro, v0.5.1, 2026-11-27)",
         rows=[
-            ("DataVo", 526.897, COLORS["datavo"]),
-            ("SQLite", 574.131, COLORS["sqlite"]),
-            ("DuckDB", 52954.047, COLORS["duckdb"]),
+            ("DataVo", 563.249, COLORS["datavo"]),
+            ("SQLite", 646.183, COLORS["sqlite"]),
+            ("DuckDB", 57012.572, COLORS["duckdb"]),
         ],
         name="ivm-simple-exposure-total-time",
     )
 
     plot_total_time(
         title="IVM Complex VIP: Total Time",
-        subtitle="50,000 JOIN + GROUP BY insert+read iterations (M4 Pro, 2026-11-12)",
+        subtitle="50,000 JOIN + GROUP BY insert+read iterations (M4 Pro, v0.5.1, 2026-11-27)",
         rows=[
-            ("DataVo", 191.699, COLORS["datavo"]),
-            ("DuckDB", 34339.077, COLORS["duckdb"]),
-            ("SQLite", 126064.397, COLORS["sqlite"]),
+            ("DataVo", 237.977, COLORS["datavo"]),
+            ("DuckDB", 39408.076, COLORS["duckdb"]),
+            ("SQLite", 128794.461, COLORS["sqlite"]),
         ],
         name="ivm-complex-vip-total-time",
     )
