@@ -148,6 +148,22 @@ jobs:
               echo "========================================"
             } | tee -a "$LOG_FILE"
 
+            if [[ "$scenario" == "arena-live-views" ]]; then
+              # Arena takes its own option set: one run per profile, no --progress-every.
+              for profile in gameplay ivm-stress; do
+                echo "PROFILE: ${profile}" | tee -a "$LOG_FILE"
+                dotnet "$HOST_DLL" \
+                  --scenario "$scenario" \
+                  --profile "$profile" \
+                  --engine all \
+                  --repetitions 7 \
+                  --output "artifacts/arena-${profile}" \
+                  --format markdown \
+                  2>&1 | tee -a "$LOG_FILE"
+              done
+              continue
+            fi
+
             dotnet "$HOST_DLL" \
               --scenario "$scenario" \
               --format markdown \
@@ -156,10 +172,13 @@ jobs:
           done
 
       - name: Upload benchmark log
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: benchmark-log-${{ matrix.label }}
-          path: artifacts/${{ matrix.label }}-benchmark.log
+          path: |
+            artifacts/${{ matrix.label }}-benchmark.log
+            artifacts/arena-*
           if-no-files-found: error
 
       - name: Upload sqlite-vec extension
