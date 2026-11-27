@@ -2,8 +2,7 @@ namespace DataVo.Core.Exceptions;
 
 /// <summary>
 /// Thrown when an attempt is made to read a row that has been logically deleted (tombstoned).
-/// This exception replaces the generic <see cref="Exception"/> previously thrown by the disk storage
-/// engine, enabling <see cref="StorageEngine.StorageContext.TableContainsRow"/> to distinguish a
+/// A dedicated type enables <see cref="StorageEngine.StorageContext.TableContainsRow"/> to distinguish a
 /// deleted row from an unexpected I/O failure.
 /// </summary>
 public class RowDeletedException : StorageException

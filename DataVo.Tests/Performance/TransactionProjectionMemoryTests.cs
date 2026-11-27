@@ -101,7 +101,7 @@ public sealed class TransactionProjectionMemoryTests : IDisposable
         var db = new DataVoContext(new DataVoConfig
         {
             StorageMode = mode,
-            DiskStoragePath = mode == StorageMode.InMemory ? null! : _directory,
+            DataDirectory = mode == StorageMode.InMemory ? null! : _directory,
         });
         Ok(db, "CREATE DATABASE P", _tx);
         Ok(db, "USE P", _tx);

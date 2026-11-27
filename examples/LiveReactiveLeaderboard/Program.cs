@@ -22,7 +22,7 @@ string only = StringArg(args, "--only") ?? "all"; // teams | top | feed | none: 
 string dataDirectory = Path.Combine(Path.GetTempPath(), $"datavo-leaderboard-{Guid.NewGuid():N}");
 
 using var db = new DataVoContext(lsm
-    ? new DataVoConfig { StorageMode = StorageMode.Lsm, DiskStoragePath = dataDirectory, LsmStrictFsync = false }
+    ? new DataVoConfig { StorageMode = StorageMode.Lsm, DataDirectory = dataDirectory, LsmStrictFsync = false }
     : new DataVoConfig { StorageMode = StorageMode.InMemory });
 try
 {

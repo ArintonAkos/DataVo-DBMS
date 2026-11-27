@@ -81,7 +81,7 @@ public sealed class NotNullTests
         {
         }
 
-        using var second = new DataVoContext(new DataVoConfig { StorageMode = StorageMode.Lsm, DiskStoragePath = path, LsmStrictFsync = false });
+        using var second = new DataVoContext(new DataVoConfig { StorageMode = StorageMode.Lsm, DataDirectory = path, LsmStrictFsync = false });
         second.Execute("USE N");
 
         Assert.Equal(DataVoErrorCodes.NotNullViolation, second.Execute("INSERT INTO P (Id) VALUES (1)").Single().ErrorCode);
@@ -89,7 +89,7 @@ public sealed class NotNullTests
 
     private static DataVoContext Open(StorageMode mode = StorageMode.InMemory, string? path = null)
     {
-        var db = new DataVoContext(new DataVoConfig { StorageMode = mode, DiskStoragePath = path, LsmStrictFsync = false });
+        var db = new DataVoContext(new DataVoConfig { StorageMode = mode, DataDirectory = path, LsmStrictFsync = false });
         foreach (string sql in new[]
         {
             "CREATE DATABASE N", "USE N",

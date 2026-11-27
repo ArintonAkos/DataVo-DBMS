@@ -5,7 +5,7 @@ description: Complete DataVoConfig reference covering storage modes, LSM durabil
 
 # Configuration Reference
 
-`DataVoConfig` configures every aspect of an embedded `DataVoContext`. Most applications only set `StorageMode`, `DiskStoragePath`, and `LsmStrictFsync`; every other property ships with sensible defaults.
+`DataVoConfig` configures every aspect of an embedded `DataVoContext`. Most applications only set `StorageMode`, `DataDirectory`, and `LsmStrictFsync`; every other property ships with sensible defaults.
 
 ```csharp
 using DataVo.Core;
@@ -14,7 +14,7 @@ using DataVo.Core.StorageEngine.Config;
 using var db = new DataVoContext(new DataVoConfig
 {
     StorageMode = StorageMode.Lsm,
-    DiskStoragePath = "./game_data",
+    DataDirectory = "./game_data",
     LsmStrictFsync = true
 });
 ```
@@ -24,7 +24,7 @@ using var db = new DataVoContext(new DataVoConfig
 | Property | Default | Description |
 | --- | --- | --- |
 | `StorageMode` | `StorageMode.InMemory` | Storage mode: `InMemory` or `Lsm` (`Wasm` and `Custom` plug in an `IStorageEngine` you supply). |
-| `DiskStoragePath` | `null` (`./datavo_lsm_data`) | Directory for persisted `Lsm` files. Guarded by a single-process `datavo.lock`. |
+| `DataDirectory` | `null` (`./datavo_lsm_data`) | Directory for persisted `Lsm` files. Guarded by a single-process `datavo.lock`. |
 | `CustomStorageEngine` | `null` | Custom `IStorageEngine` instance when `StorageMode = StorageMode.Custom`. |
 | `WasmStorageEngine` | `null` | Browser storage engine when `StorageMode = StorageMode.Wasm`. |
 | `LockAcquireTimeoutMs` | `30000` | Maximum milliseconds to wait for a lock before failing (`-1` waits indefinitely). |

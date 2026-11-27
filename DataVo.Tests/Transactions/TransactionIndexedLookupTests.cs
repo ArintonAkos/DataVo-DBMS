@@ -321,7 +321,7 @@ public sealed class TransactionIndexedLookupTests : IDisposable
         var db = new DataVoContext(new DataVoConfig
         {
             StorageMode = mode,
-            DiskStoragePath = directory,
+            DataDirectory = directory,
             LsmStrictFsync = false
         });
         Run(db, "CREATE DATABASE TxIdxDb");

@@ -207,7 +207,7 @@ public sealed class LsmVectorSnapshotTests : IDisposable
     private static List<int> NearestIds(DataVoContext context, float[] query, int topK) =>
         [.. context.SearchNearest("Items", "idx_emb", query, topK).Select(row => Convert.ToInt32(row["Id"]))];
 
-    private DataVoContext Open() => new(new DataVoConfig { StorageMode = StorageMode.Lsm, DiskStoragePath = _root, LsmStrictFsync = false });
+    private DataVoContext Open() => new(new DataVoConfig { StorageMode = StorageMode.Lsm, DataDirectory = _root, LsmStrictFsync = false });
 
     private static void Execute(DataVoContext context, string sql)
     {

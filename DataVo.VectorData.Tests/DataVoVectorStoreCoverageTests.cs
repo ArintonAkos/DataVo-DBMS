@@ -518,7 +518,7 @@ public sealed class DataVoVectorStoreCoverageTests : IDisposable
         new(new DataVoConfig
         {
             StorageMode = mode,
-            DiskStoragePath = mode == StorageMode.Lsm ? NewDirectory() : null,
+            DataDirectory = mode == StorageMode.Lsm ? NewDirectory() : null,
             LsmStrictFsync = false,
         }, options);
 

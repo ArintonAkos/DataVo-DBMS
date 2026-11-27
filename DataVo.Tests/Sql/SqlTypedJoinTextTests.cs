@@ -91,7 +91,7 @@ public sealed class SqlTypedJoinTextTests
         var context = new DataVoContext(new DataVoConfig
         {
             StorageMode = mode,
-            DiskStoragePath = mode == StorageMode.Lsm ? TestStorageDirectories.Create("sql_typed_join_text") : null,
+            DataDirectory = mode == StorageMode.Lsm ? TestStorageDirectories.Create("sql_typed_join_text") : null,
         });
         Run(context, "CREATE DATABASE J");
         Run(context, "USE J");

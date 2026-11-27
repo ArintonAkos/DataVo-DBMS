@@ -809,7 +809,7 @@ public class InMemoryVectorIndexTests : VectorIndexTestsBase
 
 public class LsmVectorIndexTests : VectorIndexTestsBase
 {
-    public LsmVectorIndexTests() : base(new DataVoConfig { StorageMode = StorageMode.Lsm, DiskStoragePath = "./test_datavo_lsm_vector" }, "VectorDB_Lsm") { }
+    public LsmVectorIndexTests() : base(new DataVoConfig { StorageMode = StorageMode.Lsm, DataDirectory = "./test_datavo_lsm_vector" }, "VectorDB_Lsm") { }
 }
 
 public class WasmVectorPlannerIntegrationTests : SqlExecutionTestsBase

@@ -165,7 +165,7 @@ public sealed class DataVoSqlWorkloadEngine : ISqlWorkloadEngine
     private static DataVoContext Open(string directory) => new(new DataVoConfig
     {
         StorageMode = StorageMode.Lsm,
-        DiskStoragePath = directory,
+        DataDirectory = directory,
         LsmStrictFsync = false,
     });
 

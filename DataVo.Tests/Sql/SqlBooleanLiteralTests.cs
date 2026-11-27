@@ -158,7 +158,7 @@ public sealed class SqlBooleanLiteralTests
     private static void WithUsers(StorageMode mode, Action<DataVoContext> test)
     {
         string? directory = mode == StorageMode.Lsm ? TestStorageDirectories.Create("sql_boolean_literals") : null;
-        using var context = new DataVoContext(new DataVoConfig { StorageMode = mode, DiskStoragePath = directory });
+        using var context = new DataVoContext(new DataVoConfig { StorageMode = mode, DataDirectory = directory });
         Execute(context, "CREATE DATABASE BooleanLiterals");
         Execute(context, "USE BooleanLiterals");
         Execute(context, "CREATE TABLE Users (Id INT PRIMARY KEY, IsActive BIT, DepartmentId INT)");

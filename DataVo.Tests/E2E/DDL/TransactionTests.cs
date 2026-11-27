@@ -231,5 +231,5 @@ public class TransactionTestsMemory : TransactionTestsBase
 
 public class TransactionTestsLsm : TransactionTestsBase
 {
-    public TransactionTestsLsm() : base(new DataVoConfig { StorageMode = StorageMode.Lsm, DiskStoragePath = "TxLsmDb" }, "TxLsmDb") { }
+    public TransactionTestsLsm() : base(new DataVoConfig { StorageMode = StorageMode.Lsm, DataDirectory = "TxLsmDb" }, "TxLsmDb") { }
 }

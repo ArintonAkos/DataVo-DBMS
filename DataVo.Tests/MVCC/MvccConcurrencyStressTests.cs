@@ -298,7 +298,7 @@ public sealed class MvccConcurrencyStressTests : IDisposable
     private DataVoContext Reopen() => new(new DataVoConfig
     {
         StorageMode = StorageMode.Lsm,
-        DiskStoragePath = _directory,
+        DataDirectory = _directory,
         LsmStrictFsync = true,
     });
 
@@ -307,7 +307,7 @@ public sealed class MvccConcurrencyStressTests : IDisposable
         var db = new DataVoContext(new DataVoConfig
         {
             StorageMode = mode,
-            DiskStoragePath = mode == StorageMode.InMemory ? null! : _directory,
+            DataDirectory = mode == StorageMode.InMemory ? null! : _directory,
             LsmStrictFsync = false,
         });
         db.Execute("CREATE DATABASE Stress");

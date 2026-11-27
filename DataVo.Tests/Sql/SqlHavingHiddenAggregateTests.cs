@@ -162,7 +162,7 @@ public sealed class SqlHavingHiddenAggregateTests : IDisposable
         var db = new DataVoContext(new DataVoConfig
         {
             StorageMode = mode,
-            DiskStoragePath = mode == StorageMode.InMemory ? null! : _directory,
+            DataDirectory = mode == StorageMode.InMemory ? null! : _directory,
             LsmStrictFsync = false,
         });
         Query(db, "CREATE DATABASE Hv");

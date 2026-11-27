@@ -154,7 +154,7 @@ public sealed class UpdateIndexConsistencyTests : IDisposable
             _roots.Add(root);
         }
 
-        var context = new DataVoContext(new DataVoConfig { StorageMode = mode, DiskStoragePath = root ?? string.Empty, LsmStrictFsync = false });
+        var context = new DataVoContext(new DataVoConfig { StorageMode = mode, DataDirectory = root ?? string.Empty, LsmStrictFsync = false });
         _contexts.Add(context);
         Ok(context, "CREATE DATABASE U");
         Ok(context, "USE U");

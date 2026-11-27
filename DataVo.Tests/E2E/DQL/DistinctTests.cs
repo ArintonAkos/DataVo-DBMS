@@ -67,7 +67,7 @@ public abstract class DistinctTestsBase : SqlExecutionTestsBase
 
 public class DistinctTestsLsm : DistinctTestsBase
 {
-    public DistinctTestsLsm() : base(new DataVoConfig { StorageMode = StorageMode.Lsm, DiskStoragePath = "./test_datavo_lsm_distinct" }, "DistinctDB_Lsm") { }
+    public DistinctTestsLsm() : base(new DataVoConfig { StorageMode = StorageMode.Lsm, DataDirectory = "./test_datavo_lsm_distinct" }, "DistinctDB_Lsm") { }
 }
 
 public class DistinctTestsMemory : DistinctTestsBase

@@ -98,7 +98,7 @@ public sealed class SqlPointSelectScalingTests
 
     private static DataVoContext CreateSeededContext(StorageMode mode, string? directory, int rows, bool codeIsUnique)
     {
-        var context = new DataVoContext(new DataVoConfig { StorageMode = mode, DiskStoragePath = directory });
+        var context = new DataVoContext(new DataVoConfig { StorageMode = mode, DataDirectory = directory });
         context.Execute("CREATE DATABASE Scaling");
         context.Execute("USE Scaling");
         context.Execute("CREATE TABLE T (Id INT PRIMARY KEY, Name VARCHAR(32), Code INT)");

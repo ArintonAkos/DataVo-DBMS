@@ -342,7 +342,7 @@ public sealed class DataVoVectorStoreTests : IDisposable
     public async Task Lsm_CollectionsSurviveReopen()
     {
         string directory = NewDirectory();
-        using (var store = new DataVoVectorStore(new DataVoConfig { StorageMode = StorageMode.Lsm, DiskStoragePath = directory }))
+        using (var store = new DataVoVectorStore(new DataVoConfig { StorageMode = StorageMode.Lsm, DataDirectory = directory }))
         {
             await SeedDocs(store);
             var flat = new DataVoVectorStoreCollection<long, FlatDoc>(store, "points");
@@ -350,7 +350,7 @@ public sealed class DataVoVectorStoreTests : IDisposable
             await flat.UpsertAsync(new FlatDoc { Id = 1, Name = "p", Embedding = [1, 2, 3] });
         }
 
-        using var reopened = new DataVoVectorStore(new DataVoConfig { StorageMode = StorageMode.Lsm, DiskStoragePath = directory });
+        using var reopened = new DataVoVectorStore(new DataVoConfig { StorageMode = StorageMode.Lsm, DataDirectory = directory });
         Assert.Equal(["docs", "points"], (await reopened.ListCollectionNamesAsync().ToListAsync()).Order());
         var docs = new DataVoVectorStoreCollection<int, Doc>(reopened, "docs");
         Assert.True(await docs.CollectionExistsAsync());
@@ -439,7 +439,7 @@ public sealed class DataVoVectorStoreTests : IDisposable
         new(new DataVoConfig
         {
             StorageMode = mode,
-            DiskStoragePath = mode == StorageMode.Lsm ? NewDirectory() : null,
+            DataDirectory = mode == StorageMode.Lsm ? NewDirectory() : null,
             LsmStrictFsync = false,
         }, options);
 

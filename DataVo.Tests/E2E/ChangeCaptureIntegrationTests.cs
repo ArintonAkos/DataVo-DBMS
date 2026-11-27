@@ -83,7 +83,7 @@ public class ChangeCaptureIntegrationTests
             path = TestStorageDirectories.Create("chg");
         }
 
-        var ctx = new DataVoContext(new DataVoConfig { StorageMode = mode, DiskStoragePath = path });
+        var ctx = new DataVoContext(new DataVoConfig { StorageMode = mode, DataDirectory = path });
         db = $"Chg_{Guid.NewGuid():N}";
         ctx.Execute($"CREATE DATABASE {db}");
         ctx.Execute($"USE {db}");

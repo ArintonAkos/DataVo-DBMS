@@ -87,7 +87,7 @@ public sealed class LsmDisjointRunScanTests
 
     private static DataVoContext Open(string directory, bool create)
     {
-        var context = new DataVoContext(new DataVoConfig { StorageMode = StorageMode.Lsm, DiskStoragePath = directory });
+        var context = new DataVoContext(new DataVoConfig { StorageMode = StorageMode.Lsm, DataDirectory = directory });
         if (create)
         {
             Run(context, "CREATE DATABASE D");

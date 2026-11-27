@@ -206,7 +206,7 @@ public class PreparedStatementCorrectnessTests : IDisposable
         var config = new DataVoConfig
         {
             StorageMode = StorageMode.Lsm,
-            DiskStoragePath = _directory,
+            DataDirectory = _directory,
             LsmStrictFsync = false,
             EnableAuthorization = true,
             AllowAnonymousSession = allowReadOnlyAnonymous,
@@ -576,7 +576,7 @@ public class PreparedStatementCorrectnessTests : IDisposable
     private DataVoContext Open(StorageMode mode) => new(new DataVoConfig
     {
         StorageMode = mode,
-        DiskStoragePath = _directory,
+        DataDirectory = _directory,
         LsmStrictFsync = false,
     });
 

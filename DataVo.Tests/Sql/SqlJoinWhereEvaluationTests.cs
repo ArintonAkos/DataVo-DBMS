@@ -196,7 +196,7 @@ public sealed class SqlJoinWhereEvaluationTests
     private static void WithSchema(StorageMode mode, Action<DataVoContext> test)
     {
         string? directory = mode == StorageMode.Lsm ? TestStorageDirectories.Create("sql_join_where") : null;
-        using var context = new DataVoContext(new DataVoConfig { StorageMode = mode, DiskStoragePath = directory });
+        using var context = new DataVoContext(new DataVoConfig { StorageMode = mode, DataDirectory = directory });
         Execute(context, "CREATE DATABASE JoinWhere");
         Execute(context, "USE JoinWhere");
         Execute(context, "CREATE TABLE Customers (Id INT PRIMARY KEY, Region VARCHAR(4), Tier INT)");

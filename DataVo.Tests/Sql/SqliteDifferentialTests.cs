@@ -161,7 +161,7 @@ public sealed class SqliteDifferentialTests : IDisposable
         private DataVoContext OpenDataVo()
         {
             DataVoContext context = _mode == StorageMode.Lsm
-                ? new DataVoContext(new DataVoConfig { StorageMode = StorageMode.Lsm, DiskStoragePath = _directory, LsmStrictFsync = false })
+                ? new DataVoContext(new DataVoConfig { StorageMode = StorageMode.Lsm, DataDirectory = _directory, LsmStrictFsync = false })
                 : new DataVoContext(new DataVoConfig { StorageMode = StorageMode.InMemory });
             if (!_created)
             {

@@ -3,10 +3,11 @@ set -euo pipefail
 
 # Fails when the README or the user manual still shows removed public API surface:
 #   - pre-0.4 sample symbols (ExecuteWithParams, DatabasePath);
-#   - the paged Disk storage mode removed in 0.5.0 (StorageMode.Disk, DiskStorageEngine, UseDiskStorage).
+#   - the paged Disk storage mode removed in 0.5.0 (StorageMode.Disk, DiskStorageEngine, UseDiskStorage);
+#   - DataVoConfig.DiskStoragePath, renamed DataDirectory in 0.5.1.
 # Run by deploy-docs.yml before the docs are built. Requires ripgrep (rg).
 
-readonly pattern='ExecuteWithParams|DatabasePath|StorageMode\.Disk\b|DiskStorageEngine|UseDiskStorage'
+readonly pattern='ExecuteWithParams|DatabasePath|StorageMode\.Disk\b|DiskStorageEngine|UseDiskStorage|DiskStoragePath'
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly ROOT
 readonly paths=("$ROOT/README.md" "$ROOT/docs/manual")

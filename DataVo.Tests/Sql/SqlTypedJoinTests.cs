@@ -227,7 +227,7 @@ public sealed class SqlTypedJoinTests
     {
         const int orderCount = 30_000;
         string? directory = mode == StorageMode.Lsm ? TestStorageDirectories.Create("sql_typed_join_alloc") : null;
-        using var context = new DataVoContext(new DataVoConfig { StorageMode = mode, DiskStoragePath = directory });
+        using var context = new DataVoContext(new DataVoConfig { StorageMode = mode, DataDirectory = directory });
         Execute(context, "CREATE DATABASE TypedJoinAlloc");
         Execute(context, "USE TypedJoinAlloc");
         Execute(context, "CREATE TABLE Customers (Id INT PRIMARY KEY, Region VARCHAR(4), Tier INT, Name VARCHAR(8))");
@@ -302,7 +302,7 @@ public sealed class SqlTypedJoinTests
     private static void WithSchema(StorageMode mode, Action<DataVoContext> test)
     {
         string? directory = mode == StorageMode.Lsm ? TestStorageDirectories.Create("sql_typed_join") : null;
-        using var context = new DataVoContext(new DataVoConfig { StorageMode = mode, DiskStoragePath = directory });
+        using var context = new DataVoContext(new DataVoConfig { StorageMode = mode, DataDirectory = directory });
         Execute(context, "CREATE DATABASE TypedJoin");
         Execute(context, "USE TypedJoin");
         Execute(context, "CREATE TABLE Customers (Id INT PRIMARY KEY, Region VARCHAR(4), Tier INT, Name VARCHAR(8))");

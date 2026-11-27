@@ -68,7 +68,7 @@ public sealed class TypedGuidPrimaryKeyInsertTests : IDisposable
     }
 
     private DataVoContext Open(StorageMode mode) => mode == StorageMode.Lsm
-        ? new DataVoContext(new DataVoConfig { StorageMode = StorageMode.Lsm, DiskStoragePath = _root, LsmStrictFsync = false })
+        ? new DataVoContext(new DataVoConfig { StorageMode = StorageMode.Lsm, DataDirectory = _root, LsmStrictFsync = false })
         : new DataVoContext(new DataVoConfig { StorageMode = StorageMode.InMemory });
 
     private static void Run(DataVoContext context, string sql)

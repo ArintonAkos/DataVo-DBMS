@@ -61,7 +61,7 @@ public sealed class LockManagerHeldLockCountTests : IDisposable
             using var db = new DataVoContext(new DataVoConfig
             {
                 StorageMode = mode,
-                DiskStoragePath = mode == StorageMode.InMemory ? null! : _directory,
+                DataDirectory = mode == StorageMode.InMemory ? null! : _directory,
                 LsmStrictFsync = false,
             });
             Run(db, "CREATE DATABASE H");

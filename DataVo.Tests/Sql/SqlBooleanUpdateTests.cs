@@ -35,7 +35,7 @@ public sealed class SqlBooleanUpdateTests
 
     private static DataVoContext Open(StorageMode mode, string directory)
     {
-        var db = new DataVoContext(new DataVoConfig { StorageMode = mode, DiskStoragePath = directory });
+        var db = new DataVoContext(new DataVoConfig { StorageMode = mode, DataDirectory = directory });
         Run(db, "CREATE DATABASE S");
         Run(db, "USE S");
         return db;

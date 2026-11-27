@@ -329,5 +329,5 @@ public class InMemoryConcurrencyTests : ConcurrencyTestsBase
 
 public class LsmConcurrencyTests : ConcurrencyTestsBase
 {
-    public LsmConcurrencyTests() : base(new DataVoConfig { StorageMode = StorageMode.Lsm, DiskStoragePath = "./test_datavo_lsm_concurrency", LockAcquireTimeoutMs = 10_000 }, "ConcurrencyDb_Lsm") { }
+    public LsmConcurrencyTests() : base(new DataVoConfig { StorageMode = StorageMode.Lsm, DataDirectory = "./test_datavo_lsm_concurrency", LockAcquireTimeoutMs = 10_000 }, "ConcurrencyDb_Lsm") { }
 }

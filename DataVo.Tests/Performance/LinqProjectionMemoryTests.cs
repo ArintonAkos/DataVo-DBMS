@@ -133,7 +133,7 @@ public sealed class LinqProjectionMemoryTests : IDisposable
         var db = new DataVoContext(new DataVoConfig
         {
             StorageMode = mode,
-            DiskStoragePath = mode == StorageMode.InMemory ? null! : _directory,
+            DataDirectory = mode == StorageMode.InMemory ? null! : _directory,
         });
         db.Execute("CREATE DATABASE P");
         db.Execute("USE P");

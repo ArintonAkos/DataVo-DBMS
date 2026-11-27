@@ -113,5 +113,5 @@ public class UnionTestsMemory : UnionTestsBase
 
 public class UnionTestsLsm : UnionTestsBase
 {
-    public UnionTestsLsm() : base(new DataVoConfig { StorageMode = StorageMode.Lsm, DiskStoragePath = "UnionDB_Lsm" }, "UnionDB_Lsm") { }
+    public UnionTestsLsm() : base(new DataVoConfig { StorageMode = StorageMode.Lsm, DataDirectory = "UnionDB_Lsm" }, "UnionDB_Lsm") { }
 }

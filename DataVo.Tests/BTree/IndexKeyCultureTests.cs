@@ -47,7 +47,7 @@ public sealed class IndexKeyCultureTests
         try
         {
             CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo("hu-HU");
-            using var context = new DataVoContext(new DataVoConfig { StorageMode = mode, DiskStoragePath = directory });
+            using var context = new DataVoContext(new DataVoConfig { StorageMode = mode, DataDirectory = directory });
             context.Execute("CREATE DATABASE Culture");
             context.Execute("USE Culture");
             context.Execute("CREATE TABLE T (Id INT PRIMARY KEY, F FLOAT)");

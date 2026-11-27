@@ -172,7 +172,7 @@ public sealed class SqlIndexGroupByTests
 
     private static DataVoContext Reopen(string directory)
     {
-        var context = new DataVoContext(new DataVoConfig { StorageMode = StorageMode.Lsm, DiskStoragePath = directory });
+        var context = new DataVoContext(new DataVoConfig { StorageMode = StorageMode.Lsm, DataDirectory = directory });
         Run(context, "USE G");
         return context;
     }
@@ -182,7 +182,7 @@ public sealed class SqlIndexGroupByTests
         var context = new DataVoContext(new DataVoConfig
         {
             StorageMode = mode,
-            DiskStoragePath = mode == StorageMode.Lsm ? directory ?? TestStorageDirectories.Create("sql_index_group_by") : null,
+            DataDirectory = mode == StorageMode.Lsm ? directory ?? TestStorageDirectories.Create("sql_index_group_by") : null,
         });
         Run(context, "CREATE DATABASE G");
         Run(context, "USE G");

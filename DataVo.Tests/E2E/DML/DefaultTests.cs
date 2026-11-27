@@ -126,5 +126,5 @@ public class DefaultTestsMemory() : DefaultTestsBase(new DataVoConfig { StorageM
 public class DefaultTestsLsm() : DefaultTestsBase(new DataVoConfig
 {
     StorageMode = StorageMode.Lsm,
-    DiskStoragePath = Path.Combine(Path.GetTempPath(), "DataVo_Tests_Default")
+    DataDirectory = Path.Combine(Path.GetTempPath(), "DataVo_Tests_Default")
 }, "DefaultDb_Disk");

@@ -102,7 +102,7 @@ public sealed class SqlTypedTopNTests
     {
         const int rowCount = 40_000;
         string? directory = mode == StorageMode.Lsm ? TestStorageDirectories.Create("sql_typed_topn_alloc") : null;
-        using var context = new DataVoContext(new DataVoConfig { StorageMode = mode, DiskStoragePath = directory });
+        using var context = new DataVoContext(new DataVoConfig { StorageMode = mode, DataDirectory = directory });
         Execute(context, "CREATE DATABASE TopNAlloc");
         Execute(context, "USE TopNAlloc");
         Execute(context, "CREATE TABLE Customers (Id INT PRIMARY KEY, Tier INT)");
@@ -166,7 +166,7 @@ public sealed class SqlTypedTopNTests
     private static void WithOrders(StorageMode mode, Action<DataVoContext> test)
     {
         string? directory = mode == StorageMode.Lsm ? TestStorageDirectories.Create("sql_typed_topn") : null;
-        using var context = new DataVoContext(new DataVoConfig { StorageMode = mode, DiskStoragePath = directory });
+        using var context = new DataVoContext(new DataVoConfig { StorageMode = mode, DataDirectory = directory });
         Execute(context, "CREATE DATABASE TopN");
         Execute(context, "USE TopN");
         Execute(context, "CREATE TABLE Customers (Id INT PRIMARY KEY, Tier INT, Name VARCHAR(8))");

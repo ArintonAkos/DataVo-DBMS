@@ -2,7 +2,7 @@ namespace DataVo.Core.StorageEngine;
 
 /// <summary>
 /// A generic interface that strictly handles appending, fetching, and removing 
-/// bytes (rows) from the physical storage medium underneath the DBMS (e.g. Memory vs Disk).
+/// bytes (rows) from the physical storage medium underneath the DBMS (e.g. in-memory vs. LSM).
 /// </summary>
 public interface IStorageEngine
 {

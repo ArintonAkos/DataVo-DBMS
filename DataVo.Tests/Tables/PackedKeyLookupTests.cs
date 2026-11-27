@@ -52,7 +52,7 @@ public sealed class PackedKeyLookupTests : IDisposable
 
     private DataVoContext Open(StorageMode mode = StorageMode.InMemory)
     {
-        var db = new DataVoContext(new DataVoConfig { StorageMode = mode, DiskStoragePath = _directory });
+        var db = new DataVoContext(new DataVoConfig { StorageMode = mode, DataDirectory = _directory });
         db.Execute("CREATE DATABASE S");
         db.Execute("USE S");
         db.EnsurePackedHeroTable();

@@ -98,7 +98,7 @@ public sealed class SqlJoinKeySetTests
     public void RepeatedKeys_KeepTheirMultiplicity(StorageMode mode)
     {
         string? directory = mode == StorageMode.Lsm ? TestStorageDirectories.Create("sql_join_key_set_repeat") : null;
-        using var context = new DataVoContext(new DataVoConfig { StorageMode = mode, DiskStoragePath = directory });
+        using var context = new DataVoContext(new DataVoConfig { StorageMode = mode, DataDirectory = directory });
         Execute(context, "CREATE DATABASE KeySetRepeat");
         Execute(context, "USE KeySetRepeat");
         Execute(context, "CREATE TABLE Orders (Id INT PRIMARY KEY, Amount DOUBLE)");
@@ -232,7 +232,7 @@ public sealed class SqlJoinKeySetTests
     private static void WithSchema(StorageMode mode, long[] customers, Order[] orders, Action<DataVoContext> test)
     {
         string? directory = mode == StorageMode.Lsm ? TestStorageDirectories.Create("sql_join_key_set") : null;
-        using var context = new DataVoContext(new DataVoConfig { StorageMode = mode, DiskStoragePath = directory });
+        using var context = new DataVoContext(new DataVoConfig { StorageMode = mode, DataDirectory = directory });
         Execute(context, "CREATE DATABASE JoinKeySet");
         Execute(context, "USE JoinKeySet");
         Execute(context, "CREATE TABLE Customers (Id BIGINT PRIMARY KEY, Name VARCHAR(8))");

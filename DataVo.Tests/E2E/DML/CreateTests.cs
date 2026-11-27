@@ -42,5 +42,5 @@ public class InMemoryCreateTests : CreateTestsBase
 
 public class LsmCreateTests : CreateTestsBase
 {
-    public LsmCreateTests() : base(new DataVoConfig { StorageMode = StorageMode.Lsm, DiskStoragePath = "./test_datavo_lsm_create" }, "CreateDB_Lsm") { }
+    public LsmCreateTests() : base(new DataVoConfig { StorageMode = StorageMode.Lsm, DataDirectory = "./test_datavo_lsm_create" }, "CreateDB_Lsm") { }
 }

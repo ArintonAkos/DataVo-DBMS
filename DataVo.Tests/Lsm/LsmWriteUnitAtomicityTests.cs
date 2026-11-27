@@ -63,7 +63,7 @@ public sealed class LsmWriteUnitAtomicityTests : IDisposable
 
     private DataVoContext OpenWithTable()
     {
-        var context = new DataVoContext(new DataVoConfig { StorageMode = StorageMode.Lsm, DiskStoragePath = _root, LsmStrictFsync = false });
+        var context = new DataVoContext(new DataVoConfig { StorageMode = StorageMode.Lsm, DataDirectory = _root, LsmStrictFsync = false });
         Assert.False(context.Execute("CREATE DATABASE Shop")[0].IsError);
         Assert.False(context.Execute("USE Shop")[0].IsError);
         Assert.False(context.Execute("CREATE TABLE Items (Id INT PRIMARY KEY, Code INT)")[0].IsError);

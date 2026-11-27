@@ -26,7 +26,7 @@ public sealed class SqlOrdinalTextComparisonTests : IDisposable
     [MemberData(nameof(Modes))]
     public void RangeComparisons_OnText_AreOrdinal(StorageMode mode)
     {
-        using var db = new DataVoContext(new DataVoConfig { StorageMode = mode, DiskStoragePath = mode == StorageMode.Lsm ? _directory : null, LsmStrictFsync = false });
+        using var db = new DataVoContext(new DataVoConfig { StorageMode = mode, DataDirectory = mode == StorageMode.Lsm ? _directory : null, LsmStrictFsync = false });
         Ok(db, "CREATE DATABASE O; USE O; CREATE TABLE T (Id INT PRIMARY KEY, P VARCHAR)");
         string[] paths = ["docs/guide/2.md", "docs/guide_x/7.md", "docs/reference/1.md", "Docs/upper.md", "docs-dash.md"];
         for (int i = 0; i < paths.Length; i++)

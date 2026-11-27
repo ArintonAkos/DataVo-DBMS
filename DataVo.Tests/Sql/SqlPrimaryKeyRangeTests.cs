@@ -124,7 +124,7 @@ public sealed class SqlPrimaryKeyRangeTests
     private static void WithTable(StorageMode mode, List<Item> items, Action<DataVoContext> test)
     {
         string? directory = mode == StorageMode.Lsm ? TestStorageDirectories.Create("sql_pk_range") : null;
-        using var context = new DataVoContext(new DataVoConfig { StorageMode = mode, DiskStoragePath = directory });
+        using var context = new DataVoContext(new DataVoConfig { StorageMode = mode, DataDirectory = directory });
         Execute(context, "CREATE DATABASE KeyRange");
         Execute(context, "USE KeyRange");
         Execute(context, "CREATE TABLE T (Id BIGINT PRIMARY KEY, V INT)");

@@ -579,7 +579,7 @@ public sealed class LinqCompositionTests : IDisposable
         var db = new DataVoContext(new DataVoConfig
         {
             StorageMode = mode,
-            DiskStoragePath = mode == StorageMode.InMemory ? null! : _directory,
+            DataDirectory = mode == StorageMode.InMemory ? null! : _directory,
         });
         db.Execute("CREATE DATABASE G");
         db.Execute("USE G");

@@ -309,7 +309,7 @@ public class AuditFixTests
         var diskConfig = new DataVoConfig
         {
             StorageMode = StorageMode.Lsm,
-            DiskStoragePath = storagePath,
+            DataDirectory = storagePath,
             TransactionIdStateFilePath = "tx-state.dat"
         };
 

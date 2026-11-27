@@ -36,7 +36,7 @@ public sealed class PrimaryKeyRangeAggregateAllocationTests
             using var context = new DataVoContext(new DataVoConfig
             {
                 StorageMode = mode,
-                DiskStoragePath = directory ?? string.Empty,
+                DataDirectory = directory ?? string.Empty,
                 LsmStrictFsync = false,
             });
             Seed(context);

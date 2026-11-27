@@ -10,7 +10,7 @@ namespace DataVo.Core.Runtime;
 /// <remarks>
 /// Publish actions run once the batch is durable, in commit order. Finally actions (lock releases) always
 /// run, also when the statement fails and its pending work is discarded. Both run on the flow that queued
-/// them: the lock manager's locks are thread-affine. Without an open batch (in-memory and Disk modes)
+/// them: the lock manager's locks are thread-affine. Without an open batch (in-memory mode)
 /// nothing is deferred.
 /// </remarks>
 internal sealed class DeferredPublication

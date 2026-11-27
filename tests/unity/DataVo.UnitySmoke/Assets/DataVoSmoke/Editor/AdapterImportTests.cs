@@ -19,7 +19,7 @@ namespace DataVo.UnitySmoke.EditorTests
         public void SaveData_Survives_Closing_And_Reopening(StorageMode mode)
         {
             string path = System.IO.Path.Combine(Application.temporaryCachePath, "DataVoSave_" + mode + "_" + Guid.NewGuid().ToString("N"));
-            var config = new DataVoConfig { StorageMode = mode, DiskStoragePath = path };
+            var config = new DataVoConfig { StorageMode = mode, DataDirectory = path };
 
             try
             {

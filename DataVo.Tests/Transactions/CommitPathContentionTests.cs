@@ -92,7 +92,7 @@ public sealed class CommitPathContentionTests
         string directory = TestStorageDirectories.Create("txid_reservation");
         try
         {
-            var config = new DataVoConfig { StorageMode = StorageMode.Lsm, DiskStoragePath = directory, LsmStrictFsync = false };
+            var config = new DataVoConfig { StorageMode = StorageMode.Lsm, DataDirectory = directory, LsmStrictFsync = false };
             string statePath = config.ResolveTransactionIdStateFilePath();
             long highest = 0;
             using (DataVoEngine engine = DataVoEngine.Initialize(config))

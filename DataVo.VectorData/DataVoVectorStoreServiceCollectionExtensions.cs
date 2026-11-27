@@ -10,7 +10,7 @@ namespace Microsoft.Extensions.DependencyInjection;
 /// <summary>Registers DataVo vector stores and collections with dependency injection.</summary>
 /// <example>
 /// <code>
-/// services.AddDataVoVectorStore(new DataVoConfig { StorageMode = StorageMode.Lsm, DiskStoragePath = "./vectors" });
+/// services.AddDataVoVectorStore(new DataVoConfig { StorageMode = StorageMode.Lsm, DataDirectory = "./vectors" });
 /// services.AddDataVoCollection&lt;Guid, Doc&gt;("docs");
 /// services.AddDataVoDynamicCollection("notes", notesDefinition);
 /// // inject VectorStore, DataVoVectorStore, VectorStoreCollection&lt;Guid, Doc&gt; or IVectorSearchable&lt;Doc&gt;

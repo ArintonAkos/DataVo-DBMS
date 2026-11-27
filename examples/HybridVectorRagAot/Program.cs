@@ -13,7 +13,7 @@ string? question = args.FirstOrDefault(a => !a.StartsWith("--", StringComparison
 var embedder = new HashingEmbedder(dimensions: 384);
 var config = dataDirectory is null
     ? new DataVoConfig { StorageMode = StorageMode.InMemory }
-    : new DataVoConfig { StorageMode = StorageMode.Lsm, DiskStoragePath = dataDirectory, LsmStrictFsync = false };
+    : new DataVoConfig { StorageMode = StorageMode.Lsm, DataDirectory = dataDirectory, LsmStrictFsync = false };
 
 using var db = new DataVoContext(config);
 Run(db, "CREATE DATABASE IF NOT EXISTS Rag");

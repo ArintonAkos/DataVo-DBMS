@@ -165,5 +165,5 @@ public class InMemoryExpressionAggregateTests : ExpressionAggregateTestsBase
 
 public class LsmExpressionAggregateTests : ExpressionAggregateTestsBase
 {
-    public LsmExpressionAggregateTests() : base(new DataVoConfig { StorageMode = StorageMode.Lsm, DiskStoragePath = "./test_datavo_lsm_expragg" }, "ExprAgg_Lsm") { }
+    public LsmExpressionAggregateTests() : base(new DataVoConfig { StorageMode = StorageMode.Lsm, DataDirectory = "./test_datavo_lsm_expragg" }, "ExprAgg_Lsm") { }
 }

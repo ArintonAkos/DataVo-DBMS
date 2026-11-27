@@ -253,7 +253,7 @@ public class RuntimeDiagnosticsTests
         var context = new DataVoContext(new DataVoConfig
         {
             StorageMode = mode,
-            DiskStoragePath = diskPath
+            DataDirectory = diskPath
         });
 
         string databaseName = $"Diag_{Guid.NewGuid():N}";

@@ -56,7 +56,7 @@ public sealed class DataVoWhitepaperBenchmarkEngine : IWhitepaperBenchmarkEngine
         _context = new DataVoContext(new DataVoConfig
         {
             StorageMode = StorageMode.Lsm,
-            DiskStoragePath = workingDirectory,
+            DataDirectory = workingDirectory,
             LsmStrictFsync = _durable,
             EnableZeroAllocCompiledUpdate = true,
         });

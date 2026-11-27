@@ -8,7 +8,7 @@ description: How DataVo routes SELECT queries through typed single-table, typed 
 DataVo does not use a cost-based optimizer. Instead, it pairs one general evaluator that can execute every supported SQL query with a cascade of **typed fast paths** that operate directly on stored bytes without boxing. Whether a query stays on a typed path is the single largest factor in its latency and allocation profile.
 
 ```csharp
-using var db = new DataVoContext(new DataVoConfig { StorageMode = StorageMode.Lsm, DiskStoragePath = "./app_db" });
+using var db = new DataVoContext(new DataVoConfig { StorageMode = StorageMode.Lsm, DataDirectory = "./app_db" });
 
 // Stays on the Typed Single-Table Path (index lookup or UTF-8 byte scan, ~16–24 KB alloc / 1M rows)
 var stmt = db.Prepare("SELECT Id, Name, Score FROM players WHERE Region = @r AND Score >= @min");

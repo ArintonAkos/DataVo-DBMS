@@ -27,7 +27,7 @@ public sealed class DataVoVectorStoreOptions
 /// </summary>
 /// <example>
 /// <code>
-/// using var store = new DataVoVectorStore(new DataVoConfig { StorageMode = StorageMode.Lsm, DiskStoragePath = "./vectors" });
+/// using var store = new DataVoVectorStore(new DataVoConfig { StorageMode = StorageMode.Lsm, DataDirectory = "./vectors" });
 /// var docs = new DataVoVectorStoreCollection&lt;Guid, Doc&gt;(store, "docs");
 /// await docs.EnsureCollectionExistsAsync();
 /// </code>

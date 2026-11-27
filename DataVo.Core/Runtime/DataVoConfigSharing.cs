@@ -93,7 +93,7 @@ internal static class DataVoConfigSharing
         Add(nameof(DataVoConfig.EnableHybridRoutingPerQueryTelemetry), config.EnableHybridRoutingPerQueryTelemetry);
         Add(nameof(DataVoConfig.HybridRoutingTelemetrySnapshotIntervalQueries), config.HybridRoutingTelemetrySnapshotIntervalQueries);
         Add(nameof(DataVoConfig.EnableHybridOrderByAdaptiveInitialTopK), config.EnableHybridOrderByAdaptiveInitialTopK);
-        Add(nameof(DataVoConfig.DiskStoragePath), ResolvePersistentRoot(config) ?? config.DiskStoragePath);
+        Add(nameof(DataVoConfig.DataDirectory), ResolvePersistentRoot(config) ?? config.DataDirectory);
         Add(nameof(DataVoConfig.LockAcquireTimeoutMs), config.LockAcquireTimeoutMs);
         Add(nameof(DataVoConfig.LsmStrictFsync), config.LsmStrictFsync);
         Add(nameof(DataVoConfig.LsmReadMode), config.LsmReadMode);

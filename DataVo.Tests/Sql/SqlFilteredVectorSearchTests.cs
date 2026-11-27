@@ -237,7 +237,7 @@ public sealed class SqlFilteredVectorSearchTests
     private static void WithDocuments(StorageMode mode, string indexType, Action<DataVoContext> test)
     {
         string? directory = mode == StorageMode.Lsm ? TestStorageDirectories.Create("sql_filtered_vector") : null;
-        using var context = new DataVoContext(new DataVoConfig { StorageMode = mode, DiskStoragePath = directory });
+        using var context = new DataVoContext(new DataVoConfig { StorageMode = mode, DataDirectory = directory });
         Execute(context, "CREATE DATABASE FilteredVector");
         Execute(context, "USE FilteredVector");
         Execute(context, "CREATE TABLE Authors (Id INT PRIMARY KEY, Name VARCHAR(16), Country VARCHAR(4))");

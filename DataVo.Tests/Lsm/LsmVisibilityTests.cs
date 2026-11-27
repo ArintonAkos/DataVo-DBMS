@@ -93,7 +93,7 @@ public sealed class LsmVisibilityTests
         var db = new DataVoContext(new DataVoConfig
         {
             StorageMode = StorageMode.Lsm,
-            DiskStoragePath = TestStorageDirectories.Create("lsm_visibility"),
+            DataDirectory = TestStorageDirectories.Create("lsm_visibility"),
             LsmStrictFsync = false,
         });
         db.Execute("CREATE DATABASE V");
@@ -124,7 +124,7 @@ public sealed class LsmCommitFailureTests
         using var db = new DataVoContext(new DataVoConfig
         {
             StorageMode = StorageMode.Lsm,
-            DiskStoragePath = TestStorageDirectories.Create("lsm_commit_failure"),
+            DataDirectory = TestStorageDirectories.Create("lsm_commit_failure"),
             LsmStrictFsync = false,
         });
         db.Execute("CREATE DATABASE F");

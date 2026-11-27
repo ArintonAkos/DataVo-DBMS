@@ -77,8 +77,8 @@ dotnet run -c Release --project benchmarks/DataVo.Benchmarks -- --filter '*'
 Always keep durability settings explicit when comparing strict vs. relaxed LSM:
 
 ```csharp
-var strict  = new DataVoConfig { StorageMode = StorageMode.Lsm, DiskStoragePath = "./bench_strict",  LsmStrictFsync = true };
-var relaxed = new DataVoConfig { StorageMode = StorageMode.Lsm, DiskStoragePath = "./bench_relaxed", LsmStrictFsync = false };
+var strict  = new DataVoConfig { StorageMode = StorageMode.Lsm, DataDirectory = "./bench_strict",  LsmStrictFsync = true };
+var relaxed = new DataVoConfig { StorageMode = StorageMode.Lsm, DataDirectory = "./bench_relaxed", LsmStrictFsync = false };
 ```
 
 ## 4. Arena Live Views, Unity IL2CPP & Charts

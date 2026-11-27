@@ -32,7 +32,7 @@ Switch to power-loss-durable persistence on disk with two config lines:
 using var db = new DataVoContext(new DataVoConfig
 {
     StorageMode = StorageMode.Lsm,
-    DiskStoragePath = "./app_data",
+    DataDirectory = "./app_data",
     LsmStrictFsync = true
 });
 ```

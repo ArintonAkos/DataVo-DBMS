@@ -14,7 +14,7 @@ using DataVo.Core.StorageEngine.Config;
 using var db = new DataVoContext(new DataVoConfig
 {
     StorageMode = StorageMode.Lsm,
-    DiskStoragePath = "./datavo_lsm_data",
+    DataDirectory = "./datavo_lsm_data",
     LsmStrictFsync = true,          // default: wait for stable storage on commit
     ClusteredPrimaryKeys = true     // default: store single INT/GUID PK tables clustered
 });
@@ -67,13 +67,13 @@ In `StorageMode.Lsm`, every auto-commit statement and every explicit transaction
 
 ## Reopening a Directory
 
-Closing and reopening a `DataVoContext` on the same `DiskStoragePath` restores the catalog (`Catalog.xml`), SSTables, commit log, and transaction-ID watermark:
+Closing and reopening a `DataVoContext` on the same `DataDirectory` restores the catalog (`Catalog.xml`), SSTables, commit log, and transaction-ID watermark:
 
 ```csharp
 var config = new DataVoConfig
 {
     StorageMode = StorageMode.Lsm,
-    DiskStoragePath = "./datavo_lsm_data"
+    DataDirectory = "./datavo_lsm_data"
 };
 
 using (var db = new DataVoContext(config))

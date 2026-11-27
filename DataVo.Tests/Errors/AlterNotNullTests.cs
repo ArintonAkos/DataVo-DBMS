@@ -69,7 +69,7 @@ public sealed class AlterNotNullTests
             Assert.False(first.Execute("ALTER TABLE P ADD COLUMN Tag VARCHAR(10) NOT NULL DEFAULT 'none'").Single().IsError);
         }
 
-        using var second = new DataVoContext(new DataVoConfig { StorageMode = StorageMode.Lsm, DiskStoragePath = path, LsmStrictFsync = false });
+        using var second = new DataVoContext(new DataVoConfig { StorageMode = StorageMode.Lsm, DataDirectory = path, LsmStrictFsync = false });
         second.Execute("USE N");
         Assert.Equal(DataVoErrorCodes.NotNullViolation,
             second.Execute("INSERT INTO P (Id, Name, Tag) VALUES (9, 'x', NULL)").Single().ErrorCode);
@@ -77,7 +77,7 @@ public sealed class AlterNotNullTests
 
     private static DataVoContext Open(bool withRows, StorageMode mode = StorageMode.InMemory, string? path = null)
     {
-        var db = new DataVoContext(new DataVoConfig { StorageMode = mode, DiskStoragePath = path, LsmStrictFsync = false });
+        var db = new DataVoContext(new DataVoConfig { StorageMode = mode, DataDirectory = path, LsmStrictFsync = false });
         db.Execute("CREATE DATABASE N");
         db.Execute("USE N");
         db.Execute("CREATE TABLE P (Id INT PRIMARY KEY, Name VARCHAR(20))");

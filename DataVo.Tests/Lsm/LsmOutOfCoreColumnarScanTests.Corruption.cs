@@ -264,7 +264,7 @@ public sealed partial class LsmOutOfCoreColumnarScanTests
     }
 
     private static DataVoContext OpenSql(string root, LsmReadMode mode) =>
-        new(new DataVoConfig { StorageMode = StorageMode.Lsm, DiskStoragePath = root, LsmReadMode = mode });
+        new(new DataVoConfig { StorageMode = StorageMode.Lsm, DataDirectory = root, LsmReadMode = mode });
 
     private static QueryResult Sql(DataVoContext db, string sql)
     {

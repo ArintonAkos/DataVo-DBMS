@@ -45,7 +45,7 @@ public sealed class WriterProgressUnderReadLoadTests(ITestOutputHelper output)
             using var context = new DataVoContext(new DataVoConfig
             {
                 StorageMode = mode,
-                DiskStoragePath = directory,
+                DataDirectory = directory,
                 LsmStrictFsync = false,
             });
             ExecuteOk(context, "CREATE DATABASE Contention");

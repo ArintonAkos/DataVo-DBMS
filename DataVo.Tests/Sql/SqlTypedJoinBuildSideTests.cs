@@ -248,7 +248,7 @@ public sealed class SqlTypedJoinBuildSideTests
         const int customers = 40_000;
         const int orders = 10_000;
         string? directory = mode == StorageMode.Lsm ? TestStorageDirectories.Create("sql_anti_join_alloc") : null;
-        using var context = new DataVoContext(new DataVoConfig { StorageMode = mode, DiskStoragePath = directory });
+        using var context = new DataVoContext(new DataVoConfig { StorageMode = mode, DataDirectory = directory });
         Execute(context, "CREATE DATABASE AntiJoinAlloc");
         Execute(context, "USE AntiJoinAlloc");
         Execute(context, "CREATE TABLE Customers (Id INT PRIMARY KEY, Region VARCHAR(8), Tier INT, Name VARCHAR(16))");
@@ -322,7 +322,7 @@ public sealed class SqlTypedJoinBuildSideTests
     private static void WithSchema(StorageMode mode, Action<DataVoContext> test)
     {
         string? directory = mode == StorageMode.Lsm ? TestStorageDirectories.Create("sql_typed_join_build") : null;
-        using var context = new DataVoContext(new DataVoConfig { StorageMode = mode, DiskStoragePath = directory });
+        using var context = new DataVoContext(new DataVoConfig { StorageMode = mode, DataDirectory = directory });
         Execute(context, "CREATE DATABASE TypedJoinBuild");
         Execute(context, "USE TypedJoinBuild");
         Execute(context, "CREATE TABLE Customers (Id BIGINT PRIMARY KEY, Region VARCHAR(4), Tier INT, Name VARCHAR(8))");

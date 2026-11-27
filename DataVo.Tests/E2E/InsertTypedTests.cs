@@ -406,7 +406,7 @@ public class InsertTypedTests
             using DataVoContext ctx = new(new DataVoConfig
             {
                 StorageMode = StorageMode.Lsm,
-                DiskStoragePath = root,
+                DataDirectory = root,
                 LsmStrictFsync = false,
             });
             string dbName = $"TypedInsertLsm_{Guid.NewGuid():N}";

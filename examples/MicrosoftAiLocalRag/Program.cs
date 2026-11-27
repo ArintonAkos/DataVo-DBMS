@@ -50,7 +50,7 @@ Console.WriteLine($"Embedded {chunks.Count} sections of {chunks.Select(chunk => 
 string dataDirectory = Path.Combine(Path.GetTempPath(), $"datavo-rag-{Environment.ProcessId}");
 var config = inMemory
     ? new DataVoConfig { StorageMode = StorageMode.InMemory }
-    : new DataVoConfig { StorageMode = StorageMode.Lsm, DiskStoragePath = dataDirectory };
+    : new DataVoConfig { StorageMode = StorageMode.Lsm, DataDirectory = dataDirectory };
 try
 {
     using (var store = new DataVoVectorStore(config, new DataVoVectorStoreOptions { DatabaseName = "Rag" }))

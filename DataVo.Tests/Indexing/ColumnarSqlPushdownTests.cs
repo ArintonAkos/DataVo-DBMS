@@ -217,7 +217,7 @@ public sealed class ColumnarSqlPushdownTests
         var config = new DataVoConfig { StorageMode = mode };
         if (path is not null)
         {
-            config.DiskStoragePath = path;
+            config.DataDirectory = path;
         }
 
         var db = new DataVoContext(config);

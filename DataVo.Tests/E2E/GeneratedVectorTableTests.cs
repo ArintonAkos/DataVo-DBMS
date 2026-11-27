@@ -85,7 +85,7 @@ public sealed class GeneratedVectorTableTests : IDisposable
         var db = new DataVoContext(new DataVoConfig
         {
             StorageMode = mode,
-            DiskStoragePath = mode == StorageMode.Lsm ? _directory : null,
+            DataDirectory = mode == StorageMode.Lsm ? _directory : null,
             LsmStrictFsync = false,
         });
         Ok(db, "CREATE DATABASE G");

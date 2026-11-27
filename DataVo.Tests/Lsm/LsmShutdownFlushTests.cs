@@ -55,7 +55,7 @@ public class LsmShutdownFlushTests : IDisposable
     private DataVoContext Open() => new(new DataVoConfig
     {
         StorageMode = StorageMode.Lsm,
-        DiskStoragePath = _directory,
+        DataDirectory = _directory,
         LsmStrictFsync = false,
     });
 }

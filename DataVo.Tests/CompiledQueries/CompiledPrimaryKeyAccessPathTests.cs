@@ -94,7 +94,7 @@ public sealed class CompiledPrimaryKeyAccessPathTests
 
     private static DataVoContext CreateContext(StorageMode mode, string? directory)
     {
-        var context = new DataVoContext(new DataVoConfig { StorageMode = mode, DiskStoragePath = directory });
+        var context = new DataVoContext(new DataVoConfig { StorageMode = mode, DataDirectory = directory });
         string databaseName = $"PkPath_{Guid.NewGuid():N}";
         context.Execute($"CREATE DATABASE {databaseName}");
         context.Execute($"USE {databaseName}");

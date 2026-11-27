@@ -559,7 +559,7 @@ public sealed class CrashRecoveryTests(ITestOutputHelper output)
     private static DataVoContext Open(string directory, string mode)
     {
         Assert.Equal("lsm", mode);
-        return new DataVoContext(new DataVoConfig { StorageMode = StorageMode.Lsm, DiskStoragePath = directory, LsmStrictFsync = true });
+        return new DataVoContext(new DataVoConfig { StorageMode = StorageMode.Lsm, DataDirectory = directory, LsmStrictFsync = true });
     }
 
     private static string HarnessPath()

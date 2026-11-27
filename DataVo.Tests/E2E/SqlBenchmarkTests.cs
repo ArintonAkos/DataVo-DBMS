@@ -57,7 +57,7 @@ public class SqlBenchmarkTests : IDisposable
 
 
         // --- 2. LSM PIPELINE BENCHMARK ---
-        var lsmConfig = new DataVoConfig { StorageMode = StorageMode.Lsm, DiskStoragePath = _lsmPath };
+        var lsmConfig = new DataVoConfig { StorageMode = StorageMode.Lsm, DataDirectory = _lsmPath };
         _engine = DataVoEngine.Initialize(lsmConfig);
 
         Execute($"CREATE DATABASE {_testDb}");
@@ -120,7 +120,7 @@ public class SqlBenchmarkTests : IDisposable
 
         _engine.Catalog.DropDatabase(_testDb);
 
-        var lsmConfig = new DataVoConfig { StorageMode = StorageMode.Lsm, DiskStoragePath = _lsmPath };
+        var lsmConfig = new DataVoConfig { StorageMode = StorageMode.Lsm, DataDirectory = _lsmPath };
         _engine = DataVoEngine.Initialize(lsmConfig);
 
         Execute($"CREATE DATABASE {_testDb}");

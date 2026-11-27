@@ -110,7 +110,7 @@ internal static class PortableSmoke
     private const int CrashTestRows = 500;
 
     private static DataVoContext OpenSaveData(StorageMode mode, string path) =>
-        new(new DataVoConfig { StorageMode = mode, DiskStoragePath = path });
+        new(new DataVoConfig { StorageMode = mode, DataDirectory = path });
 
     private static void VerifyPersistence(StorageMode mode, string path)
     {

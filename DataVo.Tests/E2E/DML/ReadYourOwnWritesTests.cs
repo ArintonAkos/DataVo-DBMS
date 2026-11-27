@@ -190,7 +190,7 @@ public sealed class ReadYourOwnWritesTests : IDisposable
         var db = new DataVoContext(new DataVoConfig
         {
             StorageMode = mode,
-            DiskStoragePath = mode == StorageMode.InMemory ? null! : _directory,
+            DataDirectory = mode == StorageMode.InMemory ? null! : _directory,
         });
         Ok(db, "CREATE DATABASE R", _tx);
         Ok(db, "USE R", _tx);

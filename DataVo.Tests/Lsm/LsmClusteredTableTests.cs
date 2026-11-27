@@ -325,7 +325,7 @@ public sealed class LsmClusteredTableTests : IDisposable
     private DataVoContext Open(bool clustered = true) => new(new DataVoConfig
     {
         StorageMode = StorageMode.Lsm,
-        DiskStoragePath = _root,
+        DataDirectory = _root,
         LsmStrictFsync = false,
         ClusteredPrimaryKeys = clustered,
     });

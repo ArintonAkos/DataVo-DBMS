@@ -17,7 +17,7 @@ public sealed class SqlNotAndSumTests : IDisposable
     public SqlNotAndSumTests()
     {
         _directory = Path.Combine(Path.GetTempPath(), "datavo-not-sum-" + Guid.NewGuid().ToString("N"));
-        _db = new DataVoContext(new DataVoConfig { StorageMode = StorageMode.Lsm, DiskStoragePath = _directory, LsmStrictFsync = false });
+        _db = new DataVoContext(new DataVoConfig { StorageMode = StorageMode.Lsm, DataDirectory = _directory, LsmStrictFsync = false });
         Seed(_db);
     }
 

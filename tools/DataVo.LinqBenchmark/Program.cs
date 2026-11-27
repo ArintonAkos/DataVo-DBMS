@@ -21,7 +21,7 @@ Console.WriteLine("WARNING: this is a Debug build; the numbers mean nothing. Run
 
 try
 {
-    using var db = new DataVoContext(new DataVoConfig { StorageMode = StorageMode.Lsm, DiskStoragePath = directory });
+    using var db = new DataVoContext(new DataVoConfig { StorageMode = StorageMode.Lsm, DataDirectory = directory });
     db.Execute("CREATE DATABASE B");
     db.Execute("USE B");
     db.EnsureReadingTable();

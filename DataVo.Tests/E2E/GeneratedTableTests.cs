@@ -363,7 +363,7 @@ public sealed class GeneratedTableTests : IDisposable
     private DataVoConfig Config(StorageMode mode) => new()
     {
         StorageMode = mode,
-        DiskStoragePath = mode == StorageMode.InMemory ? null! : _directory,
+        DataDirectory = mode == StorageMode.InMemory ? null! : _directory,
     };
 
     private DataVoContext Open(StorageMode mode)

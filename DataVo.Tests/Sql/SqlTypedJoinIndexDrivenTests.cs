@@ -120,12 +120,12 @@ public sealed class SqlTypedJoinIndexDrivenTests
     {
         string directory = TestStorageDirectories.Create("sql_typed_join_index_reopen");
         List<Order> orders = SeedOrders();
-        using (var context = new DataVoContext(new DataVoConfig { StorageMode = StorageMode.Lsm, DiskStoragePath = directory }))
+        using (var context = new DataVoContext(new DataVoConfig { StorageMode = StorageMode.Lsm, DataDirectory = directory }))
         {
             CreateSchema(context, orders);
         }
 
-        using var reopened = new DataVoContext(new DataVoConfig { StorageMode = StorageMode.Lsm, DiskStoragePath = directory });
+        using var reopened = new DataVoContext(new DataVoConfig { StorageMode = StorageMode.Lsm, DataDirectory = directory });
         Execute(reopened, "USE TypedJoinIndex");
         Execute(reopened, "UPDATE Orders SET Amount = 999.5 WHERE Id <= 400");
         Execute(reopened, "DELETE FROM Orders WHERE Id > 400 AND Id <= 800");
@@ -191,7 +191,7 @@ public sealed class SqlTypedJoinIndexDrivenTests
     private static void WithSchema(StorageMode mode, Action<DataVoContext, List<Order>> test)
     {
         string? directory = mode == StorageMode.Lsm ? TestStorageDirectories.Create("sql_typed_join_index") : null;
-        using var context = new DataVoContext(new DataVoConfig { StorageMode = mode, DiskStoragePath = directory });
+        using var context = new DataVoContext(new DataVoConfig { StorageMode = mode, DataDirectory = directory });
         List<Order> orders = SeedOrders();
         CreateSchema(context, orders);
         context.Diagnostics.Enabled = true;

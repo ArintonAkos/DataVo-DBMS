@@ -144,7 +144,7 @@ public sealed class TransactionKeyReuseTests : IDisposable
     {
         string directory = Path.Combine(Path.GetTempPath(), "datavo-tx-keys-" + Guid.NewGuid().ToString("N"));
         _directories.Add(directory);
-        var db = new DataVoContext(new DataVoConfig { StorageMode = mode, DiskStoragePath = directory, LsmStrictFsync = false });
+        var db = new DataVoContext(new DataVoConfig { StorageMode = mode, DataDirectory = directory, LsmStrictFsync = false });
         Run(db, "CREATE DATABASE D");
         Run(db, "USE D");
         Run(db, "CREATE TABLE T (Id INT PRIMARY KEY, E VARCHAR(10) UNIQUE, V VARCHAR(10))");

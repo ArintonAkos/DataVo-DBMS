@@ -68,7 +68,7 @@ public sealed class SqlIndexLookupTests
     private static void WithTable(StorageMode mode, Action<DataVoContext> test)
     {
         string? directory = mode == StorageMode.Lsm ? TestStorageDirectories.Create("sql_index_lookup") : null;
-        using var context = new DataVoContext(new DataVoConfig { StorageMode = mode, DiskStoragePath = directory });
+        using var context = new DataVoContext(new DataVoConfig { StorageMode = mode, DataDirectory = directory });
         Execute(context, "CREATE DATABASE Lookup");
         Execute(context, "USE Lookup");
         Execute(context, "CREATE TABLE T (Id INT PRIMARY KEY, Name VARCHAR(20), Code INT, Score FLOAT, GroupId INT)");

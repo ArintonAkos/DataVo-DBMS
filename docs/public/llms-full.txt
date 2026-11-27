@@ -256,7 +256,7 @@ Switch from `StorageMode.InMemory` to `StorageMode.Lsm` to persist tables to dis
 using var db = new DataVoContext(new DataVoConfig
 {
     StorageMode = StorageMode.Lsm,
-    DiskStoragePath = "./datavo_lsm_data",
+    DataDirectory = "./datavo_lsm_data",
     LsmStrictFsync = true
 });
 ```
@@ -469,7 +469,7 @@ using var db = new DataVoContext(new DataVoConfig
 using var persisted = new DataVoContext(new DataVoConfig
 {
     StorageMode = StorageMode.Lsm,
-    DiskStoragePath = "./datavo_lsm_data",
+    DataDirectory = "./datavo_lsm_data",
     LsmStrictFsync = true
 });
 ```
@@ -511,7 +511,7 @@ For `StorageMode.Wasm`, set `WasmStorageEngine` to an OPFS-backed or browser sto
 
 For `Lsm`, DataVo serves one engine per directory per process:
 
-- **Within one process:** Multiple `DataVoContext` instances and ADO.NET connections targeting the same `DiskStoragePath` share a single engine until the last handle is disposed. Their configurations must match, or the second open throws `DatabaseInUseException`.
+- **Within one process:** Multiple `DataVoContext` instances and ADO.NET connections targeting the same `DataDirectory` share a single engine until the last handle is disposed. Their configurations must match, or the second open throws `DatabaseInUseException`.
 - **Across processes:** DataVo holds a `datavo.lock` file while the directory is open. Opening the same directory from a second process throws `DatabaseInUseException`.
 
 ## See Also
@@ -536,7 +536,7 @@ using DataVo.Core.StorageEngine.Config;
 using var db = new DataVoContext(new DataVoConfig
 {
     StorageMode = StorageMode.Lsm,
-    DiskStoragePath = "./datavo_lsm_data",
+    DataDirectory = "./datavo_lsm_data",
     LsmStrictFsync = true,          // default: wait for stable storage on commit
     ClusteredPrimaryKeys = true     // default: store single INT/GUID PK tables clustered
 });
@@ -589,13 +589,13 @@ In `StorageMode.Lsm`, every auto-commit statement and every explicit transaction
 
 ## Reopening a Directory
 
-Closing and reopening a `DataVoContext` on the same `DiskStoragePath` restores the catalog (`Catalog.xml`), SSTables, commit log, and transaction-ID watermark:
+Closing and reopening a `DataVoContext` on the same `DataDirectory` restores the catalog (`Catalog.xml`), SSTables, commit log, and transaction-ID watermark:
 
 ```csharp
 var config = new DataVoConfig
 {
     StorageMode = StorageMode.Lsm,
-    DiskStoragePath = "./datavo_lsm_data"
+    DataDirectory = "./datavo_lsm_data"
 };
 
 using (var db = new DataVoContext(config))
@@ -644,7 +644,7 @@ using DataVo.Core.StorageEngine.Config;
 using var db = new DataVoContext(new DataVoConfig
 {
     StorageMode = StorageMode.Lsm,
-    DiskStoragePath = "./datavo_lsm_data"
+    DataDirectory = "./datavo_lsm_data"
 });
 
 db.Execute("CREATE DATABASE App; USE App;");
@@ -3924,7 +3924,7 @@ Perform formatting, date arithmetic, conditional projections, or type conversion
 DataVo does not use a cost-based optimizer. Instead, it pairs one general evaluator that can execute every supported SQL query with a cascade of **typed fast paths** that operate directly on stored bytes without boxing. Whether a query stays on a typed path is the single largest factor in its latency and allocation profile.
 
 ```csharp
-using var db = new DataVoContext(new DataVoConfig { StorageMode = StorageMode.Lsm, DiskStoragePath = "./app_db" });
+using var db = new DataVoContext(new DataVoConfig { StorageMode = StorageMode.Lsm, DataDirectory = "./app_db" });
 
 // Stays on the Typed Single-Table Path (index lookup or UTF-8 byte scan, ~16–24 KB alloc / 1M rows)
 var stmt = db.Prepare("SELECT Id, Name, Score FROM players WHERE Region = @r AND Score >= @min");
@@ -4657,8 +4657,8 @@ dotnet run -c Release --project benchmarks/DataVo.Benchmarks -- --filter '*'
 Always keep durability settings explicit when comparing strict vs. relaxed LSM:
 
 ```csharp
-var strict  = new DataVoConfig { StorageMode = StorageMode.Lsm, DiskStoragePath = "./bench_strict",  LsmStrictFsync = true };
-var relaxed = new DataVoConfig { StorageMode = StorageMode.Lsm, DiskStoragePath = "./bench_relaxed", LsmStrictFsync = false };
+var strict  = new DataVoConfig { StorageMode = StorageMode.Lsm, DataDirectory = "./bench_strict",  LsmStrictFsync = true };
+var relaxed = new DataVoConfig { StorageMode = StorageMode.Lsm, DataDirectory = "./bench_relaxed", LsmStrictFsync = false };
 ```
 
 ## 4. Arena Live Views, Unity IL2CPP & Charts
@@ -4705,7 +4705,7 @@ python3 docs/scripts/generate-ci-benchmark-plots.py
 > Source route: /manual/reference/configuration
 > Source file: manual/reference/configuration.md
 
-`DataVoConfig` configures every aspect of an embedded `DataVoContext`. Most applications only set `StorageMode`, `DiskStoragePath`, and `LsmStrictFsync`; every other property ships with sensible defaults.
+`DataVoConfig` configures every aspect of an embedded `DataVoContext`. Most applications only set `StorageMode`, `DataDirectory`, and `LsmStrictFsync`; every other property ships with sensible defaults.
 
 ```csharp
 using DataVo.Core;
@@ -4714,7 +4714,7 @@ using DataVo.Core.StorageEngine.Config;
 using var db = new DataVoContext(new DataVoConfig
 {
     StorageMode = StorageMode.Lsm,
-    DiskStoragePath = "./game_data",
+    DataDirectory = "./game_data",
     LsmStrictFsync = true
 });
 ```
@@ -4724,7 +4724,7 @@ using var db = new DataVoContext(new DataVoConfig
 | Property | Default | Description |
 | --- | --- | --- |
 | `StorageMode` | `StorageMode.InMemory` | Storage mode: `InMemory` or `Lsm` (`Wasm` and `Custom` plug in an `IStorageEngine` you supply). |
-| `DiskStoragePath` | `null` (`./datavo_lsm_data`) | Directory for persisted `Lsm` files. Guarded by a single-process `datavo.lock`. |
+| `DataDirectory` | `null` (`./datavo_lsm_data`) | Directory for persisted `Lsm` files. Guarded by a single-process `datavo.lock`. |
 | `CustomStorageEngine` | `null` | Custom `IStorageEngine` instance when `StorageMode = StorageMode.Custom`. |
 | `WasmStorageEngine` | `null` | Browser storage engine when `StorageMode = StorageMode.Wasm`. |
 | `LockAcquireTimeoutMs` | `30000` | Maximum milliseconds to wait for a lock before failing (`-1` waits indefinitely). |
@@ -5444,7 +5444,7 @@ dotnet add package DataVo.Generators   # optional: zero-alloc compiled LINQ
 using DataVo.Core;
 using DataVo.Core.StorageEngine.Config;
 
-using var db = new DataVoContext(new DataVoConfig { StorageMode = StorageMode.Lsm, DiskStoragePath = "./app_data" });
+using var db = new DataVoContext(new DataVoConfig { StorageMode = StorageMode.Lsm, DataDirectory = "./app_data" });
 db.Execute("CREATE TABLE Notes (Id INT PRIMARY KEY, Tag VARCHAR(32), Embedding VECTOR(384))");
 ```
 

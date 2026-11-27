@@ -65,7 +65,7 @@ public enum StorageMode
 /// var config = new DataVoConfig
 /// {
 ///     StorageMode = StorageMode.Lsm,
-///     DiskStoragePath = "./demo-data",
+///     DataDirectory = "./demo-data",
 /// };
 /// </code>
 /// </example>
@@ -300,7 +300,7 @@ public class DataVoConfig
     /// The directory that holds an <see cref="StorageMode.Lsm"/> engine's files (SSTables, logs, catalog and
     /// state). Defaults to <c>./datavo_lsm_data</c>; ignored by the in-memory engine.
     /// </summary>
-    public string? DiskStoragePath { get; set; }
+    public string? DataDirectory { get; set; }
 
     /// <summary>
     /// Gets or sets lock acquisition timeout in milliseconds.
@@ -354,7 +354,7 @@ public class DataVoConfig
     /// files), or <see langword="null"/> for storage modes that keep no on-disk directory.
     /// </summary>
     /// <returns>The configured or default data directory in Lsm mode; otherwise <see langword="null"/>.</returns>
-    public string? ResolveDataDirectory() => StorageMode == StorageMode.Lsm ? DiskStoragePath ?? DefaultLsmDirectory : null;
+    public string? ResolveDataDirectory() => StorageMode == StorageMode.Lsm ? DataDirectory ?? DefaultLsmDirectory : null;
 
     internal const string DefaultLsmDirectory = "./datavo_lsm_data";
 

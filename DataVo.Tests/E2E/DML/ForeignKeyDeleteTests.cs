@@ -125,5 +125,5 @@ public class InMemoryForeignKeyDeleteTests : ForeignKeyDeleteTestsBase
 
 public class LsmForeignKeyDeleteTests : ForeignKeyDeleteTestsBase
 {
-    public LsmForeignKeyDeleteTests() : base(new DataVoConfig { StorageMode = StorageMode.Lsm, DiskStoragePath = "./test_datavo_lsm_fkdelete" }, "FKDeleteDB_Lsm") { }
+    public LsmForeignKeyDeleteTests() : base(new DataVoConfig { StorageMode = StorageMode.Lsm, DataDirectory = "./test_datavo_lsm_fkdelete" }, "FKDeleteDB_Lsm") { }
 }

@@ -433,7 +433,7 @@ public class PreparedStatementTests
         new(new DataVoConfig
         {
             StorageMode = mode,
-            DiskStoragePath = directory,
+            DataDirectory = directory,
             LsmStrictFsync = false,
         });
 

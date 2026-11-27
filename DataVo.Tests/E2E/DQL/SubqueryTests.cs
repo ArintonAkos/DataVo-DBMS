@@ -257,5 +257,5 @@ public class SubqueryTestsMemory : SubqueryTestsBase
 
 public class SubqueryTestsLsm : SubqueryTestsBase
 {
-    public SubqueryTestsLsm() : base(new DataVoConfig { StorageMode = StorageMode.Lsm, DiskStoragePath = "SubqueryDB_Lsm" }, "SubqueryDB_Lsm") { }
+    public SubqueryTestsLsm() : base(new DataVoConfig { StorageMode = StorageMode.Lsm, DataDirectory = "SubqueryDB_Lsm" }, "SubqueryDB_Lsm") { }
 }

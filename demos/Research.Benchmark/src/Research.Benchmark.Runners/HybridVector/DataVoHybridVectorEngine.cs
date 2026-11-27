@@ -27,7 +27,7 @@ public sealed class DataVoHybridVectorEngine(string indexType) : IHybridVectorEn
         _context = new DataVoContext(new DataVoConfig
         {
             StorageMode = StorageMode.Lsm,
-            DiskStoragePath = directory,
+            DataDirectory = directory,
             LsmStrictFsync = false,
         });
         Ok($"CREATE DATABASE {Database}");

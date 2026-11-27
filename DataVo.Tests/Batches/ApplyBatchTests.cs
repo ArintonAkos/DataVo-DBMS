@@ -834,7 +834,7 @@ public sealed class ApplyBatchTests : IDisposable
     }
 
     private static DataVoContext Create(StorageMode mode, string? root) =>
-        new(new DataVoConfig { StorageMode = mode, DiskStoragePath = root ?? string.Empty, LsmStrictFsync = false });
+        new(new DataVoConfig { StorageMode = mode, DataDirectory = root ?? string.Empty, LsmStrictFsync = false });
 
     private string NewRoot()
     {

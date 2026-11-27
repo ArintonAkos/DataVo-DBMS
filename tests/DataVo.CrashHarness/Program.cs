@@ -31,7 +31,7 @@ if (!string.Equals(args[1], "lsm", StringComparison.OrdinalIgnoreCase))
 
 long nextId = long.Parse(args[2], System.Globalization.CultureInfo.InvariantCulture);
 
-var config = new DataVoConfig { StorageMode = StorageMode.Lsm, DiskStoragePath = directory, LsmStrictFsync = true };
+var config = new DataVoConfig { StorageMode = StorageMode.Lsm, DataDirectory = directory, LsmStrictFsync = true };
 
 using var db = new DataVoContext(config);
 Require(db.Execute("USE CrashDb"));

@@ -135,7 +135,7 @@ public sealed class ErrorContractTests
 
     internal static DataVoContext Seeded(StorageMode mode = StorageMode.InMemory, string? path = null)
     {
-        var db = new DataVoContext(new DataVoConfig { StorageMode = mode, DiskStoragePath = path, LsmStrictFsync = false });
+        var db = new DataVoContext(new DataVoConfig { StorageMode = mode, DataDirectory = path, LsmStrictFsync = false });
         foreach (string sql in new[]
         {
             "CREATE DATABASE A", "USE A",

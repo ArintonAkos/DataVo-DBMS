@@ -152,7 +152,7 @@ internal class InsertInto(InsertIntoStatement ast) : BaseDbAction
         // transactions, which buffer rows differently) take the general path below, so error messages
         // stay exactly those of the general path.
         // In-memory storage keeps typed inserts as packed typed rows, which some older paths (foreign-key
-        // cascades, VACUUM) cannot read; serializing backends (LSM, Disk) store bytes either way.
+        // cascades, VACUUM) cannot read; serializing backends (LSM) store bytes either way.
         if (txContext is null && !Context.KeepsTypedRowsTyped && TryBuildTypedRows(tableColumns, hasColumns, out ReactiveRowSchema? schema, out List<CellValue[]>? typedRows))
         {
             try

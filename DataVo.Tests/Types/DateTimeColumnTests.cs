@@ -201,7 +201,7 @@ public abstract class DateTimeColumnTests : IDisposable
         Assert.Equal(Base.AddTicks(1), Assert.Single(Rows("SELECT At FROM events"))["At"]);
     }
 
-    private DataVoContext Open() => new(new DataVoConfig { StorageMode = _mode, DiskStoragePath = _root, LsmStrictFsync = false });
+    private DataVoContext Open() => new(new DataVoConfig { StorageMode = _mode, DataDirectory = _root, LsmStrictFsync = false });
 
     private List<Dictionary<string, object?>> Rows(string sql)
     {

@@ -78,7 +78,7 @@ public sealed class SqlUtf8GroupKeyTests
     public void GroupByTextOverSerializedRows_AllocatesNothingPerRow()
     {
         const int rowCount = 20_000;
-        using var context = new DataVoContext(new DataVoConfig { StorageMode = StorageMode.Lsm, DiskStoragePath = TestStorageDirectories.Create("sql_utf8_group_alloc") });
+        using var context = new DataVoContext(new DataVoConfig { StorageMode = StorageMode.Lsm, DataDirectory = TestStorageDirectories.Create("sql_utf8_group_alloc") });
         Run(context, "CREATE DATABASE Utf8Group");
         Run(context, "USE Utf8Group");
         Run(context, "CREATE TABLE T (Id INT PRIMARY KEY, Status VARCHAR(12), Code INT, Amount DOUBLE)");
@@ -113,7 +113,7 @@ public sealed class SqlUtf8GroupKeyTests
     private static DataVoContext Open(StorageMode mode, Item[] items)
     {
         string? directory = mode == StorageMode.Lsm ? TestStorageDirectories.Create("sql_utf8_group") : null;
-        var context = new DataVoContext(new DataVoConfig { StorageMode = mode, DiskStoragePath = directory });
+        var context = new DataVoContext(new DataVoConfig { StorageMode = mode, DataDirectory = directory });
         Run(context, "CREATE DATABASE Utf8Group");
         Run(context, "USE Utf8Group");
         Run(context, "CREATE TABLE Items (Id INT PRIMARY KEY, Name VARCHAR(60), Qty INT)");

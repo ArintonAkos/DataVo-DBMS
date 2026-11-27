@@ -79,7 +79,7 @@ public sealed class HNSWClusteredRecallTests
         string? directory = mode == StorageMode.Lsm ? TestStorageDirectories.Create("hnsw_clustered_recall") : null;
         try
         {
-            using var context = new DataVoContext(new DataVoConfig { StorageMode = mode, DiskStoragePath = directory, LsmStrictFsync = false });
+            using var context = new DataVoContext(new DataVoConfig { StorageMode = mode, DataDirectory = directory, LsmStrictFsync = false });
             Execute(context, "CREATE DATABASE Clustered");
             Execute(context, "USE Clustered");
             Execute(context, $"CREATE TABLE Docs (Id INT PRIMARY KEY, Emb VECTOR({Dimensions}))");

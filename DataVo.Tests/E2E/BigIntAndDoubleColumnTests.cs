@@ -448,7 +448,7 @@ public sealed class BigIntAndDoubleColumnTests : IDisposable
     private DataVoConfig Config(StorageMode mode) => new()
     {
         StorageMode = mode,
-        DiskStoragePath = mode == StorageMode.InMemory ? null! : _directory,
+        DataDirectory = mode == StorageMode.InMemory ? null! : _directory,
     };
 
     private static void Ok(DataVoContext db, string sql)

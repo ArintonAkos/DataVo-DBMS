@@ -103,7 +103,7 @@ public class OutOfCoreAggregateBenchmarks
         var db = new DataVoContext(new DataVoConfig
         {
             StorageMode = StorageMode.Lsm,
-            DiskStoragePath = Path.Combine(_scratch.Path, "datavo"),
+            DataDirectory = Path.Combine(_scratch.Path, "datavo"),
         });
         var result = db.Execute("USE Bench")[^1];
         if (result.IsError)
@@ -224,7 +224,7 @@ public class OutOfCoreAggregateUpdateBenchmarks
         var db = new DataVoContext(new DataVoConfig
         {
             StorageMode = StorageMode.Lsm,
-            DiskStoragePath = Path.Combine(_scratch.Path, "datavo"),
+            DataDirectory = Path.Combine(_scratch.Path, "datavo"),
         });
         Check(db, "USE Bench");
         return db;

@@ -162,5 +162,5 @@ public class PredicateTestsMemory : PredicateTestsBase
 
 public class PredicateTestsLsm : PredicateTestsBase
 {
-    public PredicateTestsLsm() : base(new DataVoConfig { StorageMode = StorageMode.Lsm, DiskStoragePath = "PredicateDB_Lsm" }, "PredicateDB_Lsm") { }
+    public PredicateTestsLsm() : base(new DataVoConfig { StorageMode = StorageMode.Lsm, DataDirectory = "PredicateDB_Lsm" }, "PredicateDB_Lsm") { }
 }

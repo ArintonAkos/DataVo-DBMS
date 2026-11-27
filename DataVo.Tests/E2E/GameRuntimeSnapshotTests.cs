@@ -191,7 +191,7 @@ public class GameRuntimeSnapshotTests
             using var context = new DataVoContext(new DataVoConfig
             {
                 StorageMode = StorageMode.Lsm,
-                DiskStoragePath = path
+                DataDirectory = path
             });
 
             Assert.Throws<NotSupportedException>(() => context.CreateSnapshot());

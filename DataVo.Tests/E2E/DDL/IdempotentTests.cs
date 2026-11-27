@@ -69,5 +69,5 @@ public class IdempotentTestsMemory : IdempotentTestsBase
 
 public class IdempotentTestsLsm : IdempotentTestsBase
 {
-    public IdempotentTestsLsm() : base(new DataVoConfig { StorageMode = StorageMode.Lsm, DiskStoragePath = "IdempotentLsmDb" }, "IdempotentLsmDb") { }
+    public IdempotentTestsLsm() : base(new DataVoConfig { StorageMode = StorageMode.Lsm, DataDirectory = "IdempotentLsmDb" }, "IdempotentLsmDb") { }
 }

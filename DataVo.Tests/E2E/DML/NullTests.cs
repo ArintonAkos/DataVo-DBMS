@@ -99,5 +99,5 @@ public class InMemoryNullTests : NullTestsBase
 
 public class LsmNullTests : NullTestsBase
 {
-    public LsmNullTests() : base(new DataVoConfig { StorageMode = StorageMode.Lsm, DiskStoragePath = "./test_datavo_lsm_null" }, "NullDB_Lsm") { }
+    public LsmNullTests() : base(new DataVoConfig { StorageMode = StorageMode.Lsm, DataDirectory = "./test_datavo_lsm_null" }, "NullDB_Lsm") { }
 }

@@ -335,7 +335,7 @@ public sealed class ChainedTransactionDmlTests : IDisposable
         var db = new DataVoContext(new DataVoConfig
         {
             StorageMode = mode,
-            DiskStoragePath = mode == StorageMode.InMemory ? null! : _directory,
+            DataDirectory = mode == StorageMode.InMemory ? null! : _directory,
             LsmStrictFsync = false,
         });
         Ok(db, "CREATE DATABASE Chain", _tx);

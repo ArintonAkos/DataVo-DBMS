@@ -181,7 +181,7 @@ public sealed class PreparedArithmeticUpdateTests : IDisposable
             Assert.Equal(3, add.TransactionalUpdateExecutions);
         }
 
-        using DataVoContext reopened = new(new DataVoConfig { StorageMode = StorageMode.Lsm, DiskStoragePath = path });
+        using DataVoContext reopened = new(new DataVoConfig { StorageMode = StorageMode.Lsm, DataDirectory = path });
         Ok(reopened, "USE Arith");
         Assert.Equal(20, Score(reopened, 1));
         Assert.Equal(20, Score(reopened, 2));
@@ -346,7 +346,7 @@ public sealed class PreparedArithmeticUpdateTests : IDisposable
         var db = new DataVoContext(new DataVoConfig
         {
             StorageMode = mode,
-            DiskStoragePath = mode == StorageMode.InMemory ? null! : path ?? Path.Combine(_directory, name),
+            DataDirectory = mode == StorageMode.InMemory ? null! : path ?? Path.Combine(_directory, name),
         });
         Ok(db, "CREATE DATABASE Arith");
         Ok(db, "USE Arith");

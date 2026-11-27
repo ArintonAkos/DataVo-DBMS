@@ -401,7 +401,7 @@ dotnet add package DataVo.Generators   # optional: zero-alloc compiled LINQ
 using DataVo.Core;
 using DataVo.Core.StorageEngine.Config;
 
-using var db = new DataVoContext(new DataVoConfig { StorageMode = StorageMode.Lsm, DiskStoragePath = "./app_data" });
+using var db = new DataVoContext(new DataVoConfig { StorageMode = StorageMode.Lsm, DataDirectory = "./app_data" });
 db.Execute("CREATE TABLE Notes (Id INT PRIMARY KEY, Tag VARCHAR(32), Embedding VECTOR(384))");
 ```
 

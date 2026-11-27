@@ -143,7 +143,7 @@ public partial class StorageContext(DataVoConfig config) : IDisposable
         return _storageEngine is LsmStorageBackend lsm ? new UnitWriteBatch(lsm.BeginWriteBatch()) : NoWriteBatch.Instance;
     }
 
-    /// <summary>A write unit without a storage batch (in-memory and Disk modes): disposing it ends the unit.</summary>
+    /// <summary>A write unit without a storage batch (in-memory mode): disposing it ends the unit.</summary>
     private sealed class NoWriteBatch : IWriteBatchScope
     {
         public static readonly NoWriteBatch Instance = new();
@@ -310,7 +310,7 @@ public partial class StorageContext(DataVoConfig config) : IDisposable
 
     /// <summary>
     /// Scratch list handed to <see cref="IStorageEngine.InsertRows"/>, which only iterates it (no
-    /// backend retains the list itself — the LSM/disk engines retain or write the row buffers).
+    /// backend retains the list itself — the LSM engine retains or write the row buffers).
     /// Thread-static so concurrent sessions never share it; cleared after use so it doesn't pin
     /// row buffers between batches.
     /// </summary>
@@ -318,7 +318,7 @@ public partial class StorageContext(DataVoConfig config) : IDisposable
     private static List<byte[]>? _typedInsertSerializeScratch;
 
     /// <summary>
-    /// Inserts full typed cell rows. A typed backend packs the cells; a serializing backend (LSM, disk)
+    /// Inserts full typed cell rows. A typed backend packs the cells; a serializing backend (LSM)
     /// serializes them. Either way the cells are read during the call and no backend keeps the caller's
     /// arrays, so no per-row wrapper or copy is made.
     /// </summary>

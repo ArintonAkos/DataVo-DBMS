@@ -43,7 +43,7 @@ public sealed class Doc
 
 IEmbeddingGenerator<string, Embedding<float>> generator = /* any Microsoft.Extensions.AI generator */;
 
-using var store = new DataVoVectorStore(new DataVoConfig { StorageMode = StorageMode.Lsm, DiskStoragePath = "./vectors" });
+using var store = new DataVoVectorStore(new DataVoConfig { StorageMode = StorageMode.Lsm, DataDirectory = "./vectors" });
 var docs = new DataVoVectorStoreCollection<Guid, Doc>(store, "docs");
 await docs.EnsureCollectionExistsAsync();
 
@@ -123,7 +123,7 @@ var store = new DataVoVectorStore(config, new DataVoVectorStoreOptions { Embeddi
 
 ```csharp
 services.AddSingleton<IEmbeddingGenerator<string, Embedding<float>>>(generator);
-services.AddDataVoVectorStore(new DataVoConfig { StorageMode = StorageMode.Lsm, DiskStoragePath = "./vectors" });
+services.AddDataVoVectorStore(new DataVoConfig { StorageMode = StorageMode.Lsm, DataDirectory = "./vectors" });
 services.AddDataVoCollection<Guid, Doc>("docs");
 
 // Inject VectorStore, DataVoVectorStore, VectorStoreCollection<Guid, Doc> or IVectorSearchable<Doc>.

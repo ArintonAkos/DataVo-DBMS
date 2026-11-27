@@ -74,9 +74,9 @@ public abstract class SqlExecutionTestsBase : IDisposable
         try { Engine.IndexManager.DropDatabaseIndexes(TestDb); } catch { }
         try { Engine.Dispose(); } catch { }
 
-        if (Config.StorageMode == StorageMode.Lsm && !string.IsNullOrWhiteSpace(Config.DiskStoragePath) && Directory.Exists(Config.DiskStoragePath))
+        if (Config.StorageMode == StorageMode.Lsm && !string.IsNullOrWhiteSpace(Config.DataDirectory) && Directory.Exists(Config.DataDirectory))
         {
-            try { Directory.Delete(Config.DiskStoragePath, true); } catch { }
+            try { Directory.Delete(Config.DataDirectory, true); } catch { }
         }
     }
 
@@ -85,13 +85,13 @@ public abstract class SqlExecutionTestsBase : IDisposable
         // Every persistent mode gets a private directory; Lsm used to fall back to the shared default
         // ./datavo_lsm_data, so parallel test classes wrote one commit log.
         string? diskPath = config.StorageMode == StorageMode.Lsm
-            ? Path.Combine(config.DiskStoragePath ?? Path.Combine(Path.GetTempPath(), "datavo_tests"), Guid.NewGuid().ToString("N"))
+            ? Path.Combine(config.DataDirectory ?? Path.Combine(Path.GetTempPath(), "datavo_tests"), Guid.NewGuid().ToString("N"))
             : null;
 
         return new DataVoConfig
         {
             StorageMode = config.StorageMode,
-            DiskStoragePath = diskPath,
+            DataDirectory = diskPath,
             LockAcquireTimeoutMs = config.LockAcquireTimeoutMs,
             TransactionIdStateFilePath = config.TransactionIdStateFilePath,
             EnableVolcanoExecution = config.EnableVolcanoExecution,
@@ -122,7 +122,7 @@ public abstract class SqlExecutionTestsBase : IDisposable
         return new DataVoConfig
         {
             StorageMode = config.StorageMode,
-            DiskStoragePath = config.DiskStoragePath,
+            DataDirectory = config.DataDirectory,
             LockAcquireTimeoutMs = config.LockAcquireTimeoutMs,
             TransactionIdStateFilePath = config.TransactionIdStateFilePath,
             EnableVolcanoExecution = config.EnableVolcanoExecution,

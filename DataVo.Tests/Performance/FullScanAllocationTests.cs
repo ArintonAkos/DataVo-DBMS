@@ -67,7 +67,7 @@ public sealed class FullScanAllocationTests
         var context = new DataVoContext(new DataVoConfig
         {
             StorageMode = mode,
-            DiskStoragePath = mode == StorageMode.Lsm ? TestStorageDirectories.Create("full_scan_alloc") : null,
+            DataDirectory = mode == StorageMode.Lsm ? TestStorageDirectories.Create("full_scan_alloc") : null,
         });
         Run(context, "CREATE DATABASE S");
         Run(context, "USE S");

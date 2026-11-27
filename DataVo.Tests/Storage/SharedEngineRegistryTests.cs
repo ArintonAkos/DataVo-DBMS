@@ -70,7 +70,7 @@ public sealed class SharedEngineRegistryTests : IDisposable
         var ex = Assert.Throws<DatabaseInUseException>(() => new DataVoContext(new DataVoConfig
         {
             StorageMode = StorageMode.Lsm,
-            DiskStoragePath = _path,
+            DataDirectory = _path,
             EnableAuthorization = true,
         }));
         Assert.Contains(nameof(DataVoConfig.EnableAuthorization), ex.Message, StringComparison.Ordinal);
@@ -83,7 +83,7 @@ public sealed class SharedEngineRegistryTests : IDisposable
         using var second = new DataVoContext(new DataVoConfig
         {
             StorageMode = StorageMode.Lsm,
-            DiskStoragePath = _path + Path.DirectorySeparatorChar,
+            DataDirectory = _path + Path.DirectorySeparatorChar,
             LsmStrictFsync = false,
         });
 
@@ -179,10 +179,10 @@ public sealed class SharedEngineRegistryTests : IDisposable
     {
     }
 
-    private DataVoConfig NewDiskConfig() => new() { StorageMode = StorageMode.Lsm, DiskStoragePath = _path };
+    private DataVoConfig NewDiskConfig() => new() { StorageMode = StorageMode.Lsm, DataDirectory = _path };
 
     private DataVoContext Open(StorageMode mode) =>
-        new(new DataVoConfig { StorageMode = mode, DiskStoragePath = _path, LsmStrictFsync = false });
+        new(new DataVoConfig { StorageMode = mode, DataDirectory = _path, LsmStrictFsync = false });
 
     private FileStream LockDirectory() =>
         new(Path.Combine(_path, "datavo.lock"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);

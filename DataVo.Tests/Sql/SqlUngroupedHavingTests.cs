@@ -210,7 +210,7 @@ public sealed class SqlUngroupedHavingTests
     private static void WithOrders(StorageMode mode, Order[] orders, Action<DataVoContext> test)
     {
         string? directory = mode == StorageMode.Lsm ? TestStorageDirectories.Create("sql_ungrouped_having") : null;
-        using var context = new DataVoContext(new DataVoConfig { StorageMode = mode, DiskStoragePath = directory });
+        using var context = new DataVoContext(new DataVoConfig { StorageMode = mode, DataDirectory = directory });
         Execute(context, "CREATE DATABASE UngroupedHaving");
         Execute(context, "USE UngroupedHaving");
         Execute(context, "CREATE TABLE Orders (Id INT PRIMARY KEY, CustomerId INT, Status VARCHAR(8), Amount DOUBLE, Qty INT)");

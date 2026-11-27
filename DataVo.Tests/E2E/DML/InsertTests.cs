@@ -168,5 +168,5 @@ public class InMemoryInsertTests : InsertTestsBase
 
 public class LsmInsertTests : InsertTestsBase
 {
-    public LsmInsertTests() : base(new DataVoConfig { StorageMode = StorageMode.Lsm, DiskStoragePath = "./test_datavo_lsm_insert" }, "InsertDB_Lsm") { }
+    public LsmInsertTests() : base(new DataVoConfig { StorageMode = StorageMode.Lsm, DataDirectory = "./test_datavo_lsm_insert" }, "InsertDB_Lsm") { }
 }

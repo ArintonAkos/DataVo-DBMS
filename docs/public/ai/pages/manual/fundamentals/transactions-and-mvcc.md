@@ -12,7 +12,7 @@ using DataVo.Core.StorageEngine.Config;
 using var db = new DataVoContext(new DataVoConfig
 {
     StorageMode = StorageMode.Lsm,
-    DiskStoragePath = "./datavo_lsm_data"
+    DataDirectory = "./datavo_lsm_data"
 });
 
 db.Execute("CREATE DATABASE App; USE App;");

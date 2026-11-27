@@ -717,7 +717,7 @@ public sealed class RowRefStreamTests : IDisposable
 
     private DataVoContext Open(StorageMode mode)
     {
-        var db = new DataVoContext(new DataVoConfig { StorageMode = mode, DiskStoragePath = _directory });
+        var db = new DataVoContext(new DataVoConfig { StorageMode = mode, DataDirectory = _directory });
         Run(db, "CREATE DATABASE S");
         Run(db, "USE S");
         return db;

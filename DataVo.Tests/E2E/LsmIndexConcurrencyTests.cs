@@ -16,7 +16,7 @@ public class LsmIndexConcurrencyTests : SqlExecutionTestsBase
         : base(new DataVoConfig
         {
             StorageMode = StorageMode.Lsm,
-            DiskStoragePath = "./test_datavo_index_concurrency"
+            DataDirectory = "./test_datavo_index_concurrency"
         }, "IndexConcurrencyDb_Lsm")
     {
     }

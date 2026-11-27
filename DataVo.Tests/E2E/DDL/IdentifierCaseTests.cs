@@ -278,7 +278,7 @@ public class IdentifierCaseTests : IDisposable
     private DataVoContext Open(StorageMode mode) => new(new DataVoConfig
     {
         StorageMode = mode,
-        DiskStoragePath = mode == StorageMode.InMemory ? null! : _directory,
+        DataDirectory = mode == StorageMode.InMemory ? null! : _directory,
     });
 
     private static QueryResult Ok(DataVoContext context, string sql)

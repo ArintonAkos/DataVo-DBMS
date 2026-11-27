@@ -430,7 +430,7 @@ public sealed class InsertKeyLockTests : IDisposable
             _directories.Add(directory);
         }
 
-        var context = new DataVoContext(new DataVoConfig { StorageMode = mode, DiskStoragePath = directory, LsmStrictFsync = false });
+        var context = new DataVoContext(new DataVoConfig { StorageMode = mode, DataDirectory = directory, LsmStrictFsync = false });
         Execute(context, "CREATE DATABASE Keys");
         Execute(context, "USE Keys");
         Execute(context, "CREATE TABLE Records (Id INT PRIMARY KEY, Email VARCHAR(40) UNIQUE, Value INT)");

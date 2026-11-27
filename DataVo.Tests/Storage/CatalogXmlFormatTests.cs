@@ -21,7 +21,7 @@ public class CatalogXmlFormatTests
         string dir = NewTempDir();
         try
         {
-            using (var ctx = new DataVoContext(new DataVoConfig { StorageMode = StorageMode.Lsm, DiskStoragePath = dir }))
+            using (var ctx = new DataVoContext(new DataVoConfig { StorageMode = StorageMode.Lsm, DataDirectory = dir }))
             {
                 foreach (string sql in new[]
                 {
@@ -62,7 +62,7 @@ public class CatalogXmlFormatTests
         string dir = NewTempDir();
         try
         {
-            using (var ctx = new DataVoContext(new DataVoConfig { StorageMode = StorageMode.Lsm, DiskStoragePath = dir }))
+            using (var ctx = new DataVoContext(new DataVoConfig { StorageMode = StorageMode.Lsm, DataDirectory = dir }))
             {
                 foreach (string sql in new[]
                 {
@@ -78,7 +78,7 @@ public class CatalogXmlFormatTests
 
             // A fresh context over the same directory must reload the catalog + data written above through
             // the new reflection-free mappers, proving the persisted XML is correct and navigable.
-            using (var reopened = new DataVoContext(new DataVoConfig { StorageMode = StorageMode.Lsm, DiskStoragePath = dir }))
+            using (var reopened = new DataVoContext(new DataVoConfig { StorageMode = StorageMode.Lsm, DataDirectory = dir }))
             {
                 Assert.False(reopened.Execute("USE DbB").Last().IsError);
 

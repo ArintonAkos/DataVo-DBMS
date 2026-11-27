@@ -27,7 +27,7 @@ public sealed class LsmStorageBackendConfigTests
             using var context = new StorageContext(new DataVoConfig
             {
                 StorageMode = StorageMode.Lsm,
-                DiskStoragePath = root
+                DataDirectory = root
             });
 
             Assert.NotNull(context.Backend);

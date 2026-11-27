@@ -197,7 +197,7 @@ internal static class GeneratedTableSmoke
             var config = new DataVoConfig
             {
                 StorageMode = StorageMode.Lsm,
-                DiskStoragePath = lsmPath,
+                DataDirectory = lsmPath,
                 LsmStrictFsync = true,
             };
 

@@ -254,5 +254,5 @@ public class AlterTableTestsMemory : AlterTableTestsBase
 
 public class AlterTableTestsLsm : AlterTableTestsBase
 {
-    public AlterTableTestsLsm() : base(new DataVoConfig { StorageMode = StorageMode.Lsm, DiskStoragePath = "AlterTableDB_Lsm" }, "AlterTableDB_Lsm") { }
+    public AlterTableTestsLsm() : base(new DataVoConfig { StorageMode = StorageMode.Lsm, DataDirectory = "AlterTableDB_Lsm" }, "AlterTableDB_Lsm") { }
 }

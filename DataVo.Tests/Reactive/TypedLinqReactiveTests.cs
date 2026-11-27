@@ -50,7 +50,7 @@ public sealed class TypedLinqReactiveTests : IDisposable
         var config = new DataVoConfig
         {
             StorageMode = mode,
-            DiskStoragePath = dbDir,
+            DataDirectory = dbDir,
         };
 
         var ctx = new DataVoContext(config);

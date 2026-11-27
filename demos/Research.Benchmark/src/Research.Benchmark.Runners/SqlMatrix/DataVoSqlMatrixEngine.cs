@@ -142,7 +142,7 @@ public sealed class DataVoSqlMatrixEngine(StorageMode mode) : ISqlMatrixEngine
     private DataVoContext Open() => new(new DataVoConfig
     {
         StorageMode = mode,
-        DiskStoragePath = _directory!,
+        DataDirectory = _directory!,
         LsmStrictFsync = false,
     });
 

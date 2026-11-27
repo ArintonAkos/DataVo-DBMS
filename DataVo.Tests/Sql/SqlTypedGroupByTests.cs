@@ -151,7 +151,7 @@ public sealed class SqlTypedGroupByTests
     {
         const int rows = 60_000;
         string? directory = mode == StorageMode.Lsm ? TestStorageDirectories.Create("sql_typed_group_alloc") : null;
-        using var context = new DataVoContext(new DataVoConfig { StorageMode = mode, DiskStoragePath = directory });
+        using var context = new DataVoContext(new DataVoConfig { StorageMode = mode, DataDirectory = directory });
         Execute(context, "CREATE DATABASE GroupAlloc");
         Execute(context, "USE GroupAlloc");
         Execute(context, "CREATE TABLE Orders (Id INT PRIMARY KEY, CustomerId INT, Amount DOUBLE)");
@@ -180,7 +180,7 @@ public sealed class SqlTypedGroupByTests
     {
         const int orders = 40_000;
         string? directory = mode == StorageMode.Lsm ? TestStorageDirectories.Create("sql_join_group_alloc") : null;
-        using var context = new DataVoContext(new DataVoConfig { StorageMode = mode, DiskStoragePath = directory });
+        using var context = new DataVoContext(new DataVoConfig { StorageMode = mode, DataDirectory = directory });
         Execute(context, "CREATE DATABASE JoinGroupAlloc");
         Execute(context, "USE JoinGroupAlloc");
         Execute(context, "CREATE TABLE Customers (Id INT PRIMARY KEY, Region VARCHAR(4))");
@@ -244,7 +244,7 @@ public sealed class SqlTypedGroupByTests
     private static void WithSchema(StorageMode mode, Action<DataVoContext> test)
     {
         string? directory = mode == StorageMode.Lsm ? TestStorageDirectories.Create("sql_typed_group") : null;
-        using var context = new DataVoContext(new DataVoConfig { StorageMode = mode, DiskStoragePath = directory });
+        using var context = new DataVoContext(new DataVoConfig { StorageMode = mode, DataDirectory = directory });
         Execute(context, "CREATE DATABASE TypedGroup");
         Execute(context, "USE TypedGroup");
         Execute(context, "CREATE TABLE Orders (Id INT PRIMARY KEY, CustomerId INT, Status VARCHAR(8), Amount DOUBLE, Big BIGINT, Score FLOAT)");

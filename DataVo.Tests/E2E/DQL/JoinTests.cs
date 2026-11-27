@@ -210,5 +210,5 @@ public class InMemoryJoinTests : JoinTestsBase
 
 public class LsmJoinTests : JoinTestsBase
 {
-    public LsmJoinTests() : base(new DataVoConfig { StorageMode = StorageMode.Lsm, DiskStoragePath = "./test_datavo_lsm_join" }, "JoinDB_Lsm") { }
+    public LsmJoinTests() : base(new DataVoConfig { StorageMode = StorageMode.Lsm, DataDirectory = "./test_datavo_lsm_join" }, "JoinDB_Lsm") { }
 }

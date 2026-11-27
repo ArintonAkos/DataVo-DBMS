@@ -43,7 +43,7 @@ public static class Engines
         var db = new DataVoContext(new DataVoConfig
         {
             StorageMode = storage == Storage.Memory ? StorageMode.InMemory : StorageMode.Lsm,
-            DiskStoragePath = System.IO.Path.Combine(directory, "datavo"),
+            DataDirectory = System.IO.Path.Combine(directory, "datavo"),
         });
         Check(db, "CREATE DATABASE Bench");
         Check(db, "USE Bench");

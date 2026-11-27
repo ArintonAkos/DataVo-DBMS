@@ -121,7 +121,7 @@ public sealed class LsmRestartTests
     }
 
     private DataVoContext Open(bool strictFsync = true) =>
-        new(new DataVoConfig { StorageMode = StorageMode.Lsm, DiskStoragePath = _path, LsmStrictFsync = strictFsync });
+        new(new DataVoConfig { StorageMode = StorageMode.Lsm, DataDirectory = _path, LsmStrictFsync = strictFsync });
 
     private DataVoContext Reopen(bool strictFsync = true)
     {
@@ -154,7 +154,7 @@ public sealed class TransactionIdReservationTests
     public void PersistedBound_CoversEveryHandedOutId_WithoutCleanShutdown()
     {
         string path = TestStorageDirectories.Create("txid_reservation");
-        using var db = new DataVoContext(new DataVoConfig { StorageMode = StorageMode.Lsm, DiskStoragePath = path, LsmStrictFsync = false });
+        using var db = new DataVoContext(new DataVoConfig { StorageMode = StorageMode.Lsm, DataDirectory = path, LsmStrictFsync = false });
         db.Execute("CREATE DATABASE R");
         db.Execute("USE R");
         db.Execute("CREATE TABLE T (Id INT PRIMARY KEY)");

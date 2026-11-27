@@ -445,7 +445,7 @@ public class Phase3AuditFixTests
     public void UpdateFixedWidthByPrimaryKeyBatch_WaitsForTheTableWriteLock()
     {
         string root = TestStorageDirectories.Create("phase3-batch-lock");
-        using var db = new DataVoContext(new DataVoConfig { StorageMode = StorageMode.Lsm, DiskStoragePath = root, LockAcquireTimeoutMs = 250 });
+        using var db = new DataVoContext(new DataVoConfig { StorageMode = StorageMode.Lsm, DataDirectory = root, LockAcquireTimeoutMs = 250 });
         Ok(db, "CREATE DATABASE Batches");
         Ok(db, "USE Batches");
         Ok(db, "CREATE TABLE Records (Id INT PRIMARY KEY, Value INT, Score INT)");
@@ -672,7 +672,7 @@ public class Phase3AuditFixTests
     private static DataVoContext Context(StorageMode mode)
     {
         DataVoConfig config = mode == StorageMode.Lsm
-            ? new DataVoConfig { StorageMode = StorageMode.Lsm, DiskStoragePath = TestStorageDirectories.Create("phase3") }
+            ? new DataVoConfig { StorageMode = StorageMode.Lsm, DataDirectory = TestStorageDirectories.Create("phase3") }
             : new DataVoConfig { StorageMode = mode };
         var context = new DataVoContext(config);
         string database = $"Phase3_{Guid.NewGuid():N}";

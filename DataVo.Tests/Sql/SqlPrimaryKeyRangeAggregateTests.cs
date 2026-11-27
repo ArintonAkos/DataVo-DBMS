@@ -334,7 +334,7 @@ public sealed class SqlPrimaryKeyRangeAggregateTests : IDisposable
     {
         string directory = Path.Combine(Path.GetTempPath(), "datavo-range-agg-" + Guid.NewGuid().ToString("N"));
         _directories.Add(directory);
-        var context = new DataVoContext(new DataVoConfig { StorageMode = mode, DiskStoragePath = directory, LsmStrictFsync = false });
+        var context = new DataVoContext(new DataVoConfig { StorageMode = mode, DataDirectory = directory, LsmStrictFsync = false });
         Run(context, "CREATE DATABASE RangeAggDb");
         Run(context, "USE RangeAggDb");
         Run(context, "CREATE TABLE T (Id INT PRIMARY KEY, S INT, B BIGINT, F FLOAT, D DOUBLE, N VARCHAR(16))");

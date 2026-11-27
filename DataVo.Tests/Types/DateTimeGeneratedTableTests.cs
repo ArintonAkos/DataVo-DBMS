@@ -45,7 +45,7 @@ public sealed class DateTimeGeneratedTableTests : IDisposable
     [InlineData(StorageMode.Lsm)]
     public void Members_RoundTrip_AndCompiledQueriesFilterAndFold(StorageMode mode)
     {
-        using DataVoContext db = new(new DataVoConfig { StorageMode = mode, DiskStoragePath = Path.Combine(_root, mode.ToString()), LsmStrictFsync = false });
+        using DataVoContext db = new(new DataVoConfig { StorageMode = mode, DataDirectory = Path.Combine(_root, mode.ToString()), LsmStrictFsync = false });
         Assert.False(db.Execute("CREATE DATABASE T; USE T;").Last().IsError);
         db.EnsureTimedEventTable();
 

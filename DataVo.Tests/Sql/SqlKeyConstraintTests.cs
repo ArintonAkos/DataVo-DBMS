@@ -103,7 +103,7 @@ public sealed class SqlKeyConstraintTests : IDisposable
     {
         string directory = Path.Combine(Path.GetTempPath(), "datavo-keys-" + Guid.NewGuid().ToString("N"));
         _directories.Add(directory);
-        var db = new DataVoContext(new DataVoConfig { StorageMode = mode, DiskStoragePath = directory, LsmStrictFsync = false });
+        var db = new DataVoContext(new DataVoConfig { StorageMode = mode, DataDirectory = directory, LsmStrictFsync = false });
         Run(db, "CREATE DATABASE D");
         Run(db, "USE D");
         return db;

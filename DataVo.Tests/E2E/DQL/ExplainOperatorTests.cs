@@ -249,7 +249,7 @@ public sealed class LsmExplainSegmentTests : IDisposable
         Assert.True((long)plan["SegmentsSkipped"]! > (long)plan["SegmentsRead"]!);
     }
 
-    private DataVoContext Open() => new(new DataVoConfig { StorageMode = StorageMode.Lsm, DiskStoragePath = _root, LsmStrictFsync = false });
+    private DataVoContext Open() => new(new DataVoConfig { StorageMode = StorageMode.Lsm, DataDirectory = _root, LsmStrictFsync = false });
 
     private static void Ok(DataVoContext db, string sql)
     {

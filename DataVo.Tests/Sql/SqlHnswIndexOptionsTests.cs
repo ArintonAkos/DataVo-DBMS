@@ -133,7 +133,7 @@ public sealed class SqlHnswIndexOptionsTests
     private static DataVoContext Open(StorageMode mode, out string directory)
     {
         directory = mode == StorageMode.Lsm ? TestStorageDirectories.Create("sql_hnsw_options") : string.Empty;
-        var context = new DataVoContext(new DataVoConfig { StorageMode = mode, DiskStoragePath = mode == StorageMode.Lsm ? directory : null });
+        var context = new DataVoContext(new DataVoConfig { StorageMode = mode, DataDirectory = mode == StorageMode.Lsm ? directory : null });
         Execute(context, "CREATE DATABASE HnswOptions");
         Execute(context, "USE HnswOptions");
         return context;
@@ -141,7 +141,7 @@ public sealed class SqlHnswIndexOptionsTests
 
     private static DataVoContext Reopen(string directory)
     {
-        var context = new DataVoContext(new DataVoConfig { StorageMode = StorageMode.Lsm, DiskStoragePath = directory });
+        var context = new DataVoContext(new DataVoConfig { StorageMode = StorageMode.Lsm, DataDirectory = directory });
         Execute(context, "USE HnswOptions");
         return context;
     }

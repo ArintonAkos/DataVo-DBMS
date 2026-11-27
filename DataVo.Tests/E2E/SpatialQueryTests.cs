@@ -250,7 +250,7 @@ public sealed class SpatialQueryTests : IDisposable
             all = SeedShips(db, 800, seed: 6);
         }
 
-        using var reopened = new DataVoContext(new DataVoConfig { StorageMode = mode, DiskStoragePath = _directory });
+        using var reopened = new DataVoContext(new DataVoConfig { StorageMode = mode, DataDirectory = _directory });
         reopened.Execute("USE Space");
         reopened.EnsureShipTable(); // finds the existing Euclidean index and leaves it
         Assert.Equal(IndexFile.EuclideanMetric, SpatialIndex(reopened, "ships").EffectiveMetric);
@@ -585,7 +585,7 @@ public sealed class SpatialQueryTests : IDisposable
         var db = new DataVoContext(new DataVoConfig
         {
             StorageMode = mode,
-            DiskStoragePath = mode == StorageMode.InMemory ? null! : _directory,
+            DataDirectory = mode == StorageMode.InMemory ? null! : _directory,
         });
         db.Execute("CREATE DATABASE Space");
         db.Execute("USE Space");

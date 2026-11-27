@@ -144,7 +144,7 @@ public sealed class SqlVectorParameterTests
     private static void WithDocuments(StorageMode mode, string indexType, Action<DataVoContext, Dictionary<int, float[]>> test)
     {
         string? directory = mode == StorageMode.Lsm ? TestStorageDirectories.Create("sql_vector_parameter") : null;
-        using var context = new DataVoContext(new DataVoConfig { StorageMode = mode, DiskStoragePath = directory });
+        using var context = new DataVoContext(new DataVoConfig { StorageMode = mode, DataDirectory = directory });
         Execute(context, "CREATE DATABASE VectorParameter");
         Execute(context, "USE VectorParameter");
         Execute(context, $"CREATE TABLE Docs (Id INT PRIMARY KEY, Category INT, Emb VECTOR({Dimensions}))");

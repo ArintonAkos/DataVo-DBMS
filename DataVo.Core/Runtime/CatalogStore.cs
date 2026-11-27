@@ -22,7 +22,7 @@ internal sealed class CatalogStore
 
     public CatalogStore(DataVoConfig config)
     {
-        // Every storage mode with a data directory (Disk, Lsm) must persist its schema, or a reopened
+        // Every storage mode with a data directory (Lsm) must persist its schema, or a reopened
         // engine would find the data files but no tables.
         _catalogDirectory = config.ResolveDataDirectory();
         _persistToDisk = _catalogDirectory is not null;

@@ -174,7 +174,7 @@ public sealed class LinqStreamingMemoryTests : IDisposable
 
     private DataVoContext Open(StorageMode mode)
     {
-        var db = new DataVoContext(new DataVoConfig { StorageMode = mode, DiskStoragePath = _directory });
+        var db = new DataVoContext(new DataVoConfig { StorageMode = mode, DataDirectory = _directory });
         db.Execute("CREATE DATABASE S");
         db.Execute("USE S");
         db.EnsureReadingTable();

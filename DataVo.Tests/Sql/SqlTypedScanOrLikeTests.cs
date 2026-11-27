@@ -253,7 +253,7 @@ public sealed class SqlTypedScanOrLikeTests
     {
         const int rowCount = 20_000;
         string? directory = mode == StorageMode.Lsm ? TestStorageDirectories.Create("sql_typed_or_like_alloc") : null;
-        using var context = new DataVoContext(new DataVoConfig { StorageMode = mode, DiskStoragePath = directory });
+        using var context = new DataVoContext(new DataVoConfig { StorageMode = mode, DataDirectory = directory });
         Execute(context, "CREATE DATABASE OrLikeAlloc");
         Execute(context, "USE OrLikeAlloc");
         Execute(context, "CREATE TABLE T (Id INT PRIMARY KEY, Status VARCHAR(8), Amount DOUBLE, Sku VARCHAR(16))");
@@ -323,7 +323,7 @@ public sealed class SqlTypedScanOrLikeTests
     private static void WithOrders(StorageMode mode, Action<DataVoContext> test)
     {
         string? directory = mode == StorageMode.Lsm ? TestStorageDirectories.Create("sql_typed_or_like") : null;
-        using var context = new DataVoContext(new DataVoConfig { StorageMode = mode, DiskStoragePath = directory });
+        using var context = new DataVoContext(new DataVoConfig { StorageMode = mode, DataDirectory = directory });
         Execute(context, "CREATE DATABASE OrLike");
         Execute(context, "USE OrLike");
         Execute(context, "CREATE TABLE Orders (Id INT PRIMARY KEY, Status VARCHAR(16), Qty INT, Amount DOUBLE, Discount DOUBLE, Sku VARCHAR(32), CustomerId INT)");

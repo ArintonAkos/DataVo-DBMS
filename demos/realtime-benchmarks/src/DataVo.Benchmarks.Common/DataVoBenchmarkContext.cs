@@ -19,7 +19,7 @@ public static class DataVoBenchmarkContext
             var context = new DataVoContext(new DataVoConfig
             {
                 StorageMode = StorageMode.Lsm,
-                DiskStoragePath = path
+                DataDirectory = path
             });
 
             return new BenchmarkDatabase(context, path);

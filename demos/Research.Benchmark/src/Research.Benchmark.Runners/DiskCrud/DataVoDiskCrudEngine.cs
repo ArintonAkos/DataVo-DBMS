@@ -55,7 +55,7 @@ public sealed class DataVoDiskCrudEngine : IDiskCrudEngine
         var config = new DataVoConfig
         {
             StorageMode = StorageMode.Lsm,
-            DiskStoragePath = workingDirectory,
+            DataDirectory = workingDirectory,
             LsmStrictFsync = _durable,
             EnableZeroAllocCompiledUpdate = _zeroAllocUpdate,
         };

@@ -851,7 +851,7 @@ internal sealed partial class InsertRowService(
 
         // Caller-owned buffers are copied only when something retains cells past this call, and only a
         // change recorder does: it captures the after-image. Every backend reads the cells during the
-        // insert (in-memory storage packs them, LSM and disk serialize them), so storage needs no copy.
+        // insert (in-memory storage packs them, LSM serializes them), so storage needs no copy.
         IReadOnlyList<CellValue[]> ownedRows = rows;
         if (callerOwnsRowBuffers && recorder is not null)
         {

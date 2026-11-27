@@ -144,7 +144,7 @@ public sealed class SqlUtf8TextFilterTests
     public void TextFiltersOverSerializedRows_AllocateNothingPerRow()
     {
         const int rowCount = 20_000;
-        using var context = new DataVoContext(new DataVoConfig { StorageMode = StorageMode.Lsm, DiskStoragePath = TestStorageDirectories.Create("sql_utf8_filter_alloc") });
+        using var context = new DataVoContext(new DataVoConfig { StorageMode = StorageMode.Lsm, DataDirectory = TestStorageDirectories.Create("sql_utf8_filter_alloc") });
         Execute(context, "CREATE DATABASE Utf8Alloc");
         Execute(context, "USE Utf8Alloc");
         Execute(context, "CREATE TABLE T (Id INT PRIMARY KEY, Status VARCHAR(8), Amount DOUBLE, Sku VARCHAR(16))");
@@ -240,7 +240,7 @@ public sealed class SqlUtf8TextFilterTests
     private static void WithItems(StorageMode mode, Action<DataVoContext> test)
     {
         string? directory = mode == StorageMode.Lsm ? TestStorageDirectories.Create("sql_utf8_filter") : null;
-        using var context = new DataVoContext(new DataVoConfig { StorageMode = mode, DiskStoragePath = directory });
+        using var context = new DataVoContext(new DataVoConfig { StorageMode = mode, DataDirectory = directory });
         Execute(context, "CREATE DATABASE Utf8Filter");
         Execute(context, "USE Utf8Filter");
         Execute(context, "CREATE TABLE Items (Id INT PRIMARY KEY, Name VARCHAR(40), Code VARCHAR(8), Qty INT)");

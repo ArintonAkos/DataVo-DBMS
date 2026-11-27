@@ -19,7 +19,7 @@ using var db = new DataVoContext(new DataVoConfig
 using var persisted = new DataVoContext(new DataVoConfig
 {
     StorageMode = StorageMode.Lsm,
-    DiskStoragePath = "./datavo_lsm_data",
+    DataDirectory = "./datavo_lsm_data",
     LsmStrictFsync = true
 });
 ```
@@ -61,7 +61,7 @@ For `StorageMode.Wasm`, set `WasmStorageEngine` to an OPFS-backed or browser sto
 
 For `Lsm`, DataVo serves one engine per directory per process:
 
-- **Within one process:** Multiple `DataVoContext` instances and ADO.NET connections targeting the same `DiskStoragePath` share a single engine until the last handle is disposed. Their configurations must match, or the second open throws `DatabaseInUseException`.
+- **Within one process:** Multiple `DataVoContext` instances and ADO.NET connections targeting the same `DataDirectory` share a single engine until the last handle is disposed. Their configurations must match, or the second open throws `DatabaseInUseException`.
 - **Across processes:** DataVo holds a `datavo.lock` file while the directory is open. Opening the same directory from a second process throws `DatabaseInUseException`.
 
 ## See Also

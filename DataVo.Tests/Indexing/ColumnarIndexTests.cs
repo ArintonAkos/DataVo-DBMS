@@ -267,7 +267,7 @@ public sealed class ColumnarIndexTests
 
         // The columns are on disk with the rows: after a reopen a query reads them from the files, and the
         // part in memory holds nothing, because closing flushed every row.
-        using (DataVoContext db = new(new DataVoConfig { StorageMode = StorageMode.Lsm, DiskStoragePath = scratch.Path }))
+        using (DataVoContext db = new(new DataVoConfig { StorageMode = StorageMode.Lsm, DataDirectory = scratch.Path }))
         {
             Run(db, "USE S");
             Assert.Null(db.Engine.StorageContext.ColumnarStore!.Columnar("S", "col_samples"));
@@ -570,7 +570,7 @@ public sealed class ColumnarIndexTests
 
     private static DataVoContext Open(StorageMode mode = StorageMode.InMemory, string? directory = null)
     {
-        var db = new DataVoContext(new DataVoConfig { StorageMode = mode, DiskStoragePath = directory });
+        var db = new DataVoContext(new DataVoConfig { StorageMode = mode, DataDirectory = directory });
         Run(db, "CREATE DATABASE S");
         Run(db, "USE S");
         return db;

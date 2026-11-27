@@ -35,7 +35,7 @@ public sealed class LsmCompiledUpdateFastPathTests : IDisposable
     [Fact]
     public void FixedWidthUpdate_PatchesInPlace_AndAllocatesLittle()
     {
-        using var context = new DataVoContext(new DataVoConfig { StorageMode = StorageMode.Lsm, DiskStoragePath = _root, LsmStrictFsync = false });
+        using var context = new DataVoContext(new DataVoConfig { StorageMode = StorageMode.Lsm, DataDirectory = _root, LsmStrictFsync = false });
         Assert.False(context.Execute("CREATE DATABASE Z")[0].IsError);
         Assert.False(context.Execute("USE Z")[0].IsError);
         Assert.False(context.Execute("CREATE TABLE Records (Id INT PRIMARY KEY, Name VARCHAR(20), Value INT)")[0].IsError);

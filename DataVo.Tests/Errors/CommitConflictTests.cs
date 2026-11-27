@@ -19,7 +19,7 @@ public sealed class CommitConflictTests
         using var db = new DataVoContext(new DataVoConfig
         {
             StorageMode = mode,
-            DiskStoragePath = mode == StorageMode.InMemory ? null : TestStorageDirectories.Create("commit_conflict"),
+            DataDirectory = mode == StorageMode.InMemory ? null : TestStorageDirectories.Create("commit_conflict"),
             LsmStrictFsync = false,
         });
         db.Execute("CREATE DATABASE C");

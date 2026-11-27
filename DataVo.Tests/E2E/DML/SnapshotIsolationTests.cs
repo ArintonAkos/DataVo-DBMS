@@ -154,7 +154,7 @@ public sealed class SnapshotIsolationTests : IDisposable
         var db = new DataVoContext(new DataVoConfig
         {
             StorageMode = mode,
-            DiskStoragePath = mode == StorageMode.InMemory ? null! : _directory,
+            DataDirectory = mode == StorageMode.InMemory ? null! : _directory,
         });
         Ok(db, "CREATE DATABASE Si", _tx);
         Ok(db, "USE Si", _tx);

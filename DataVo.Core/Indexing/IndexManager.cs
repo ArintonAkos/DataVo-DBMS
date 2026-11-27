@@ -1335,7 +1335,7 @@ public partial class IndexManager : IDisposable
 
         var cacheKey = GetCacheKey(indexName, tableName, databaseName);
         ConcurrentInt64Int64Map map = _integerPrimaryKeyMaps.GetOrAdd(cacheKey, static _ => new ConcurrentInt64Int64Map());
-        // The lane stores integer row ids (in-memory and disk modes only use those).
+        // The lane stores integer row ids (the in-memory mode only uses those).
         long[] laneValues = System.Buffers.ArrayPool<long>.Shared.Rent(rowIds.Length);
         try
         {

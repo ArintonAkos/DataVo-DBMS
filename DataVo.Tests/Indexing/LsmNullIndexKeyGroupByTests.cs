@@ -121,7 +121,7 @@ public sealed class LsmNullIndexKeyGroupByTests
 
     private static DataVoContext Open(string directory, bool create)
     {
-        var db = new DataVoContext(new DataVoConfig { StorageMode = StorageMode.Lsm, DiskStoragePath = directory, LsmStrictFsync = false });
+        var db = new DataVoContext(new DataVoConfig { StorageMode = StorageMode.Lsm, DataDirectory = directory, LsmStrictFsync = false });
         if (create)
         {
             Run(db, "CREATE DATABASE G");

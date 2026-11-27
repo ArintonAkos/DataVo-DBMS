@@ -83,7 +83,7 @@ public class DataVoConnectionStringBuilder : DbConnectionStringBuilder
     }
 
     /// <summary>
-    /// Gets or sets the data source: the <see cref="DataVoConfig.DiskStoragePath"/> in Lsm mode. Defaults to <c>datavo</c>.
+    /// Gets or sets the data source: the <see cref="DataVoConfig.DataDirectory"/> in Lsm mode. Defaults to <c>datavo</c>.
     /// </summary>
     [AllowNull]
     public string DataSource
@@ -123,7 +123,7 @@ public class DataVoConnectionStringBuilder : DbConnectionStringBuilder
         return new DataVoConfig
         {
             StorageMode = StorageMode,
-            DiskStoragePath = DataSource,
+            DataDirectory = DataSource,
         };
     }
 

@@ -114,5 +114,5 @@ public class LimitOffsetTestsMemory : LimitOffsetTestsBase
 
 public class LimitOffsetTestsLsm : LimitOffsetTestsBase
 {
-    public LimitOffsetTestsLsm() : base(new DataVoConfig { StorageMode = StorageMode.Lsm, DiskStoragePath = "LimitDB_Lsm" }, "LimitDB_Lsm") { }
+    public LimitOffsetTestsLsm() : base(new DataVoConfig { StorageMode = StorageMode.Lsm, DataDirectory = "LimitDB_Lsm" }, "LimitDB_Lsm") { }
 }

@@ -205,7 +205,7 @@ public sealed class LsmIntegerPrimaryKeyPersistenceTests : IDisposable
     }
 
     private DataVoContext Open(StorageMode mode) =>
-        new(new DataVoConfig { StorageMode = mode, DiskStoragePath = _path, LsmStrictFsync = false });
+        new(new DataVoConfig { StorageMode = mode, DataDirectory = _path, LsmStrictFsync = false });
 
     private DataVoContext Reopen(StorageMode mode)
     {

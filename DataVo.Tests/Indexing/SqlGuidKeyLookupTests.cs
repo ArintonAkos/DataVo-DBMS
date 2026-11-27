@@ -32,7 +32,7 @@ public sealed class SqlGuidKeyLookupTests : IDisposable
     public void GuidEquality_FindsRows_AndAnswersMissesWithoutScanning(StorageMode mode)
     {
         using DataVoContext context = mode == StorageMode.Lsm
-            ? new DataVoContext(new DataVoConfig { StorageMode = StorageMode.Lsm, DiskStoragePath = _root, LsmStrictFsync = false })
+            ? new DataVoContext(new DataVoConfig { StorageMode = StorageMode.Lsm, DataDirectory = _root, LsmStrictFsync = false })
             : new DataVoContext(new DataVoConfig { StorageMode = StorageMode.InMemory });
         Run(context, "CREATE DATABASE G");
         Run(context, "USE G");

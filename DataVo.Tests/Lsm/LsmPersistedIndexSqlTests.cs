@@ -103,7 +103,7 @@ public sealed class LsmPersistedIndexSqlTests : IDisposable
         Assert.Equal([1, 3], Ids(reopened, "SELECT Id FROM Items WHERE Code = 7"));
     }
 
-    private DataVoContext Open() => new(new DataVoConfig { StorageMode = StorageMode.Lsm, DiskStoragePath = _root, LsmStrictFsync = false });
+    private DataVoContext Open() => new(new DataVoConfig { StorageMode = StorageMode.Lsm, DataDirectory = _root, LsmStrictFsync = false });
 
     private static void Execute(DataVoContext context, string sql)
     {

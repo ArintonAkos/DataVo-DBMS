@@ -102,7 +102,7 @@ public sealed class StreamQueryTests : IDisposable
     {
         // After a reopen the seeded rows are in files; the changes below sit in the unflushed overlay above them.
         Seed(StorageMode.Lsm, RowCount).Dispose();
-        using var db = new DataVoContext(new DataVoConfig { StorageMode = StorageMode.Lsm, DiskStoragePath = _directory });
+        using var db = new DataVoContext(new DataVoConfig { StorageMode = StorageMode.Lsm, DataDirectory = _directory });
         Ok(db, "USE S");
         Ok(db, "DELETE FROM Items WHERE Id >= 2000 AND Id < 5200");
         Ok(db, "UPDATE Items SET Grp = 77 WHERE Id >= 6000 AND Id < 9100");
@@ -318,7 +318,7 @@ public sealed class StreamQueryTests : IDisposable
         var db = new DataVoContext(new DataVoConfig
         {
             StorageMode = mode,
-            DiskStoragePath = mode == StorageMode.InMemory ? null! : _directory,
+            DataDirectory = mode == StorageMode.InMemory ? null! : _directory,
         });
         Ok(db, "CREATE DATABASE S");
         Ok(db, "USE S");

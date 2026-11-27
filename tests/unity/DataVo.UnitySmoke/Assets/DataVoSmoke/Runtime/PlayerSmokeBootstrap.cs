@@ -119,7 +119,7 @@ namespace DataVo.UnitySmoke.Player
         private static void AssertSaveDataPersists(StorageMode mode)
         {
             string path = Path.Combine(Application.persistentDataPath, "DataVoSmokeSave_" + mode + "_" + Guid.NewGuid().ToString("N"));
-            var config = new DataVoConfig { StorageMode = mode, DiskStoragePath = path };
+            var config = new DataVoConfig { StorageMode = mode, DataDirectory = path };
 
             try
             {
