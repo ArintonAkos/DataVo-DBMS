@@ -3,20 +3,28 @@
  *
  * Storage backend order:
  * 1) Worker + OPFS bridge (sync surface for JSImport via SharedArrayBuffer + Atomics)
- * 2) localStorage fallback for broad compatibility
+ * 2) localStorage fallback on the main thread (persistent, ~5 MB quota)
+ * 3) worker-memory-fallback inside a worker that cannot block: NOT persistent, data is lost on reload.
+ *    Selecting it logs a warning, sets globalThis.__datavoStorageNonPersistent and reports
+ *    `persistent: false` in the capabilities.
  */
 
 const STORAGE_PREFIX = "datavo:";
 const SEQ_ROWID_KEY = "datavo:seq:rowid";
 const CATALOG_KEY = "datavo:catalog";
 const SELECTED_DATABASE_KEY = "datavo:selectedDatabase";
-const WORKER_RESPONSE_BYTES = 8 * 1024 * 1024; // 8MB per sync call buffer
+const WORKER_RESPONSE_BYTES = 8 * 1024 * 1024; // one shared 8 MB response buffer, reused by every sync call
 const WORKER_WAIT_TIMEOUT_MS = 1000;
 const WORKER_MAX_WAIT_ITERATIONS = 30;
 const STORAGE_FORCE_BACKEND_GLOBAL_KEY = "__datavoForceStorageBackend";
 const STORAGE_BACKEND_SINGLETON_KEY = "__datavoStorageBackendSingleton";
 const STORAGE_BACKEND_DIAGNOSTICS_KEY = "__datavoStorageBackendDiagnostics";
 const STORAGE_OPERATION_COUNTERS_KEY = "__datavoStorageOperationCounters";
+const STORAGE_NON_PERSISTENT_KEY = "__datavoStorageNonPersistent";
+const MEMORY_FALLBACK_WARNING =
+    "DataVo storage is running in worker-memory-fallback mode: OPFS needs a worker that can block on " +
+    "SharedArrayBuffer/Atomics (cross-origin isolation via COOP/COEP headers). Data will be lost on reload.";
+const BASE64_CHUNK_BYTES = 0x8000;
 
 if (!globalThis[STORAGE_OPERATION_COUNTERS_KEY]) {
     globalThis[STORAGE_OPERATION_COUNTERS_KEY] = {
@@ -44,12 +52,13 @@ function bumpCounter(name) {
 }
 
 function bytesToBase64(bytes) {
-    let binary = "";
-    for (let i = 0; i < bytes.byteLength; i++) {
-        binary += String.fromCharCode(bytes[i]);
+    // Chunked: per-byte string concatenation is quadratic on large rows.
+    const chunks = [];
+    for (let offset = 0; offset < bytes.length; offset += BASE64_CHUNK_BYTES) {
+        chunks.push(String.fromCharCode.apply(null, bytes.subarray(offset, offset + BASE64_CHUNK_BYTES)));
     }
 
-    return btoa(binary);
+    return btoa(chunks.join(""));
 }
 
 function base64ToBytes(base64) {
@@ -121,6 +130,8 @@ function setBackendDiagnostics(selectedKind, requestedKind, reason) {
 
 function createMemoryFallbackBackend() {
     const store = new Map();
+    globalThis[STORAGE_NON_PERSISTENT_KEY] = true;
+    console.warn(MEMORY_FALLBACK_WARNING);
 
     function getNextRowId() {
         let currentId = parseInt(store.get(SEQ_ROWID_KEY) || "0", 10);
@@ -199,6 +210,8 @@ function createMemoryFallbackBackend() {
             return {
                 storageBackend: "worker-memory-fallback",
                 mode: "fallback",
+                persistent: false,
+                warning: MEMORY_FALLBACK_WARNING,
                 hasWorker: typeof Worker !== "undefined",
                 hasSharedArrayBuffer: typeof SharedArrayBuffer !== "undefined",
                 canBlockCurrentThread: canBlockCurrentThread(),
@@ -302,6 +315,7 @@ function createLocalStorageBackend() {
             return {
                 storageBackend: "localStorage",
                 mode: "fallback",
+                persistent: true,
                 hasWorker: typeof Worker !== "undefined",
                 hasSharedArrayBuffer: typeof SharedArrayBuffer !== "undefined",
                 canBlockCurrentThread: canBlockCurrentThread(),
@@ -326,7 +340,11 @@ function createWorkerBackendOrNull() {
     }
 
     const decoder = new TextDecoder();
-    const encoder = new TextEncoder();
+
+    // One control word set and one response buffer for the backend's lifetime: invokeSync is synchronous,
+    // so calls never overlap. The worker receives both once, in the attach message.
+    const control = new Int32Array(new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT * 3));
+    const responseBuffer = new SharedArrayBuffer(WORKER_RESPONSE_BYTES);
 
     function terminateWorker() {
         if (!workerActive) {
@@ -346,12 +364,10 @@ function createWorkerBackendOrNull() {
             throw new Error("Storage worker is unavailable.");
         }
 
-        const controlBuffer = new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT * 3);
-        const control = new Int32Array(controlBuffer);
-        const responseBuffer = new SharedArrayBuffer(WORKER_RESPONSE_BYTES);
+        Atomics.store(control, 0, 0);
 
         try {
-            worker.postMessage({ command, payload, controlBuffer, responseBuffer });
+            worker.postMessage({ command, payload });
         } catch (error) {
             terminateWorker();
             throw new Error(`Failed to post storage command '${command}' to worker: ${error && error.message ? error.message : String(error)}`);
@@ -378,8 +394,8 @@ function createWorkerBackendOrNull() {
             throw new Error("Worker response payload length out of range.");
         }
 
-        const bytes = new Uint8Array(responseBuffer, 0, length);
-        const text = decoder.decode(bytes);
+        // TextDecoder rejects views over shared memory; slice copies just the payload into a plain buffer.
+        const text = decoder.decode(new Uint8Array(responseBuffer, 0, length).slice());
 
         if (status !== 0) {
             throw new Error(text || "Storage worker command failed.");
@@ -390,6 +406,13 @@ function createWorkerBackendOrNull() {
         }
 
         return JSON.parse(text);
+    }
+
+    try {
+        worker.postMessage({ attach: true, controlBuffer: control.buffer, responseBuffer });
+    } catch {
+        terminateWorker();
+        return null;
     }
 
     // Probe backend once so we can gracefully fallback if worker initialization fails.
