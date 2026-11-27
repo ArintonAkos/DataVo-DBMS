@@ -1,38 +1,19 @@
-using DataVo.Core;
 using System.Runtime.InteropServices.JavaScript;
-using System.Runtime.CompilerServices;
-using Newtonsoft.Json;
+using System.Runtime.Versioning;
+using System.Text.Json;
+using DataVo.Core;
+using DataVo.Core.Contracts.Results;
+using DataVo.Core.Indexing.HNSW;
 using DataVo.Core.Parser;
 using DataVo.Core.Runtime;
 using DataVo.Core.StorageEngine.Config;
-using DataVo.Core.Constants;
-using DataVo.Core.Enums;
-using DataVo.Core.Models.Catalog;
-using DataVo.Core.BTree;
-using DataVo.Core.Indexing.HNSW;
-using System.Globalization;
-using System.Runtime.Versioning;
-using Newtonsoft.Json.Linq;
 
 namespace DataVo.Browser;
 
-internal sealed class ExceptionDetails
-{
-    public string Error { get; init; } = string.Empty;
-
-    public string? Type { get; init; }
-
-    public string? Stack { get; init; }
-
-    public string? RootType { get; init; }
-
-    public string? RootError { get; init; }
-
-    public string? RootStack { get; init; }
-
-    public List<object> InnerExceptions { get; init; } = [];
-}
-
+/// <summary>
+/// JavaScript-facing entry points of the DataVo WebAssembly runtime. Every SQL call answers with a JSON
+/// <c>QueryResult[]</c>; failures are results with <c>IsError</c> set, never a different shape.
+/// </summary>
 [SupportedOSPlatform("browser")]
 public partial class DataVoInterop
 {
@@ -40,6 +21,10 @@ public partial class DataVoInterop
 
     private static DataVoEngine? _engine;
     private static readonly Guid _session = Guid.NewGuid();
+
+    // What OPFS/localStorage currently holds, so read-only or failed calls skip the catalog write.
+    private static long _persistedCatalogGeneration = -1;
+    private static string _persistedDatabase = string.Empty;
 
     [JSImport("globalThis.DataVoStorage.readCatalog")]
     internal static partial string? ReadCatalogState();
@@ -65,6 +50,7 @@ public partial class DataVoInterop
     [JSImport("globalThis.DataVoStorage.getRuntimeFlags")]
     internal static partial string? GetRuntimeFlags();
 
+    /// <summary>Starts the engine over browser storage and restores the persisted catalog and indexes.</summary>
     [JSExport]
     public static void Initialize()
     {
@@ -85,7 +71,7 @@ public partial class DataVoInterop
             _engine.Catalog.LoadState(catalogState);
         }
 
-        RebuildIndexesFromStorage();
+        _engine.RebuildIndexesFromStorage();
 
         var selectedDatabase = ReadSelectedDatabase();
         if (!string.IsNullOrWhiteSpace(selectedDatabase))
@@ -93,78 +79,45 @@ public partial class DataVoInterop
             _engine.Sessions.Set(_session, selectedDatabase);
         }
 
-        PersistBrowserState();
+        // Storage already holds exactly this state.
+        MarkPersisted();
     }
 
+    /// <summary>Runs a SQL batch and returns its results as a JSON <c>QueryResult[]</c>.</summary>
     [JSExport]
     public static string ExecuteSql(string sql)
     {
-        if (_engine == null) return JsonConvert.SerializeObject(new { error = "Engine not initialized. Call Initialize() first." });
+        if (_engine == null)
+        {
+            return SerializeResults([QueryResult.Error("Engine not initialized. Call Initialize() first.")]);
+        }
 
         try
         {
-            var queryEngine = new QueryEngine(sql, _session, _engine);
-            var results = queryEngine.Parse();
-
-            // Serialize the List<QueryResult> back to JS
-            return JsonConvert.SerializeObject(results);
+            return SerializeResults(new QueryEngine(sql, _session, _engine).Parse());
         }
         catch (Exception ex)
         {
-            var details = BuildExceptionDetails(ex);
-            return JsonConvert.SerializeObject(details);
+            return SerializeResults([QueryResult.FromException(ex)]);
         }
         finally
         {
-            PersistBrowserState();
+            PersistBrowserStateIfChanged();
         }
     }
 
-    [JSExport]
-    public static string DiagnoseLexer(string sql)
-    {
-        try
-        {
-            RuntimeHelpers.RunClassConstructor(typeof(Lexer).TypeHandle);
-
-            var lexer = new Lexer(sql);
-            var tokens = lexer.Tokenize();
-
-            return JsonConvert.SerializeObject(new
-            {
-                ok = true,
-                tokenCount = tokens.Count,
-                tokens = tokens.Select(token => token.ToString()).ToList(),
-                diagnostics = BuildLexerEnvironment()
-            });
-        }
-        catch (Exception ex)
-        {
-            var details = BuildExceptionDetails(ex);
-            return JsonConvert.SerializeObject(new
-            {
-                ok = false,
-                stage = "LexerDiagnostics",
-                diagnostics = BuildLexerEnvironment(),
-                error = details.Error,
-                type = details.Type,
-                stack = details.Stack,
-                rootType = details.RootType,
-                rootError = details.RootError,
-                rootStack = details.RootStack,
-                innerExceptions = details.InnerExceptions
-            });
-        }
-    }
-
+    /// <summary>Wipes all DataVo browser storage and stops the engine.</summary>
     [JSExport]
     public static void ResetStorage()
     {
         ClearAllStorage();
         _engine?.Dispose();
         _engine = null;
+        _persistedCatalogGeneration = -1;
+        _persistedDatabase = string.Empty;
     }
 
+    /// <summary>Returns the storage backend capabilities reported by the JS host, as JSON.</summary>
     [JSExport]
     public static string RuntimeCapabilities()
     {
@@ -194,29 +147,22 @@ public partial class DataVoInterop
             return capabilitiesJson!;
         }
 
-        return JsonConvert.SerializeObject(new
-        {
-            storageBackend = backendKind,
-            engineInitialized = _engine != null,
-            forceVectorFallback = BrowserRuntimeFlags.ForceVectorFallback
-        });
+        var fallback = new BrowserRuntimeCapabilities(backendKind, _engine != null, BrowserRuntimeFlags.ForceVectorFallback);
+        return JsonSerializer.Serialize(fallback, BrowserJsonContext.Default.BrowserRuntimeCapabilities);
     }
+
+    private static string SerializeResults(List<QueryResult> results) =>
+        JsonSerializer.Serialize(results, BrowserJsonContext.Default.ListQueryResult);
 
     private static bool ResolveForceVectorFallback()
     {
         try
         {
             string? raw = GetRuntimeFlags();
-            if (string.IsNullOrWhiteSpace(raw))
+            if (!string.IsNullOrWhiteSpace(raw)
+                && JsonSerializer.Deserialize(raw, BrowserJsonContext.Default.BrowserRuntimeFlagsPayload) is { ForceVectorFallback: bool value })
             {
-                return true;
-            }
-
-            JObject flags = JObject.Parse(raw);
-            JToken? token = flags["forceVectorFallback"];
-            if (token != null && token.Type == JTokenType.Boolean)
-            {
-                return token.Value<bool>();
+                return value;
             }
         }
         catch
@@ -227,178 +173,34 @@ public partial class DataVoInterop
         return true;
     }
 
-    private static object BuildLexerEnvironment()
-    {
-        return new
-        {
-            lexerAssembly = typeof(Lexer).Assembly.FullName,
-            keywordsAssembly = typeof(SqlKeywords).Assembly.FullName,
-            operatorsAssembly = typeof(Operators).Assembly.FullName,
-            keywordCount = SqlKeywords.All.Length,
-            hasCreate = SqlKeywords.All.Contains(SqlKeywords.CREATE),
-            hasDatabase = SqlKeywords.All.Contains(SqlKeywords.DATABASE),
-            andOperator = Operators.AND,
-            orOperator = Operators.OR
-        };
-    }
-
-    private static void PersistBrowserState()
+    /// <summary>
+    /// Writes the catalog and selected database only when a statement changed them (DDL, USE, database
+    /// create/drop); the catalog generation advances on every schema change.
+    /// </summary>
+    private static void PersistBrowserStateIfChanged()
     {
         if (_engine == null)
         {
             return;
         }
 
-        WriteCatalogState(_engine.Catalog.ExportState());
-        WriteSelectedDatabase(_engine.Sessions.Get(_session) ?? string.Empty);
+        if (_engine.Catalog.Generation != _persistedCatalogGeneration)
+        {
+            WriteCatalogState(_engine.Catalog.ExportState());
+        }
+
+        string selectedDatabase = _engine.Sessions.Get(_session) ?? string.Empty;
+        if (!string.Equals(selectedDatabase, _persistedDatabase, StringComparison.Ordinal))
+        {
+            WriteSelectedDatabase(selectedDatabase);
+        }
+
+        MarkPersisted();
     }
 
-    private static void RebuildIndexesFromStorage()
+    private static void MarkPersisted()
     {
-        if (_engine == null)
-        {
-            return;
-        }
-
-        foreach (string databaseName in _engine.Catalog.GetDatabases())
-        {
-            foreach (string tableName in _engine.Catalog.GetTables(databaseName))
-            {
-                var rows = _engine.StorageContext.GetTableContents(tableName, databaseName);
-                List<IndexFile> indexes = _engine.Catalog.GetTableIndexes(tableName, databaseName);
-
-                foreach (IndexFile index in indexes)
-                {
-                    if (_engine.IndexManager.SupportsVectorIndexType(index.IndexKind))
-                    {
-                        if (index.AttributeNames.Count != 1)
-                        {
-                            continue;
-                        }
-
-                        string vectorColumn = index.AttributeNames[0];
-                        List<(RowKey RowId, float[] Vector)> vectors = [];
-
-                        foreach (var rowEntry in rows)
-                        {
-                            if (!rowEntry.Value.TryGetValue(vectorColumn, out dynamic? rawValue) || rawValue == null)
-                            {
-                                continue;
-                            }
-
-                            if (TryCoerceVector(rawValue, out float[] vector))
-                            {
-                                vectors.Add((rowEntry.Key, vector));
-                            }
-                        }
-
-                        _engine.IndexManager.CreateVectorIndex(
-                            vectors,
-                            index.IndexFileName,
-                            tableName,
-                            databaseName,
-                            indexType: index.IndexKind);
-
-                        continue;
-                    }
-
-                    var values = new Dictionary<string, List<RowKey>>();
-
-                    foreach (var rowEntry in rows)
-                    {
-                        var row = rowEntry.Value;
-                        if (index.AttributeNames.Any(attribute => !row.ContainsKey(attribute) || row[attribute] == null))
-                        {
-                            continue;
-                        }
-
-                        string key = IndexKeyEncoder.BuildKeyString(row, index.AttributeNames);
-                        if (!values.TryGetValue(key, out List<RowKey>? rowIds))
-                        {
-                            rowIds = [];
-                            values[key] = rowIds;
-                        }
-
-                        rowIds.Add(rowEntry.Key);
-                    }
-
-                    _engine.IndexManager.CreateIndex(values, index.IndexFileName, tableName, databaseName);
-                }
-            }
-        }
-    }
-
-    private static bool TryCoerceVector(object? value, out float[] vector)
-    {
-        if (value is float[] typed)
-        {
-            vector = [.. typed];
-            return true;
-        }
-
-        if (value is IEnumerable<float> floatEnumerable)
-        {
-            vector = [.. floatEnumerable];
-            return true;
-        }
-
-        if (value is string text)
-        {
-            string trimmed = text.Trim();
-            if (trimmed.StartsWith('[') && trimmed.EndsWith(']') && trimmed.Length >= 2)
-            {
-                string[] parts = trimmed[1..^1]
-                    .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-
-                float[] parsed = new float[parts.Length];
-                for (int i = 0; i < parts.Length; i++)
-                {
-                    if (!float.TryParse(parts[i], NumberStyles.Float, CultureInfo.InvariantCulture, out parsed[i]))
-                    {
-                        vector = [];
-                        return false;
-                    }
-                }
-
-                vector = parsed;
-                return true;
-            }
-        }
-
-        vector = [];
-        return false;
-    }
-
-    private static ExceptionDetails BuildExceptionDetails(Exception ex)
-    {
-        var current = ex;
-        var depth = 0;
-        var messages = new List<object>();
-
-        while (current != null && depth < 10)
-        {
-            messages.Add(new
-            {
-                type = current.GetType().FullName,
-                message = current.Message,
-                stack = current.StackTrace
-            });
-
-            current = current.InnerException;
-            depth++;
-        }
-
-        var root = ex.GetBaseException();
-
-        return new ExceptionDetails
-        {
-            Error = ex.Message,
-            Type = ex.GetType().FullName,
-            Stack = ex.StackTrace,
-            RootType = root.GetType().FullName,
-            RootError = root.Message,
-            RootStack = root.StackTrace,
-            InnerExceptions = messages
-        };
+        _persistedCatalogGeneration = _engine!.Catalog.Generation;
+        _persistedDatabase = _engine.Sessions.Get(_session) ?? string.Empty;
     }
 }

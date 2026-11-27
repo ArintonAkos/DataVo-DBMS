@@ -1,24 +1,19 @@
 using System.Runtime.InteropServices.JavaScript;
+using System.Runtime.Versioning;
 using DataVo.Core;
 using DataVo.Core.StorageEngine;
 
 namespace DataVo.Browser;
 
 /// <summary>
-/// A WebAssembly specific storage engine that heavily relies on JSInterop to 
-/// read and write byte arrays to an underlying persistent Browser API (like IndexedDB).
+/// WebAssembly storage engine that keeps each row as its own entry in browser storage through
+/// <c>datavo.interop.js</c>: OPFS behind a dedicated storage worker when the runtime may block on
+/// <c>Atomics.wait</c> (synchronous to .NET via <c>SharedArrayBuffer</c>), otherwise <c>localStorage</c>,
+/// or a non-persistent in-memory map inside a worker without OPFS (reported as <c>persistent: false</c>).
 /// </summary>
+[SupportedOSPlatform("browser")]
 public partial class BrowserStorageEngine : IStorageEngine
 {
-    // Note: IndexedDB is fundamentally asynchronous, but DataVo's current IStorageEngine
-    // is fully synchronous. In WASM, synchronous JSInterop holds the WASM execution thread,
-    // which is acceptable for client-side synchronous DB execution, provided the JS implementations 
-    // utilize synchronous storage (like localStorage) OR the WASM payload is booted with Web Workers.
-    // However, JSInterop doesn't support async calls blocking WASM thread natively without Asyncify/Promises.
-    // For this generalized implementation, we will map standard synchronous calls.
-    // (If using IndexedDB, you'll need a synchronous proxy in JS or run WASM in a Worker that bridges to IDB synchronously via Atomics, 
-    // or just use localStorage for smaller datasets if IDB sync is unavailable).
-
     [JSImport("globalThis.DataVoStorage.insertRow")]
     internal static partial string InsertRowJS(string databaseName, string tableName, byte[] rowBytes);
 
@@ -130,19 +125,12 @@ public partial class BrowserStorageEngine : IStorageEngine
         DropDatabaseJS(databaseName);
     }
 
-    public List<(RowKey NewRowId, byte[] RawRow)> CompactTable(string databaseName, string tableName)
-    {
-        // For BrowserStorage, compaction is largely delegated to the JS engine or handled here
-        // by reading all, dropping, and rewriting.
-        var allRows = ReadAllRows(databaseName, tableName).ToList();
-        DropTable(databaseName, tableName);
-
-        var rewritten = new List<(RowKey NewRowId, byte[] RawRow)>();
-        foreach (var row in allRows)
-        {
-            RowKey newId = InsertRow(databaseName, tableName, row.RawRow);
-            rewritten.Add((newId, row.RawRow));
-        }
-        return rewritten;
-    }
+    /// <summary>
+    /// Compaction for per-row storage. Every row is an independent OPFS file or <c>localStorage</c> entry,
+    /// so deleted rows already left no gaps and there is nothing to reclaim: rows keep their ids and the
+    /// table is never dropped. The operation is atomic because it writes nothing; an interrupted VACUUM
+    /// cannot lose rows.
+    /// </summary>
+    public List<(RowKey NewRowId, byte[] RawRow)> CompactTable(string databaseName, string tableName) =>
+        [.. ReadAllRows(databaseName, tableName)];
 }

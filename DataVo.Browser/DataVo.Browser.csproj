@@ -4,13 +4,14 @@
     <OutputType>Exe</OutputType>
     <TargetFramework>net10.0</TargetFramework>
     <RuntimeIdentifier>browser-wasm</RuntimeIdentifier>
-    <Version>0.1.0-preview.1</Version>
+    <Version>$(DataVoVersion)</Version>
     <IsPackable>false</IsPackable>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <InvariantGlobalization>true</InvariantGlobalization>
-    <PublishTrimmed>false</PublishTrimmed>
+    <!-- Safe since the host dropped Newtonsoft/dynamic: DataVo.Core is trim/AOT-clean and JSON is source-generated. -->
+    <PublishTrimmed>true</PublishTrimmed>
     <TrimMode>partial</TrimMode>
   </PropertyGroup>
 
@@ -18,25 +19,11 @@
     <ProjectReference Include="..\DataVo.Core\DataVo.Core.csproj" />
   </ItemGroup>
 
-  <!-- DataVo.Core dropped Newtonsoft.Json (Native AOT migration to System.Text.Json source-gen). The
-       Browser host still uses Newtonsoft directly, so it declares its own reference now that it can no
-       longer rely on Core's transitive one. (Browser is WASM/untrimmed, out of the AOT Phase 1 scope.) -->
-  <ItemGroup>
-    <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
-  </ItemGroup>
-
+  <!-- DataVo.Core is trim/AOT-clean, so the framework is trimmed by analysis alone; the engine and the
+       JS-facing host stay fully rooted for [JSExport]/[JSImport] and catalog XML. -->
   <ItemGroup>
     <TrimmerRootAssembly Include="DataVo.Core" />
     <TrimmerRootAssembly Include="DataVo.Browser" />
-    <TrimmerRootAssembly Include="Newtonsoft.Json" />
-    <TrimmerRootAssembly Include="System.Linq" />
-    <TrimmerRootAssembly Include="System.Runtime" />
-    <TrimmerRootAssembly Include="System.Runtime.Extensions" />
-    <TrimmerRootAssembly Include="System.Text.RegularExpressions" />
-    <TrimmerRootAssembly Include="Microsoft.CSharp" />
-    <TrimmerRootAssembly Include="System.Xml.XmlSerializer" />
-    <TrimmerRootAssembly Include="System.Private.Xml" />
-    <TrimmerRootAssembly Include="System.Private.Xml.Linq" />
   </ItemGroup>
 
   <ItemGroup>

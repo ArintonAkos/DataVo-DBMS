@@ -3,6 +3,8 @@
  * Provides a strongly typed TypeScript interface over the DataVo C# WebAssembly engine.
  */
 
+import { resolveDataVoWasmBaseUrl } from "./datavoWasmPaths";
+
 /**
  * Result contract returned by SQL execution.
  *
@@ -143,14 +145,13 @@ export class DataVoClient {
       const debugEnabled = this.isDebugEnabled();
 
       // 1. Load the DataVoStorage interop module into globalThis so [JSImport] can find it
-      const storageUrl =
-        window.location.origin + "/datavo-wasm/datavo.interop.js";
+      const wasmBase = resolveDataVoWasmBaseUrl(window.location.origin);
+      const storageUrl = `${wasmBase}datavo.interop.js`;
       const storageModule = await import(/* @vite-ignore */ storageUrl);
       (globalThis as any).DataVoStorage = storageModule;
 
       // 2. Load the dotnet.js entry point from the _framework directory
-      const frameworkBase = window.location.origin + "/datavo-wasm/_framework";
-      const dotnetUrl = frameworkBase + "/dotnet.js";
+      const dotnetUrl = `${wasmBase}_framework/dotnet.js`;
       const { dotnet } = await import(/* @vite-ignore */ dotnetUrl);
 
       // 3. Create the runtime. dotnet.js will automatically load dotnet.boot.js
@@ -299,94 +300,20 @@ export class DataVoClient {
     }
 
     try {
-      const parsed = this.workerMode
+      // The runtime always answers with a QueryResult[]: failures are results with IsError set.
+      const parsed: QueryResult[] = this.workerMode
         ? await this.callRuntimeWorker("execute", { sql })
         : JSON.parse(
             this.dotnetRuntime.DataVo.Browser.DataVoInterop.ExecuteSql(sql),
           );
 
-      if (
-        parsed &&
-        typeof parsed === "object" &&
-        !Array.isArray(parsed) &&
-        parsed.error
-      ) {
-        const messages = [parsed.error];
-
-        if (parsed.rootType || parsed.rootError) {
-          messages.push(
-            `Root cause${parsed.rootType ? ` (${parsed.rootType})` : ""}: ${parsed.rootError ?? parsed.error}`,
-          );
-        }
-
-        return [
-          {
-            IsError: true,
-            Messages: messages,
-            Data: [],
-            Fields: [],
-            ExecutionTime: "",
-          },
-        ];
-      }
-
-      return this.attachErrorLocations(parsed as QueryResult[]);
+      return this.attachErrorLocations(parsed);
     } catch (error: any) {
       console.error("Error executing SQL:", error);
-
-      try {
-        if (this.workerMode) {
-          return [
-            this.attachErrorLocationToResult({
-              IsError: true,
-              Messages: [error.message || "Unknown execution error"],
-              Data: [],
-              Fields: [],
-              ExecutionTime: "",
-            }),
-          ];
-        }
-
-        const interop = this.dotnetRuntime?.DataVo?.Browser?.DataVoInterop;
-        if (interop && typeof interop.DiagnoseLexer === "function") {
-          const diagnosticJson = interop.DiagnoseLexer(sql);
-          const diagnostic = JSON.parse(diagnosticJson);
-          console.error("Lexer diagnostics:", diagnostic);
-
-          const messages = [error.message || "Unknown execution error"];
-
-          if (diagnostic?.error) {
-            messages.push(`Diagnostic error: ${diagnostic.error}`);
-          }
-
-          if (diagnostic?.rootType || diagnostic?.rootError) {
-            messages.push(
-              `Root cause${diagnostic.rootType ? ` (${diagnostic.rootType})` : ""}: ${diagnostic.rootError ?? diagnostic.error}`,
-            );
-          }
-
-          if (diagnostic?.stage) {
-            messages.push(`Diagnostic stage: ${diagnostic.stage}`);
-          }
-
-          return [
-            this.attachErrorLocationToResult({
-              IsError: true,
-              Messages: messages,
-              Data: [],
-              Fields: [],
-              ExecutionTime: "",
-            }),
-          ];
-        }
-      } catch (diagnosticError) {
-        console.error("Failed to collect lexer diagnostics:", diagnosticError);
-      }
-
       return [
         this.attachErrorLocationToResult({
           IsError: true,
-          Messages: [error.message || "Unknown execution error"],
+          Messages: [error?.message || "Unknown execution error"],
           Data: [],
           Fields: [],
           ExecutionTime: "",
