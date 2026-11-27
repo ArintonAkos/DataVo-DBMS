@@ -1,0 +1,176 @@
+[17:09:06] DataVo (LSM Production) [DataVo.Core net10.0]: disk CRUD (WAL) — inserting 20 000 records then 20 000 durable point updates...
+[17:09:06] DataVo (LSM Production) [DataVo.Core net10.0]: inserted 1 000/20 000, elapsed 0,0s
+[17:09:06] DataVo (LSM Production) [DataVo.Core net10.0]: inserted 2 000/20 000, elapsed 0,0s
+[17:09:06] DataVo (LSM Production) [DataVo.Core net10.0]: inserted 3 000/20 000, elapsed 0,0s
+[17:09:06] DataVo (LSM Production) [DataVo.Core net10.0]: inserted 4 000/20 000, elapsed 0,0s
+[17:09:06] DataVo (LSM Production) [DataVo.Core net10.0]: inserted 5 000/20 000, elapsed 0,0s
+[17:09:06] DataVo (LSM Production) [DataVo.Core net10.0]: inserted 6 000/20 000, elapsed 0,0s
+[17:09:06] DataVo (LSM Production) [DataVo.Core net10.0]: inserted 7 000/20 000, elapsed 0,0s
+[17:09:06] DataVo (LSM Production) [DataVo.Core net10.0]: inserted 8 000/20 000, elapsed 0,0s
+[17:09:06] DataVo (LSM Production) [DataVo.Core net10.0]: inserted 9 000/20 000, elapsed 0,0s
+[17:09:06] DataVo (LSM Production) [DataVo.Core net10.0]: inserted 10 000/20 000, elapsed 0,0s
+[17:09:06] DataVo (LSM Production) [DataVo.Core net10.0]: inserted 11 000/20 000, elapsed 0,0s
+[17:09:06] DataVo (LSM Production) [DataVo.Core net10.0]: inserted 12 000/20 000, elapsed 0,0s
+[17:09:06] DataVo (LSM Production) [DataVo.Core net10.0]: inserted 13 000/20 000, elapsed 0,0s
+[17:09:06] DataVo (LSM Production) [DataVo.Core net10.0]: inserted 14 000/20 000, elapsed 0,0s
+[17:09:06] DataVo (LSM Production) [DataVo.Core net10.0]: inserted 15 000/20 000, elapsed 0,0s
+[17:09:06] DataVo (LSM Production) [DataVo.Core net10.0]: inserted 16 000/20 000, elapsed 0,0s
+[17:09:06] DataVo (LSM Production) [DataVo.Core net10.0]: inserted 17 000/20 000, elapsed 0,0s
+[17:09:06] DataVo (LSM Production) [DataVo.Core net10.0]: inserted 18 000/20 000, elapsed 0,0s
+[17:09:06] DataVo (LSM Production) [DataVo.Core net10.0]: inserted 19 000/20 000, elapsed 0,0s
+[17:09:06] DataVo (LSM Production) [DataVo.Core net10.0]: inserted 20 000/20 000, elapsed 0,0s
+[17:09:06] DataVo (LSM Production) [DataVo.Core net10.0]: insert phase complete in 0,07s; starting 20 000 point updates...
+[17:09:10] DataVo (LSM Production) [DataVo.Core net10.0]: 1 000/20 000 updates, elapsed 4,3s
+[17:09:14] DataVo (LSM Production) [DataVo.Core net10.0]: 2 000/20 000 updates, elapsed 8,5s
+[17:09:18] DataVo (LSM Production) [DataVo.Core net10.0]: 3 000/20 000 updates, elapsed 12,7s
+[17:09:23] DataVo (LSM Production) [DataVo.Core net10.0]: 4 000/20 000 updates, elapsed 16,9s
+[17:09:27] DataVo (LSM Production) [DataVo.Core net10.0]: 5 000/20 000 updates, elapsed 21,1s
+[17:09:31] DataVo (LSM Production) [DataVo.Core net10.0]: 6 000/20 000 updates, elapsed 25,6s
+[17:09:36] DataVo (LSM Production) [DataVo.Core net10.0]: 7 000/20 000 updates, elapsed 30,3s
+[17:09:41] DataVo (LSM Production) [DataVo.Core net10.0]: 8 000/20 000 updates, elapsed 34,9s
+[17:09:45] DataVo (LSM Production) [DataVo.Core net10.0]: 9 000/20 000 updates, elapsed 39,3s
+[17:09:50] DataVo (LSM Production) [DataVo.Core net10.0]: 10 000/20 000 updates, elapsed 43,8s
+[17:09:54] DataVo (LSM Production) [DataVo.Core net10.0]: 11 000/20 000 updates, elapsed 48,1s
+[17:09:58] DataVo (LSM Production) [DataVo.Core net10.0]: 12 000/20 000 updates, elapsed 52,4s
+[17:10:03] DataVo (LSM Production) [DataVo.Core net10.0]: 13 000/20 000 updates, elapsed 56,8s
+[17:10:07] DataVo (LSM Production) [DataVo.Core net10.0]: 14 000/20 000 updates, elapsed 61,2s
+[17:10:11] DataVo (LSM Production) [DataVo.Core net10.0]: 15 000/20 000 updates, elapsed 65,5s
+[17:10:16] DataVo (LSM Production) [DataVo.Core net10.0]: 16 000/20 000 updates, elapsed 69,9s
+[17:10:20] DataVo (LSM Production) [DataVo.Core net10.0]: 17 000/20 000 updates, elapsed 74,2s
+[17:10:24] DataVo (LSM Production) [DataVo.Core net10.0]: 18 000/20 000 updates, elapsed 78,5s
+[17:10:29] DataVo (LSM Production) [DataVo.Core net10.0]: 19 000/20 000 updates, elapsed 82,8s
+[17:10:33] DataVo (LSM Production) [DataVo.Core net10.0]: 20 000/20 000 updates, elapsed 87,0s
+[17:10:33] DataVo (LSM Production) [DataVo.Core net10.0]: insert 0,07s | update 86,98s | update p50 4,0713ms p99 5,8840ms
+[17:10:33] DataVo (LSM Production) [DataVo.Core net10.0]: UPDATE alloc 18,59 MB total = 974,5 B/op | UPDATE cpu 4 348,79 us/op | insert alloc 12,23 MB
+[17:10:33] DataVo (LSM Relaxed) [DataVo.Core net10.0]: disk CRUD (WAL) — inserting 20 000 records then 20 000 durable point updates...
+[17:10:33] DataVo (LSM Relaxed) [DataVo.Core net10.0]: inserted 1 000/20 000, elapsed 0,0s
+[17:10:33] DataVo (LSM Relaxed) [DataVo.Core net10.0]: inserted 2 000/20 000, elapsed 0,0s
+[17:10:33] DataVo (LSM Relaxed) [DataVo.Core net10.0]: inserted 3 000/20 000, elapsed 0,0s
+[17:10:33] DataVo (LSM Relaxed) [DataVo.Core net10.0]: inserted 4 000/20 000, elapsed 0,0s
+[17:10:33] DataVo (LSM Relaxed) [DataVo.Core net10.0]: inserted 5 000/20 000, elapsed 0,0s
+[17:10:33] DataVo (LSM Relaxed) [DataVo.Core net10.0]: inserted 6 000/20 000, elapsed 0,0s
+[17:10:33] DataVo (LSM Relaxed) [DataVo.Core net10.0]: inserted 7 000/20 000, elapsed 0,0s
+[17:10:33] DataVo (LSM Relaxed) [DataVo.Core net10.0]: inserted 8 000/20 000, elapsed 0,0s
+[17:10:33] DataVo (LSM Relaxed) [DataVo.Core net10.0]: inserted 9 000/20 000, elapsed 0,0s
+[17:10:33] DataVo (LSM Relaxed) [DataVo.Core net10.0]: inserted 10 000/20 000, elapsed 0,0s
+[17:10:33] DataVo (LSM Relaxed) [DataVo.Core net10.0]: inserted 11 000/20 000, elapsed 0,0s
+[17:10:33] DataVo (LSM Relaxed) [DataVo.Core net10.0]: inserted 12 000/20 000, elapsed 0,0s
+[17:10:33] DataVo (LSM Relaxed) [DataVo.Core net10.0]: inserted 13 000/20 000, elapsed 0,0s
+[17:10:33] DataVo (LSM Relaxed) [DataVo.Core net10.0]: inserted 14 000/20 000, elapsed 0,0s
+[17:10:33] DataVo (LSM Relaxed) [DataVo.Core net10.0]: inserted 15 000/20 000, elapsed 0,0s
+[17:10:33] DataVo (LSM Relaxed) [DataVo.Core net10.0]: inserted 16 000/20 000, elapsed 0,0s
+[17:10:33] DataVo (LSM Relaxed) [DataVo.Core net10.0]: inserted 17 000/20 000, elapsed 0,0s
+[17:10:33] DataVo (LSM Relaxed) [DataVo.Core net10.0]: inserted 18 000/20 000, elapsed 0,0s
+[17:10:33] DataVo (LSM Relaxed) [DataVo.Core net10.0]: inserted 19 000/20 000, elapsed 0,0s
+[17:10:33] DataVo (LSM Relaxed) [DataVo.Core net10.0]: inserted 20 000/20 000, elapsed 0,0s
+[17:10:33] DataVo (LSM Relaxed) [DataVo.Core net10.0]: insert phase complete in 0,02s; starting 20 000 point updates...
+[17:10:33] DataVo (LSM Relaxed) [DataVo.Core net10.0]: 1 000/20 000 updates, elapsed 0,0s
+[17:10:33] DataVo (LSM Relaxed) [DataVo.Core net10.0]: 2 000/20 000 updates, elapsed 0,0s
+[17:10:33] DataVo (LSM Relaxed) [DataVo.Core net10.0]: 3 000/20 000 updates, elapsed 0,0s
+[17:10:33] DataVo (LSM Relaxed) [DataVo.Core net10.0]: 4 000/20 000 updates, elapsed 0,0s
+[17:10:33] DataVo (LSM Relaxed) [DataVo.Core net10.0]: 5 000/20 000 updates, elapsed 0,0s
+[17:10:33] DataVo (LSM Relaxed) [DataVo.Core net10.0]: 6 000/20 000 updates, elapsed 0,0s
+[17:10:33] DataVo (LSM Relaxed) [DataVo.Core net10.0]: 7 000/20 000 updates, elapsed 0,0s
+[17:10:33] DataVo (LSM Relaxed) [DataVo.Core net10.0]: 8 000/20 000 updates, elapsed 0,0s
+[17:10:33] DataVo (LSM Relaxed) [DataVo.Core net10.0]: 9 000/20 000 updates, elapsed 0,1s
+[17:10:33] DataVo (LSM Relaxed) [DataVo.Core net10.0]: 10 000/20 000 updates, elapsed 0,1s
+[17:10:33] DataVo (LSM Relaxed) [DataVo.Core net10.0]: 11 000/20 000 updates, elapsed 0,1s
+[17:10:33] DataVo (LSM Relaxed) [DataVo.Core net10.0]: 12 000/20 000 updates, elapsed 0,1s
+[17:10:33] DataVo (LSM Relaxed) [DataVo.Core net10.0]: 13 000/20 000 updates, elapsed 0,1s
+[17:10:33] DataVo (LSM Relaxed) [DataVo.Core net10.0]: 14 000/20 000 updates, elapsed 0,1s
+[17:10:33] DataVo (LSM Relaxed) [DataVo.Core net10.0]: 15 000/20 000 updates, elapsed 0,1s
+[17:10:33] DataVo (LSM Relaxed) [DataVo.Core net10.0]: 16 000/20 000 updates, elapsed 0,1s
+[17:10:33] DataVo (LSM Relaxed) [DataVo.Core net10.0]: 17 000/20 000 updates, elapsed 0,1s
+[17:10:33] DataVo (LSM Relaxed) [DataVo.Core net10.0]: 18 000/20 000 updates, elapsed 0,1s
+[17:10:33] DataVo (LSM Relaxed) [DataVo.Core net10.0]: 19 000/20 000 updates, elapsed 0,1s
+[17:10:33] DataVo (LSM Relaxed) [DataVo.Core net10.0]: 20 000/20 000 updates, elapsed 0,1s
+[17:10:33] DataVo (LSM Relaxed) [DataVo.Core net10.0]: insert 0,02s | update 0,07s | update p50 0,0028ms p99 0,0100ms
+[17:10:33] DataVo (LSM Relaxed) [DataVo.Core net10.0]: UPDATE alloc 14,65 MB total = 768,3 B/op | UPDATE cpu 3,52 us/op | insert alloc 8,23 MB
+[17:10:33] SQLite (WAL,normal): disk CRUD (WAL) — inserting 20 000 records then 20 000 durable point updates...
+[17:10:33] SQLite (WAL,normal): inserted 1 000/20 000, elapsed 0,0s
+[17:10:33] SQLite (WAL,normal): inserted 2 000/20 000, elapsed 0,0s
+[17:10:33] SQLite (WAL,normal): inserted 3 000/20 000, elapsed 0,0s
+[17:10:33] SQLite (WAL,normal): inserted 4 000/20 000, elapsed 0,0s
+[17:10:33] SQLite (WAL,normal): inserted 5 000/20 000, elapsed 0,0s
+[17:10:33] SQLite (WAL,normal): inserted 6 000/20 000, elapsed 0,0s
+[17:10:33] SQLite (WAL,normal): inserted 7 000/20 000, elapsed 0,0s
+[17:10:33] SQLite (WAL,normal): inserted 8 000/20 000, elapsed 0,0s
+[17:10:33] SQLite (WAL,normal): inserted 9 000/20 000, elapsed 0,0s
+[17:10:33] SQLite (WAL,normal): inserted 10 000/20 000, elapsed 0,0s
+[17:10:33] SQLite (WAL,normal): inserted 11 000/20 000, elapsed 0,0s
+[17:10:33] SQLite (WAL,normal): inserted 12 000/20 000, elapsed 0,0s
+[17:10:33] SQLite (WAL,normal): inserted 13 000/20 000, elapsed 0,0s
+[17:10:33] SQLite (WAL,normal): inserted 14 000/20 000, elapsed 0,0s
+[17:10:33] SQLite (WAL,normal): inserted 15 000/20 000, elapsed 0,0s
+[17:10:33] SQLite (WAL,normal): inserted 16 000/20 000, elapsed 0,0s
+[17:10:33] SQLite (WAL,normal): inserted 17 000/20 000, elapsed 0,0s
+[17:10:33] SQLite (WAL,normal): inserted 18 000/20 000, elapsed 0,0s
+[17:10:33] SQLite (WAL,normal): inserted 19 000/20 000, elapsed 0,0s
+[17:10:33] SQLite (WAL,normal): inserted 20 000/20 000, elapsed 0,0s
+[17:10:33] SQLite (WAL,normal): insert phase complete in 0,03s; starting 20 000 point updates...
+[17:10:33] SQLite (WAL,normal): 1 000/20 000 updates, elapsed 0,0s
+[17:10:33] SQLite (WAL,normal): 2 000/20 000 updates, elapsed 0,1s
+[17:10:33] SQLite (WAL,normal): 3 000/20 000 updates, elapsed 0,1s
+[17:10:33] SQLite (WAL,normal): 4 000/20 000 updates, elapsed 0,1s
+[17:10:33] SQLite (WAL,normal): 5 000/20 000 updates, elapsed 0,1s
+[17:10:33] SQLite (WAL,normal): 6 000/20 000 updates, elapsed 0,1s
+[17:10:33] SQLite (WAL,normal): 7 000/20 000 updates, elapsed 0,1s
+[17:10:33] SQLite (WAL,normal): 8 000/20 000 updates, elapsed 0,1s
+[17:10:33] SQLite (WAL,normal): 9 000/20 000 updates, elapsed 0,1s
+[17:10:33] SQLite (WAL,normal): 10 000/20 000 updates, elapsed 0,1s
+[17:10:33] SQLite (WAL,normal): 11 000/20 000 updates, elapsed 0,1s
+[17:10:33] SQLite (WAL,normal): 12 000/20 000 updates, elapsed 0,1s
+[17:10:33] SQLite (WAL,normal): 13 000/20 000 updates, elapsed 0,1s
+[17:10:33] SQLite (WAL,normal): 14 000/20 000 updates, elapsed 0,2s
+[17:10:33] SQLite (WAL,normal): 15 000/20 000 updates, elapsed 0,2s
+[17:10:33] SQLite (WAL,normal): 16 000/20 000 updates, elapsed 0,2s
+[17:10:33] SQLite (WAL,normal): 17 000/20 000 updates, elapsed 0,2s
+[17:10:33] SQLite (WAL,normal): 18 000/20 000 updates, elapsed 0,2s
+[17:10:33] SQLite (WAL,normal): 19 000/20 000 updates, elapsed 0,2s
+[17:10:33] SQLite (WAL,normal): 20 000/20 000 updates, elapsed 0,2s
+[17:10:33] SQLite (WAL,normal): insert 0,03s | update 0,18s | update p50 0,0069ms p99 0,0253ms
+[17:10:33] SQLite (WAL,normal): UPDATE alloc 10,69 MB total = 560,4 B/op | UPDATE cpu 8,95 us/op | insert alloc 12,52 MB
+[17:10:33] SQLite (WAL,full): disk CRUD (WAL) — inserting 20 000 records then 20 000 durable point updates...
+[17:10:33] SQLite (WAL,full): inserted 1 000/20 000, elapsed 0,0s
+[17:10:33] SQLite (WAL,full): inserted 2 000/20 000, elapsed 0,0s
+[17:10:33] SQLite (WAL,full): inserted 3 000/20 000, elapsed 0,0s
+[17:10:33] SQLite (WAL,full): inserted 4 000/20 000, elapsed 0,0s
+[17:10:33] SQLite (WAL,full): inserted 5 000/20 000, elapsed 0,0s
+[17:10:33] SQLite (WAL,full): inserted 6 000/20 000, elapsed 0,0s
+[17:10:33] SQLite (WAL,full): inserted 7 000/20 000, elapsed 0,0s
+[17:10:33] SQLite (WAL,full): inserted 8 000/20 000, elapsed 0,0s
+[17:10:33] SQLite (WAL,full): inserted 9 000/20 000, elapsed 0,0s
+[17:10:33] SQLite (WAL,full): inserted 10 000/20 000, elapsed 0,0s
+[17:10:33] SQLite (WAL,full): inserted 11 000/20 000, elapsed 0,0s
+[17:10:33] SQLite (WAL,full): inserted 12 000/20 000, elapsed 0,0s
+[17:10:33] SQLite (WAL,full): inserted 13 000/20 000, elapsed 0,0s
+[17:10:33] SQLite (WAL,full): inserted 14 000/20 000, elapsed 0,0s
+[17:10:33] SQLite (WAL,full): inserted 15 000/20 000, elapsed 0,0s
+[17:10:33] SQLite (WAL,full): inserted 16 000/20 000, elapsed 0,0s
+[17:10:33] SQLite (WAL,full): inserted 17 000/20 000, elapsed 0,0s
+[17:10:33] SQLite (WAL,full): inserted 18 000/20 000, elapsed 0,0s
+[17:10:33] SQLite (WAL,full): inserted 19 000/20 000, elapsed 0,0s
+[17:10:33] SQLite (WAL,full): inserted 20 000/20 000, elapsed 0,0s
+[17:10:33] SQLite (WAL,full): insert phase complete in 0,04s; starting 20 000 point updates...
+[17:10:38] SQLite (WAL,full): 1 000/20 000 updates, elapsed 5,1s
+[17:10:43] SQLite (WAL,full): 2 000/20 000 updates, elapsed 9,6s
+[17:10:47] SQLite (WAL,full): 3 000/20 000 updates, elapsed 13,9s
+[17:10:52] SQLite (WAL,full): 4 000/20 000 updates, elapsed 18,4s
+[17:10:56] SQLite (WAL,full): 5 000/20 000 updates, elapsed 22,6s
+[17:11:00] SQLite (WAL,full): 6 000/20 000 updates, elapsed 26,9s
+[17:11:05] SQLite (WAL,full): 7 000/20 000 updates, elapsed 31,5s
+[17:11:09] SQLite (WAL,full): 8 000/20 000 updates, elapsed 35,7s
+[17:11:13] SQLite (WAL,full): 9 000/20 000 updates, elapsed 40,0s
+[17:11:18] SQLite (WAL,full): 10 000/20 000 updates, elapsed 44,4s
+[17:11:22] SQLite (WAL,full): 11 000/20 000 updates, elapsed 48,8s
+[17:11:27] SQLite (WAL,full): 12 000/20 000 updates, elapsed 53,2s
+[17:11:31] SQLite (WAL,full): 13 000/20 000 updates, elapsed 57,5s
+[17:11:35] SQLite (WAL,full): 14 000/20 000 updates, elapsed 61,6s
+[17:11:39] SQLite (WAL,full): 15 000/20 000 updates, elapsed 65,8s
+[17:11:43] SQLite (WAL,full): 16 000/20 000 updates, elapsed 70,1s
+[17:11:48] SQLite (WAL,full): 17 000/20 000 updates, elapsed 74,7s
+[17:11:53] SQLite (WAL,full): 18 000/20 000 updates, elapsed 79,3s
+[17:11:57] SQLite (WAL,full): 19 000/20 000 updates, elapsed 83,8s
+[17:12:02] SQLite (WAL,full): 20 000/20 000 updates, elapsed 88,2s
+[17:12:02] SQLite (WAL,full): insert 0,04s | update 88,19s | update p50 4,0955ms p99 6,0558ms
+[17:12:02] SQLite (WAL,full): UPDATE alloc 9,78 MB total = 512,6 B/op | UPDATE cpu 4 409,72 us/op | insert alloc 12,52 MB

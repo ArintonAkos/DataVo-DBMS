@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang='en'>
+<head>
+<meta charset='utf-8' />
+<title>DataVo.Benchmarks.OutOfCoreAggregateUpdateBenchmarks-20261127-175234</title>
+
+<style type="text/css">
+	table { border-collapse: collapse; display: block; width: 100%; overflow: auto; }
+	td, th { padding: 6px 13px; border: 1px solid #ddd; text-align: right; }
+	tr { background-color: #fff; border-top: 1px solid #ccc; }
+	tr:nth-child(even) { background: #f8f8f8; }
+</style>
+</head>
+<body>
+<pre><code>
+BenchmarkDotNet v0.15.8, macOS Tahoe 26.3 (25D125) [Darwin 25.3.0]
+Apple M4 Pro, 1 CPU, 12 logical and 12 physical cores
+.NET SDK 10.0.103
+  [Host]     : .NET 10.0.3 (10.0.3, 10.0.326.7603), Arm64 RyuJIT armv8.0-a
+  DefaultJob : .NET 10.0.3 (10.0.3, 10.0.326.7603), Arm64 RyuJIT armv8.0-a
+</code></pre>
+<pre><code></code></pre>
+
+<table>
+<thead><tr><th>Method</th><th>Categories</th><th>UpdatedPercent</th><th>Updates</th><th>Mean        </th><th>Error    </th><th>StdDev   </th><th>Gen0</th><th>Allocated</th>
+</tr>
+</thead><tbody><tr><td>OpenAndSum</td><td>OpenAndSum</td><td>0</td><td>Tail</td><td>0.1995 ns</td><td>0.0020 ns</td><td>0.0017 ns</td><td>-</td><td>-</td>
+</tr><tr><td>OpenAndSum</td><td>OpenAndSum</td><td>0</td><td>Files</td><td>12,974,059.2000 ns</td><td>47,482.2363 ns</td><td>44,414.9133 ns</td><td>-</td><td>182218 B</td>
+</tr><tr><td>OpenAndSum</td><td>OpenAndSum</td><td>1</td><td>Tail</td><td>0.1973 ns</td><td>0.0010 ns</td><td>0.0009 ns</td><td>-</td><td>-</td>
+</tr><tr><td>OpenAndSum</td><td>OpenAndSum</td><td>1</td><td>Files</td><td>15,147,630.9420 ns</td><td>120,900.6666 ns</td><td>107,175.2919 ns</td><td>31.2500</td><td>336413 B</td>
+</tr><tr><td>OpenAndSum</td><td>OpenAndSum</td><td>10</td><td>Tail</td><td>0.1994 ns</td><td>0.0020 ns</td><td>0.0018 ns</td><td>-</td><td>-</td>
+</tr><tr><td>OpenAndSum</td><td>OpenAndSum</td><td>10</td><td>Files</td><td>32,943,317.3125 ns</td><td>161,649.8626 ns</td><td>134,984.9565 ns</td><td>-</td><td>364085 B</td>
+</tr><tr><td>Sum</td><td>Sum</td><td>0</td><td>Tail</td><td>388,869.4117 ns</td><td>443.5741 ns</td><td>414.9195 ns</td><td>-</td><td>-</td>
+</tr><tr><td>Sum</td><td>Sum</td><td>0</td><td>Files</td><td>388,466.4953 ns</td><td>633.0169 ns</td><td>494.2179 ns</td><td>-</td><td>-</td>
+</tr><tr><td>Sum</td><td>Sum</td><td>1</td><td>Tail</td><td>406,887.9801 ns</td><td>1,048.6579 ns</td><td>929.6080 ns</td><td>-</td><td>-</td>
+</tr><tr><td>Sum</td><td>Sum</td><td>1</td><td>Files</td><td>405,595.7549 ns</td><td>1,059.8034 ns</td><td>884.9838 ns</td><td>-</td><td>-</td>
+</tr><tr><td>Sum</td><td>Sum</td><td>10</td><td>Tail</td><td>467,129.6436 ns</td><td>9,179.7344 ns</td><td>11,936.2487 ns</td><td>-</td><td>-</td>
+</tr><tr><td>Sum</td><td>Sum</td><td>10</td><td>Files</td><td>456,517.2916 ns</td><td>1,638.4164 ns</td><td>1,368.1519 ns</td><td>-</td><td>-</td>
+</tr></tbody></table>
+</body>
+</html>

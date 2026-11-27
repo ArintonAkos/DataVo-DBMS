@@ -1,0 +1,1022 @@
+DataVo benchmark matrix (linux-x64-net10)
+DataVo.Core target: net10.0
+Date: 2026-11-27T15:08:27Z
+System: Linux runnervm0hi8g 7.0.0-1020-azure #21-Ubuntu SMP PREEMPT Tue Oct 27 22:34:38 UTC 2026 x86_64 GNU/Linux
+Host DLL: demos/Research.Benchmark/src/Research.Benchmark.Host/bin/Release/net10.0/Research.Benchmark.Host.dll
+sqlite-vec: 0.1.9 (sqlite-vec-0.1.9-loadable-linux-x86_64.tar.gz, sha256:b959baa1d8dc88861b1edb337b8587178cdcb12d60b4998f9d10b6a82052d5d7)
+SQLITE_VEC_PATH: /home/runner/work/_temp/sqlite-vec/vec0.so
+.NET SDK:
+ Version:           11.0.100
+ Commit:            297acf930f
+ Workload version:  11.0.100-manifests.08e30c08
+ MSBuild version:   18.12.2-1.26529.118+297acf930
+
+Runtime Environment:
+ OS Name:     ubuntu
+ OS Version:  26.04
+ OS Platform: Linux
+ RID:         linux-x64
+ Base Path:   /usr/share/dotnet/sdk/11.0.100
+
+.NET workloads installed:
+There are no installed workloads to display.
+Configured to use workload sets when installing new manifests.
+No workload sets are installed. Run "dotnet workload restore" to install a workload set.
+
+Host:
+  Version:      11.0.0
+  Architecture: x64
+  Commit:       297acf930f
+
+.NET SDKs installed:
+  8.0.134 [/usr/share/dotnet/sdk]
+  8.0.206 [/usr/share/dotnet/sdk]
+  8.0.319 [/usr/share/dotnet/sdk]
+  8.0.428 [/usr/share/dotnet/sdk]
+  9.0.124 [/usr/share/dotnet/sdk]
+  9.0.205 [/usr/share/dotnet/sdk]
+  9.0.321 [/usr/share/dotnet/sdk]
+  10.0.115 [/usr/share/dotnet/sdk]
+  10.0.204 [/usr/share/dotnet/sdk]
+  10.0.303 [/usr/share/dotnet/sdk]
+  10.0.404 [/usr/share/dotnet/sdk]
+  11.0.100 [/usr/share/dotnet/sdk]
+
+.NET runtimes installed:
+  Microsoft.AspNetCore.App 8.0.6 [/usr/share/dotnet/shared/Microsoft.AspNetCore.App]
+  Microsoft.AspNetCore.App 8.0.22 [/usr/share/dotnet/shared/Microsoft.AspNetCore.App]
+  Microsoft.AspNetCore.App 8.0.34 [/usr/share/dotnet/shared/Microsoft.AspNetCore.App]
+  Microsoft.AspNetCore.App 9.0.6 [/usr/share/dotnet/shared/Microsoft.AspNetCore.App]
+  Microsoft.AspNetCore.App 9.0.23 [/usr/share/dotnet/shared/Microsoft.AspNetCore.App]
+  Microsoft.AspNetCore.App 10.0.8 [/usr/share/dotnet/shared/Microsoft.AspNetCore.App]
+  Microsoft.AspNetCore.App 10.0.11 [/usr/share/dotnet/shared/Microsoft.AspNetCore.App]
+  Microsoft.AspNetCore.App 10.0.15 [/usr/share/dotnet/shared/Microsoft.AspNetCore.App]
+  Microsoft.AspNetCore.App 11.0.0 [/usr/share/dotnet/shared/Microsoft.AspNetCore.App]
+  Microsoft.NETCore.App 8.0.6 [/usr/share/dotnet/shared/Microsoft.NETCore.App]
+  Microsoft.NETCore.App 8.0.22 [/usr/share/dotnet/shared/Microsoft.NETCore.App]
+  Microsoft.NETCore.App 8.0.34 [/usr/share/dotnet/shared/Microsoft.NETCore.App]
+  Microsoft.NETCore.App 9.0.6 [/usr/share/dotnet/shared/Microsoft.NETCore.App]
+  Microsoft.NETCore.App 9.0.23 [/usr/share/dotnet/shared/Microsoft.NETCore.App]
+  Microsoft.NETCore.App 10.0.8 [/usr/share/dotnet/shared/Microsoft.NETCore.App]
+  Microsoft.NETCore.App 10.0.11 [/usr/share/dotnet/shared/Microsoft.NETCore.App]
+  Microsoft.NETCore.App 10.0.15 [/usr/share/dotnet/shared/Microsoft.NETCore.App]
+  Microsoft.NETCore.App 11.0.0 [/usr/share/dotnet/shared/Microsoft.NETCore.App]
+
+Other architectures found:
+  None
+
+Environment variables:
+  DOTNET_MULTILEVEL_LOOKUP                 [0]
+  DOTNET_NOLOGO                            [1]
+  DOTNET_ROOT                              [/usr/share/dotnet]
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE        [1]
+
+global.json file:
+  Not found
+
+Learn more:
+  https://aka.ms/dotnet/info
+
+Download .NET:
+  https://aka.ms/dotnet/download
+
+========================================
+SCENARIO: arena-live-views
+========================================
+PROFILE: gameplay
+# Arena live-views benchmark
+
+Schema/query revision: `arena-live-views-v1`
+Profile: `gameplay` (seed 20260721)
+
+| Engine | Architecture | Repetitions | Median total (ms) |
+|---|---|---:|---:|
+| datavo-reactive | EmbeddedReactiveIvm | 7 | 227.562 |
+| datavo-polling | EmbeddedPollingRecompute | 7 | 373.374 |
+| sqlite | EmbeddedPollingRecompute | 7 | 141.459 |
+| duckdb | EmbeddedPollingRecompute | 7 | 1733.648 |
+
+## datavo-reactive
+
+| Repetition | Total (ms) | Artifact |
+|---:|---:|---|
+| 1 | 212.000 | datavo-reactive/repetition-1.json |
+| 2 | 245.227 | datavo-reactive/repetition-2.json |
+| 3 | 227.814 | datavo-reactive/repetition-3.json |
+| 4 | 248.182 | datavo-reactive/repetition-4.json |
+| 5 | 227.562 | datavo-reactive/repetition-5.json |
+| 6 | 175.780 | datavo-reactive/repetition-6.json |
+| 7 | 142.841 | datavo-reactive/repetition-7.json |
+
+## datavo-polling
+
+| Repetition | Total (ms) | Artifact |
+|---:|---:|---|
+| 1 | 932.819 | datavo-polling/repetition-1.json |
+| 2 | 944.710 | datavo-polling/repetition-2.json |
+| 3 | 775.447 | datavo-polling/repetition-3.json |
+| 4 | 373.374 | datavo-polling/repetition-4.json |
+| 5 | 316.822 | datavo-polling/repetition-5.json |
+| 6 | 312.613 | datavo-polling/repetition-6.json |
+| 7 | 314.927 | datavo-polling/repetition-7.json |
+
+## sqlite
+
+| Repetition | Total (ms) | Artifact |
+|---:|---:|---|
+| 1 | 168.777 | sqlite/repetition-1.json |
+| 2 | 146.178 | sqlite/repetition-2.json |
+| 3 | 141.942 | sqlite/repetition-3.json |
+| 4 | 141.459 | sqlite/repetition-4.json |
+| 5 | 141.203 | sqlite/repetition-5.json |
+| 6 | 141.180 | sqlite/repetition-6.json |
+| 7 | 140.433 | sqlite/repetition-7.json |
+
+## duckdb
+
+| Repetition | Total (ms) | Artifact |
+|---:|---:|---|
+| 1 | 1742.909 | duckdb/repetition-1.json |
+| 2 | 1741.043 | duckdb/repetition-2.json |
+| 3 | 1726.989 | duckdb/repetition-3.json |
+| 4 | 1739.087 | duckdb/repetition-4.json |
+| 5 | 1732.759 | duckdb/repetition-5.json |
+| 6 | 1721.428 | duckdb/repetition-6.json |
+| 7 | 1733.648 | duckdb/repetition-7.json |
+PROFILE: ivm-stress
+# Arena live-views benchmark
+
+Schema/query revision: `arena-live-views-v1`
+Profile: `ivm-stress` (seed 20260721)
+
+| Engine | Architecture | Repetitions | Median total (ms) |
+|---|---|---:|---:|
+| datavo-reactive | EmbeddedReactiveIvm | 7 | 2678.804 |
+| datavo-polling | EmbeddedPollingRecompute | 7 | 17084.948 |
+| sqlite | EmbeddedPollingRecompute | 7 | 5599.478 |
+| duckdb | EmbeddedPollingRecompute | 7 | 30199.517 |
+
+## datavo-reactive
+
+| Repetition | Total (ms) | Artifact |
+|---:|---:|---|
+| 1 | 3197.165 | datavo-reactive/repetition-1.json |
+| 2 | 2744.097 | datavo-reactive/repetition-2.json |
+| 3 | 2748.486 | datavo-reactive/repetition-3.json |
+| 4 | 2595.290 | datavo-reactive/repetition-4.json |
+| 5 | 2678.804 | datavo-reactive/repetition-5.json |
+| 6 | 2658.408 | datavo-reactive/repetition-6.json |
+| 7 | 2641.969 | datavo-reactive/repetition-7.json |
+
+## datavo-polling
+
+| Repetition | Total (ms) | Artifact |
+|---:|---:|---|
+| 1 | 17223.566 | datavo-polling/repetition-1.json |
+| 2 | 16925.744 | datavo-polling/repetition-2.json |
+| 3 | 16885.353 | datavo-polling/repetition-3.json |
+| 4 | 17084.948 | datavo-polling/repetition-4.json |
+| 5 | 17233.700 | datavo-polling/repetition-5.json |
+| 6 | 17124.094 | datavo-polling/repetition-6.json |
+| 7 | 17051.123 | datavo-polling/repetition-7.json |
+
+## sqlite
+
+| Repetition | Total (ms) | Artifact |
+|---:|---:|---|
+| 1 | 5658.417 | sqlite/repetition-1.json |
+| 2 | 5614.235 | sqlite/repetition-2.json |
+| 3 | 5580.840 | sqlite/repetition-3.json |
+| 4 | 5613.778 | sqlite/repetition-4.json |
+| 5 | 5581.573 | sqlite/repetition-5.json |
+| 6 | 5599.478 | sqlite/repetition-6.json |
+| 7 | 5557.087 | sqlite/repetition-7.json |
+
+## duckdb
+
+| Repetition | Total (ms) | Artifact |
+|---:|---:|---|
+| 1 | 30144.204 | duckdb/repetition-1.json |
+| 2 | 30342.131 | duckdb/repetition-2.json |
+| 3 | 30130.721 | duckdb/repetition-3.json |
+| 4 | 30201.059 | duckdb/repetition-4.json |
+| 5 | 30234.961 | duckdb/repetition-5.json |
+| 6 | 30121.628 | duckdb/repetition-6.json |
+| 7 | 30199.517 | duckdb/repetition-7.json |
+
+========================================
+SCENARIO: simple-exposure
+========================================
+[15:19:18] DataVo [DataVo.Core net10.0]: preloading 10,000 baseline orders...
+[15:19:18] DataVo [DataVo.Core net10.0]: measuring 50,000 insert+read iterations...
+[15:19:18] DataVo [DataVo.Core net10.0]: 10,000/50,000 iterations, elapsed 0.4s
+[15:19:18] DataVo [DataVo.Core net10.0]: 20,000/50,000 iterations, elapsed 0.5s
+[15:19:19] DataVo [DataVo.Core net10.0]: 30,000/50,000 iterations, elapsed 0.7s
+[15:19:19] DataVo [DataVo.Core net10.0]: 40,000/50,000 iterations, elapsed 0.8s
+[15:19:19] DataVo [DataVo.Core net10.0]: 50,000/50,000 iterations, elapsed 0.9s
+[15:19:19] DuckDB: preloading 10,000 baseline orders...
+[15:19:37] DuckDB: measuring 50,000 insert+read iterations...
+[15:20:03] DuckDB: 10,000/50,000 iterations, elapsed 26.2s
+[15:20:30] DuckDB: 20,000/50,000 iterations, elapsed 52.9s
+[15:20:57] DuckDB: 30,000/50,000 iterations, elapsed 79.9s
+[15:21:24] DuckDB: 40,000/50,000 iterations, elapsed 107.3s
+[15:21:52] DuckDB: 50,000/50,000 iterations, elapsed 135.0s
+[15:21:52] SQLite: preloading 10,000 baseline orders...
+[15:21:52] SQLite: measuring 50,000 insert+read iterations...
+[15:21:52] SQLite: 10,000/50,000 iterations, elapsed 0.2s
+[15:21:52] SQLite: 20,000/50,000 iterations, elapsed 0.4s
+[15:21:52] SQLite: 30,000/50,000 iterations, elapsed 0.6s
+[15:21:53] SQLite: 40,000/50,000 iterations, elapsed 0.8s
+[15:21:53] SQLite: 50,000/50,000 iterations, elapsed 1.0s
+| Engine Name | Total Execution Time (ms) | P50 Latency (ms) | P99 Latency (ms) | Total GC Allocated (MB) |
+|---|---:|---:|---:|---:|
+| DataVo [DataVo.Core net10.0] | 933.420 | 0.016224 | 0.044947 | 356.695 |
+| DuckDB | 134996.420 | 2.652673 | 3.873622 | 208.302 |
+| SQLite | 964.962 | 0.015823 | 0.037545 | 199.680 |
+
+========================================
+SCENARIO: complex-vip
+========================================
+[15:21:53] DataVo [DataVo.Core net10.0]: preloading 10,000 orders, 1,000 accounts, 50 markets...
+[15:21:53] DataVo [DataVo.Core net10.0]: measuring 50,000 complex JOIN+GROUP BY insert+read iterations...
+[15:21:53] DataVo [DataVo.Core net10.0]: 10,000/50,000 iterations, elapsed 0.1s
+[15:21:53] DataVo [DataVo.Core net10.0]: 20,000/50,000 iterations, elapsed 0.2s
+[15:21:53] DataVo [DataVo.Core net10.0]: 30,000/50,000 iterations, elapsed 0.2s
+[15:21:53] DataVo [DataVo.Core net10.0]: 40,000/50,000 iterations, elapsed 0.3s
+[15:21:54] DataVo [DataVo.Core net10.0]: 50,000/50,000 iterations, elapsed 0.4s
+[15:21:54] DuckDB: preloading 10,000 orders, 1,000 accounts, 50 markets...
+[15:21:57] DuckDB: measuring 50,000 complex JOIN+GROUP BY insert+read iterations...
+[15:22:13] DuckDB: 10,000/50,000 iterations, elapsed 16.1s
+[15:22:30] DuckDB: 20,000/50,000 iterations, elapsed 33.0s
+[15:22:47] DuckDB: 30,000/50,000 iterations, elapsed 50.4s
+[15:23:05] DuckDB: 40,000/50,000 iterations, elapsed 68.3s
+[15:23:23] DuckDB: 50,000/50,000 iterations, elapsed 86.6s
+[15:23:23] SQLite: preloading 10,000 orders, 1,000 accounts, 50 markets...
+[15:23:23] SQLite: measuring 50,000 complex JOIN+GROUP BY insert+read iterations...
+[15:23:39] SQLite: 10,000/50,000 iterations, elapsed 15.3s
+[15:24:04] SQLite: 20,000/50,000 iterations, elapsed 40.6s
+[15:24:40] SQLite: 30,000/50,000 iterations, elapsed 76.2s
+[15:25:26] SQLite: 40,000/50,000 iterations, elapsed 122.3s
+[15:26:22] SQLite: 50,000/50,000 iterations, elapsed 179.1s
+| Engine Name | Total Execution Time (ms) | P50 Latency (ms) | P99 Latency (ms) | Total GC Allocated (MB) |
+|---|---:|---:|---:|---:|
+| DataVo [DataVo.Core net10.0] | 422.950 | 0.007000 | 0.014822 | 77.028 |
+| DuckDB | 86624.020 | 1.721723 | 2.148877 | 131.237 |
+| SQLite | 179066.100 | 3.550003 | 6.148676 | 115.610 |
+
+========================================
+SCENARIO: flat-crud
+========================================
+[15:26:22] DataVo [DataVo.Core net10.0]: flat CRUD — inserting 50,000 records then 50,000 point lookups...
+[15:26:23] DataVo [DataVo.Core net10.0]: inserted 10,000/50,000, elapsed 0.0s
+[15:26:23] DataVo [DataVo.Core net10.0]: inserted 20,000/50,000, elapsed 0.0s
+[15:26:23] DataVo [DataVo.Core net10.0]: inserted 30,000/50,000, elapsed 0.0s
+[15:26:23] DataVo [DataVo.Core net10.0]: inserted 40,000/50,000, elapsed 0.0s
+[15:26:23] DataVo [DataVo.Core net10.0]: inserted 50,000/50,000, elapsed 0.0s
+[15:26:23] DataVo [DataVo.Core net10.0]: insert phase complete in 0.1s; starting 50,000 lookups...
+[15:26:23] DataVo [DataVo.Core net10.0]: 10,000/50,000 lookups, elapsed 0.1s
+[15:26:23] DataVo [DataVo.Core net10.0]: 20,000/50,000 lookups, elapsed 0.1s
+[15:26:23] DataVo [DataVo.Core net10.0]: 30,000/50,000 lookups, elapsed 0.1s
+[15:26:23] DataVo [DataVo.Core net10.0]: 40,000/50,000 lookups, elapsed 0.1s
+[15:26:23] DataVo [DataVo.Core net10.0]: 50,000/50,000 lookups, elapsed 0.2s
+[15:26:23] LiteDB: flat CRUD — inserting 50,000 records then 50,000 point lookups...
+[15:26:23] LiteDB: inserted 10,000/50,000, elapsed 0.2s
+[15:26:23] LiteDB: inserted 20,000/50,000, elapsed 0.5s
+[15:26:23] LiteDB: inserted 30,000/50,000, elapsed 0.5s
+[15:26:23] LiteDB: inserted 40,000/50,000, elapsed 0.6s
+[15:26:24] LiteDB: inserted 50,000/50,000, elapsed 0.6s
+[15:26:24] LiteDB: insert phase complete in 0.6s; starting 50,000 lookups...
+[15:26:24] LiteDB: 10,000/50,000 lookups, elapsed 1.0s
+[15:26:24] LiteDB: 20,000/50,000 lookups, elapsed 1.4s
+[15:26:25] LiteDB: 30,000/50,000 lookups, elapsed 1.7s
+[15:26:25] LiteDB: 40,000/50,000 lookups, elapsed 1.8s
+[15:26:25] LiteDB: 50,000/50,000 lookups, elapsed 2.0s
+[15:26:25] SQLite: flat CRUD — inserting 50,000 records then 50,000 point lookups...
+[15:26:25] SQLite: inserted 10,000/50,000, elapsed 0.0s
+[15:26:25] SQLite: inserted 20,000/50,000, elapsed 0.0s
+[15:26:25] SQLite: inserted 30,000/50,000, elapsed 0.1s
+[15:26:25] SQLite: inserted 40,000/50,000, elapsed 0.1s
+[15:26:25] SQLite: inserted 50,000/50,000, elapsed 0.1s
+[15:26:25] SQLite: insert phase complete in 0.1s; starting 50,000 lookups...
+[15:26:25] SQLite: 10,000/50,000 lookups, elapsed 0.1s
+[15:26:25] SQLite: 20,000/50,000 lookups, elapsed 0.2s
+[15:26:25] SQLite: 30,000/50,000 lookups, elapsed 0.2s
+[15:26:25] SQLite: 40,000/50,000 lookups, elapsed 0.2s
+[15:26:25] SQLite: 50,000/50,000 lookups, elapsed 0.2s
+| Engine Name | Total Execution Time (ms) | P50 Latency (ms) | P99 Latency (ms) | Insert GC Allocated (MB) | Lookup GC Allocated (MB) | Total GC Allocated (MB) |
+|---|---:|---:|---:|---:|---:|---:|
+| DataVo [DataVo.Core net10.0] | 160.669 | 0.001372 | 0.002143 | 17.997 | 2.297 | 20.294 |
+| LiteDB | 1950.395 | 0.020320 | 0.053138 | 636.618 | 1839.428 | 2476.046 |
+| SQLite | 232.858 | 0.002213 | 0.003185 | 31.285 | 30.824 | 62.109 |
+
+========================================
+SCENARIO: disk-crud-wal
+========================================
+[15:26:25] DataVo (LSM Production) [DataVo.Core net10.0]: disk CRUD (WAL) — inserting 50,000 records then 50,000 durable point updates...
+[15:26:25] DataVo (LSM Production) [DataVo.Core net10.0]: inserted 10,000/50,000, elapsed 0.0s
+[15:26:25] DataVo (LSM Production) [DataVo.Core net10.0]: inserted 20,000/50,000, elapsed 0.0s
+[15:26:25] DataVo (LSM Production) [DataVo.Core net10.0]: inserted 30,000/50,000, elapsed 0.0s
+[15:26:25] DataVo (LSM Production) [DataVo.Core net10.0]: inserted 40,000/50,000, elapsed 0.0s
+[15:26:25] DataVo (LSM Production) [DataVo.Core net10.0]: inserted 50,000/50,000, elapsed 0.0s
+[15:26:26] DataVo (LSM Production) [DataVo.Core net10.0]: insert phase complete in 0.17s; starting 50,000 point updates...
+[15:26:29] DataVo (LSM Production) [DataVo.Core net10.0]: 10,000/50,000 updates, elapsed 3.3s
+[15:26:31] DataVo (LSM Production) [DataVo.Core net10.0]: 20,000/50,000 updates, elapsed 5.6s
+[15:26:34] DataVo (LSM Production) [DataVo.Core net10.0]: 30,000/50,000 updates, elapsed 8.3s
+[15:26:36] DataVo (LSM Production) [DataVo.Core net10.0]: 40,000/50,000 updates, elapsed 10.2s
+[15:26:38] DataVo (LSM Production) [DataVo.Core net10.0]: 50,000/50,000 updates, elapsed 12.6s
+[15:26:38] DataVo (LSM Production) [DataVo.Core net10.0]: insert 0.17s | update 12.41s | update p50 0.1628ms p99 0.7161ms
+[15:26:38] DataVo (LSM Production) [DataVo.Core net10.0]: UPDATE alloc 46.06 MB total = 966.0 B/op | UPDATE cpu 248.16 us/op | insert alloc 27.79 MB
+[15:26:38] DataVo (LSM Relaxed) [DataVo.Core net10.0]: disk CRUD (WAL) — inserting 50,000 records then 50,000 durable point updates...
+[15:26:38] DataVo (LSM Relaxed) [DataVo.Core net10.0]: inserted 10,000/50,000, elapsed 0.0s
+[15:26:38] DataVo (LSM Relaxed) [DataVo.Core net10.0]: inserted 20,000/50,000, elapsed 0.0s
+[15:26:38] DataVo (LSM Relaxed) [DataVo.Core net10.0]: inserted 30,000/50,000, elapsed 0.0s
+[15:26:38] DataVo (LSM Relaxed) [DataVo.Core net10.0]: inserted 40,000/50,000, elapsed 0.0s
+[15:26:38] DataVo (LSM Relaxed) [DataVo.Core net10.0]: inserted 50,000/50,000, elapsed 0.0s
+[15:26:38] DataVo (LSM Relaxed) [DataVo.Core net10.0]: insert phase complete in 0.05s; starting 50,000 point updates...
+[15:26:38] DataVo (LSM Relaxed) [DataVo.Core net10.0]: 10,000/50,000 updates, elapsed 0.1s
+[15:26:38] DataVo (LSM Relaxed) [DataVo.Core net10.0]: 20,000/50,000 updates, elapsed 0.1s
+[15:26:38] DataVo (LSM Relaxed) [DataVo.Core net10.0]: 30,000/50,000 updates, elapsed 0.2s
+[15:26:38] DataVo (LSM Relaxed) [DataVo.Core net10.0]: 40,000/50,000 updates, elapsed 0.2s
+[15:26:38] DataVo (LSM Relaxed) [DataVo.Core net10.0]: 50,000/50,000 updates, elapsed 0.3s
+[15:26:38] DataVo (LSM Relaxed) [DataVo.Core net10.0]: insert 0.05s | update 0.22s | update p50 0.0037ms p99 0.0106ms
+[15:26:38] DataVo (LSM Relaxed) [DataVo.Core net10.0]: UPDATE alloc 36.62 MB total = 768.1 B/op | UPDATE cpu 4.45 us/op | insert alloc 19.79 MB
+[15:26:38] SQLite (WAL,normal): disk CRUD (WAL) — inserting 50,000 records then 50,000 durable point updates...
+[15:26:38] SQLite (WAL,normal): inserted 10,000/50,000, elapsed 0.0s
+[15:26:39] SQLite (WAL,normal): inserted 20,000/50,000, elapsed 0.1s
+[15:26:39] SQLite (WAL,normal): inserted 30,000/50,000, elapsed 0.1s
+[15:26:39] SQLite (WAL,normal): inserted 40,000/50,000, elapsed 0.1s
+[15:26:39] SQLite (WAL,normal): inserted 50,000/50,000, elapsed 0.1s
+[15:26:39] SQLite (WAL,normal): insert phase complete in 0.13s; starting 50,000 point updates...
+[15:26:39] SQLite (WAL,normal): 10,000/50,000 updates, elapsed 0.3s
+[15:26:39] SQLite (WAL,normal): 20,000/50,000 updates, elapsed 0.5s
+[15:26:39] SQLite (WAL,normal): 30,000/50,000 updates, elapsed 1.0s
+[15:26:40] SQLite (WAL,normal): 40,000/50,000 updates, elapsed 1.2s
+[15:26:40] SQLite (WAL,normal): 50,000/50,000 updates, elapsed 1.5s
+[15:26:40] SQLite (WAL,normal): insert 0.13s | update 1.36s | update p50 0.0103ms p99 0.0194ms
+[15:26:40] SQLite (WAL,normal): UPDATE alloc 25.21 MB total = 528.8 B/op | UPDATE cpu 27.21 us/op | insert alloc 31.28 MB
+[15:26:40] SQLite (WAL,full): disk CRUD (WAL) — inserting 50,000 records then 50,000 durable point updates...
+[15:26:40] SQLite (WAL,full): inserted 10,000/50,000, elapsed 0.0s
+[15:26:40] SQLite (WAL,full): inserted 20,000/50,000, elapsed 0.0s
+[15:26:40] SQLite (WAL,full): inserted 30,000/50,000, elapsed 0.0s
+[15:26:40] SQLite (WAL,full): inserted 40,000/50,000, elapsed 0.1s
+[15:26:40] SQLite (WAL,full): inserted 50,000/50,000, elapsed 0.1s
+[15:26:40] SQLite (WAL,full): insert phase complete in 0.07s; starting 50,000 point updates...
+[15:26:42] SQLite (WAL,full): 10,000/50,000 updates, elapsed 1.6s
+[15:26:43] SQLite (WAL,full): 20,000/50,000 updates, elapsed 2.5s
+[15:26:44] SQLite (WAL,full): 30,000/50,000 updates, elapsed 3.9s
+[15:26:45] SQLite (WAL,full): 40,000/50,000 updates, elapsed 5.1s
+[15:26:46] SQLite (WAL,full): 50,000/50,000 updates, elapsed 6.5s
+[15:26:46] SQLite (WAL,full): insert 0.07s | update 6.38s | update p50 0.0790ms p99 0.2954ms
+[15:26:46] SQLite (WAL,full): UPDATE alloc 24.42 MB total = 512.1 B/op | UPDATE cpu 127.56 us/op | insert alloc 29.00 MB
+| Engine Name | Total Execution Time (ms) | P50 Latency (ms) | P99 Latency (ms) | Total GC Allocated (MB) |
+|---|---:|---:|---:|---:|
+| DataVo (LSM Production) [DataVo.Core net10.0] | 12573.184 | 0.162812 | 0.716092 | 73.853 |
+| DataVo (LSM Relaxed) [DataVo.Core net10.0] | 271.987 | 0.003655 | 0.010596 | 56.412 |
+| SQLite (WAL,normal) | 1488.991 | 0.010335 | 0.019439 | 56.499 |
+| SQLite (WAL,full) | 6451.945 | 0.079027 | 0.295448 | 53.414 |
+
+========================================
+SCENARIO: deep-document
+========================================
+[15:26:46] DataVo [DataVo.Core net10.0]: deep document — saving 5,000 nested orders (5 items, 2 addresses each) then loading 5,000...
+[15:26:47] DataVo [DataVo.Core net10.0]: saved 5,000/5,000, elapsed 0.0s
+[15:26:47] DataVo [DataVo.Core net10.0]: save phase complete in 0.1s; starting 5,000 loads...
+[15:26:47] DataVo [DataVo.Core net10.0]: 5,000/5,000 loads, elapsed 0.2s
+[15:26:47] LiteDB: deep document — saving 5,000 nested orders (5 items, 2 addresses each) then loading 5,000...
+[15:26:47] LiteDB: saved 5,000/5,000, elapsed 0.3s
+[15:26:47] LiteDB: save phase complete in 0.3s; starting 5,000 loads...
+[15:26:48] LiteDB: 5,000/5,000 loads, elapsed 0.8s
+[15:26:48] SQLite: deep document — saving 5,000 nested orders (5 items, 2 addresses each) then loading 5,000...
+[15:26:48] SQLite: saved 5,000/5,000, elapsed 0.2s
+[15:26:48] SQLite: save phase complete in 0.2s; starting 5,000 loads...
+[15:26:48] SQLite: 5,000/5,000 loads, elapsed 0.2s
+| Engine Name | Total Execution Time (ms) | P50 Latency (ms) | P99 Latency (ms) | Total GC Allocated (MB) |
+|---|---:|---:|---:|---:|
+| DataVo [DataVo.Core net10.0] | 168.412 | 0.011337 | 0.020631 | 23.482 |
+| LiteDB | 834.749 | 0.097063 | 0.193297 | 332.252 |
+| SQLite | 249.484 | 0.013600 | 0.020861 | 46.048 |
+
+========================================
+SCENARIO: concurrent-ops
+========================================
+[15:26:48] DataVo [DataVo.Core net10.0]: concurrent ops — preloading 100,000 records, then 8 readers + 2 writers for 5s...
+[15:26:54] DataVo [DataVo.Core net10.0]: 6,661,548 reads + 1,180,510 writes, 1,568,190 OPS
+[15:26:54] SQLite: concurrent ops — preloading 100,000 records, then 8 readers + 2 writers for 5s...
+[15:26:59] SQLite: 1,715,244 reads + 2 writes, 335,911 OPS
+[15:26:59] SQLite (WAL,normal): concurrent ops — preloading 100,000 records, then 8 readers + 2 writers for 5s...
+[15:27:05] SQLite (WAL,normal): 4,110,830 reads + 16,622 writes, 825,002 OPS
+| Engine Name | Total Execution Time (ms) | OPS | Read P99 Latency (ms) | Write P99 Latency (ms) | Total GC Allocated (MB) |
+|---|---:|---:|---:|---:|---:|
+| DataVo [DataVo.Core net10.0] | 5000.706 | 1568190.172 | 0.004507 | 0.020070 | 1440.364 |
+| SQLite | 5106.257 | 335910.616 | 0.084626 | 5104.266590 | 945.863 |
+| SQLite (WAL,normal) | 5002.962 | 825001.735 | 0.054621 | 6.453757 | 2281.144 |
+
+========================================
+SCENARIO: vector-search
+========================================
+[15:27:05] DataVo [DataVo.Core net10.0]: vector search — inserting 10,000 x 1536-dim vectors then 100 top-10 queries...
+[15:27:05] DataVo [DataVo.Core net10.0]: inserted 10,000/10,000, elapsed 0.0s
+[15:27:10] DataVo [DataVo.Core net10.0]: insert phase complete in 5.4s; starting 100 top-10 queries...
+[15:27:11] DataVo [DataVo.Core net10.0]: 100/100 queries, elapsed 5.7s
+[15:27:11] DataVo-HNSW-Diversity [DataVo.Core net10.0]: vector search — inserting 10,000 x 1536-dim vectors then 100 top-10 queries...
+[15:27:11] DataVo-HNSW-Diversity [DataVo.Core net10.0]: inserted 10,000/10,000, elapsed 0.0s
+[15:27:16] DataVo-HNSW-Diversity [DataVo.Core net10.0]: insert phase complete in 5.6s; starting 100 top-10 queries...
+[15:27:17] DataVo-HNSW-Diversity [DataVo.Core net10.0]: 100/100 queries, elapsed 5.8s
+[15:27:17] DataVo-HNSW-Diversity [DataVo.Core net10.0]: HNSW build diagnostics — searchLayerCalls=15723, searchLayerNeighborVisits=28372885, edgeAddCalls=408642, edgeDuplicateSkips=0, edgeAppends=1396, fullNeighborPrunes=14773, selectNeighborsCalls=30395, selectNeighborCandidates=1390640, diversityComparisons=20365219, diversityOcclusions=613872, incrementalDiversityPrunes=392473, nonDiverseReplacementScans=0, nonDiverseReplacements=0, distanceToOrdinalCalls=20612751, distanceBetweenOrdinalCalls=33377196
+[15:27:17] DataVo-Flat [DataVo.Core net10.0]: vector search — inserting 10,000 x 1536-dim vectors then 100 top-10 queries...
+[15:27:17] DataVo-Flat [DataVo.Core net10.0]: inserted 10,000/10,000, elapsed 0.0s
+[15:27:17] DataVo-Flat [DataVo.Core net10.0]: insert phase complete in 0.2s; starting 100 top-10 queries...
+[15:27:17] DataVo-Flat [DataVo.Core net10.0]: 100/100 queries, elapsed 0.4s
+[15:27:17] LiteDB: vector search — inserting 10,000 x 1536-dim vectors then 100 top-10 queries...
+[15:27:20] LiteDB: inserted 10,000/10,000, elapsed 2.1s
+[15:27:20] LiteDB: insert phase complete in 2.7s; starting 100 top-10 queries...
+[15:29:29] LiteDB: 100/100 queries, elapsed 131.7s
+[15:29:29] SQLite: vector search — inserting 10,000 x 1536-dim vectors then 100 top-10 queries...
+[15:29:30] SQLite: inserted 10,000/10,000, elapsed 0.3s
+[15:29:30] SQLite: insert phase complete in 0.3s; starting 100 top-10 queries...
+[15:29:31] SQLite: 100/100 queries, elapsed 2.0s
+| Engine Name | Total Execution Time (ms) | P50 Latency (ms) | P99 Latency (ms) | Total GC Allocated (MB) |
+|---|---:|---:|---:|---:|
+| DataVo [DataVo.Core net10.0] | 5658.573 | 2.456222 | 3.450936 | 62.106 |
+| DataVo-HNSW-Diversity [DataVo.Core net10.0] | 5822.661 | 2.522580 | 3.225381 | 60.928 |
+| DataVo-Flat [DataVo.Core net10.0] | 388.684 | 2.254973 | 2.489691 | 60.852 |
+| LiteDB | 131679.943 | 1281.061449 | 1348.589167 | 208914.822 |
+| SQLite | 2035.294 | 17.390972 | 19.825871 | 63.208 |
+
+========================================
+SCENARIO: thread-scaling
+========================================
+[15:29:31] DataVo (LSM Production) [DataVo.Core net10.0]: thread scaling — preloading 100,000 records, then 100,000 reads + 10,000 updates at 1..32 threads...
+[15:29:34] DataVo (LSM Production) [DataVo.Core net10.0]: 1 threads completed 110,000 ops in 2,304.6ms (47,730 OPS)
+[15:29:36] DataVo (LSM Production) [DataVo.Core net10.0]: 2 threads completed 110,000 ops in 1,936.4ms (56,806 OPS)
+[15:29:37] DataVo (LSM Production) [DataVo.Core net10.0]: 4 threads completed 110,000 ops in 1,441.3ms (76,318 OPS)
+[15:29:38] DataVo (LSM Production) [DataVo.Core net10.0]: 8 threads completed 110,000 ops in 933.8ms (117,793 OPS)
+[15:29:39] DataVo (LSM Production) [DataVo.Core net10.0]: 16 threads completed 110,000 ops in 831.4ms (132,303 OPS)
+[15:29:41] DataVo (LSM Production) [DataVo.Core net10.0]: 32 threads completed 110,000 ops in 1,846.0ms (59,588 OPS)
+[15:29:41] DataVo (LSM Relaxed) [DataVo.Core net10.0]: thread scaling — preloading 100,000 records, then 100,000 reads + 10,000 updates at 1..32 threads...
+[15:29:41] DataVo (LSM Relaxed) [DataVo.Core net10.0]: 1 threads completed 110,000 ops in 102.8ms (1,070,419 OPS)
+[15:29:41] DataVo (LSM Relaxed) [DataVo.Core net10.0]: 2 threads completed 110,000 ops in 71.0ms (1,549,745 OPS)
+[15:29:42] DataVo (LSM Relaxed) [DataVo.Core net10.0]: 4 threads completed 110,000 ops in 72.9ms (1,509,902 OPS)
+[15:29:42] DataVo (LSM Relaxed) [DataVo.Core net10.0]: 8 threads completed 110,000 ops in 98.8ms (1,113,373 OPS)
+[15:29:42] DataVo (LSM Relaxed) [DataVo.Core net10.0]: 16 threads completed 110,000 ops in 89.6ms (1,227,155 OPS)
+[15:29:42] DataVo (LSM Relaxed) [DataVo.Core net10.0]: 32 threads completed 110,000 ops in 88.1ms (1,248,756 OPS)
+[15:29:42] SQLite (WAL,normal): thread scaling — preloading 100,000 records, then 100,000 reads + 10,000 updates at 1..32 threads...
+[15:29:43] SQLite (WAL,normal): 1 threads completed 110,000 ops in 902.1ms (121,933 OPS)
+[15:29:44] SQLite (WAL,normal): 2 threads completed 110,000 ops in 513.6ms (214,194 OPS)
+[15:29:44] SQLite (WAL,normal): 4 threads completed 110,000 ops in 419.9ms (261,961 OPS)
+[15:29:44] SQLite (WAL,normal): 8 threads completed 110,000 ops in 383.7ms (286,695 OPS)
+[15:29:45] SQLite (WAL,normal): 16 threads completed 110,000 ops in 379.7ms (289,681 OPS)
+[15:29:45] SQLite (WAL,normal): 32 threads completed 110,000 ops in 398.1ms (276,328 OPS)
+[15:29:45] LiteDB: thread scaling — preloading 100,000 records, then 100,000 reads + 10,000 updates at 1..32 threads...
+[15:29:50] LiteDB: 1 threads completed 110,000 ops in 3,422.6ms (32,139 OPS)
+[15:29:53] LiteDB: 2 threads completed 110,000 ops in 2,950.2ms (37,285 OPS)
+[15:29:56] LiteDB: 4 threads completed 110,000 ops in 3,385.7ms (32,490 OPS)
+[15:29:59] LiteDB: 8 threads completed 110,000 ops in 3,481.9ms (31,591 OPS)
+[15:30:03] LiteDB: 16 threads completed 110,000 ops in 3,479.2ms (31,616 OPS)
+[15:30:06] LiteDB: 32 threads completed 110,000 ops in 3,510.3ms (31,337 OPS)
+| Engine Name | Total Execution Time (ms) | OPS | Read P99 Latency (ms) | Write P99 Latency (ms) | Total GC Allocated (MB) |
+|---|---:|---:|---:|---:|---:|
+| DataVo (LSM Production) [DataVo.Core net10.0] (1 threads) | 2304.620 | 47730.218 | n/a | n/a | 34.215 |
+| DataVo (LSM Production) [DataVo.Core net10.0] (2 threads) | 1936.428 | 56805.621 | n/a | n/a | 33.900 |
+| DataVo (LSM Production) [DataVo.Core net10.0] (4 threads) | 1441.345 | 76317.596 | n/a | n/a | 34.651 |
+| DataVo (LSM Production) [DataVo.Core net10.0] (8 threads) | 933.845 | 117792.618 | n/a | n/a | 33.600 |
+| DataVo (LSM Production) [DataVo.Core net10.0] (16 threads) | 831.424 | 132303.133 | n/a | n/a | 34.593 |
+| DataVo (LSM Production) [DataVo.Core net10.0] (32 threads) | 1846.001 | 59588.273 | n/a | n/a | 33.613 |
+| DataVo (LSM Relaxed) [DataVo.Core net10.0] (1 threads) | 102.763 | 1070418.972 | n/a | n/a | 32.428 |
+| DataVo (LSM Relaxed) [DataVo.Core net10.0] (2 threads) | 70.979 | 1549745.419 | n/a | n/a | 32.428 |
+| DataVo (LSM Relaxed) [DataVo.Core net10.0] (4 threads) | 72.852 | 1509902.213 | n/a | n/a | 32.428 |
+| DataVo (LSM Relaxed) [DataVo.Core net10.0] (8 threads) | 98.799 | 1113372.720 | n/a | n/a | 32.442 |
+| DataVo (LSM Relaxed) [DataVo.Core net10.0] (16 threads) | 89.638 | 1227155.387 | n/a | n/a | 32.429 |
+| DataVo (LSM Relaxed) [DataVo.Core net10.0] (32 threads) | 88.088 | 1248755.502 | n/a | n/a | 32.430 |
+| SQLite (WAL,normal) (1 threads) | 902.134 | 121933.146 | n/a | n/a | 63.013 |
+| SQLite (WAL,normal) (2 threads) | 513.552 | 214194.390 | n/a | n/a | 62.035 |
+| SQLite (WAL,normal) (4 threads) | 419.910 | 261961.146 | n/a | n/a | 62.041 |
+| SQLite (WAL,normal) (8 threads) | 383.683 | 286695.155 | n/a | n/a | 62.041 |
+| SQLite (WAL,normal) (16 threads) | 379.728 | 289680.959 | n/a | n/a | 62.032 |
+| SQLite (WAL,normal) (32 threads) | 398.077 | 276328.171 | n/a | n/a | 62.033 |
+| LiteDB (1 threads) | 3422.630 | 32139.030 | n/a | n/a | 4380.184 |
+| LiteDB (2 threads) | 2950.231 | 37285.215 | n/a | n/a | 4350.905 |
+| LiteDB (4 threads) | 3385.695 | 32489.640 | n/a | n/a | 4350.819 |
+| LiteDB (8 threads) | 3481.950 | 31591.496 | n/a | n/a | 4350.634 |
+| LiteDB (16 threads) | 3479.203 | 31616.438 | n/a | n/a | 4350.964 |
+| LiteDB (32 threads) | 3510.257 | 31336.735 | n/a | n/a | 4350.541 |
+
+========================================
+SCENARIO: ycsb-mixed
+========================================
+[15:30:06] DataVo (LSM Production) [DataVo.Core net10.0]: YCSB mixed — preloading 100,000, then 80,000 reads + 20,000 updates across 4 threads...
+[15:30:09] DataVo (LSM Production) [DataVo.Core net10.0]: YCSB completed in 2,360.6ms (42,363 OPS), read p99 0.0106ms write p99 1.9215ms
+[15:30:09] DataVo (LSM Relaxed) [DataVo.Core net10.0]: YCSB mixed — preloading 100,000, then 80,000 reads + 20,000 updates across 4 threads...
+[15:30:10] DataVo (LSM Relaxed) [DataVo.Core net10.0]: YCSB completed in 124.5ms (803,301 OPS), read p99 0.0019ms write p99 0.1451ms
+[15:30:10] SQLite (WAL,normal): YCSB mixed — preloading 100,000, then 80,000 reads + 20,000 updates across 4 threads...
+[15:30:11] SQLite (WAL,normal): YCSB completed in 882.7ms (113,283 OPS), read p99 0.0228ms write p99 3.1656ms
+[15:30:11] LiteDB: YCSB mixed — preloading 100,000, then 80,000 reads + 20,000 updates across 4 threads...
+[15:30:18] LiteDB: YCSB completed in 5,840.7ms (17,121 OPS), read p99 0.0910ms write p99 0.2193ms
+| Engine Name | Total Execution Time (ms) | OPS | Read P99 Latency (ms) | Write P99 Latency (ms) | Total GC Allocated (MB) |
+|---|---:|---:|---:|---:|---:|
+| DataVo (LSM Production) [DataVo.Core net10.0] | 2360.577 | 42362.515 | 0.010576 | 1.921508 | 38.305 |
+| DataVo (LSM Relaxed) [DataVo.Core net10.0] | 124.486 | 803301.247 | 0.001933 | 0.145095 | 34.732 |
+| SQLite (WAL,normal) | 882.747 | 113282.741 | 0.022814 | 3.165582 | 55.505 |
+| LiteDB | 5840.693 | 17121.257 | 0.090954 | 0.219265 | 4283.561 |
+
+========================================
+SCENARIO: space-and-recovery
+========================================
+[15:30:18] DataVo (LSM Production) [DataVo.Core net10.0]: space/recovery — inserting 1,000,000 records, measuring footprint and cold-open RTO...
+[15:30:19] DataVo (LSM Production) [DataVo.Core net10.0]: insert 1,435.6ms | size 28.15 MB | recovery 22.5ms | first read after recovery 7.3ms
+[15:30:19] DataVo (LSM Relaxed) [DataVo.Core net10.0]: space/recovery — inserting 1,000,000 records, measuring footprint and cold-open RTO...
+[15:30:21] DataVo (LSM Relaxed) [DataVo.Core net10.0]: insert 998.1ms | size 28.15 MB | recovery 1.3ms | first read after recovery 0.0ms
+[15:30:21] SQLite (WAL,normal): space/recovery — inserting 1,000,000 records, measuring footprint and cold-open RTO...
+[15:30:22] SQLite (WAL,normal): insert 1,595.0ms | size 29.08 MB | recovery 0.6ms | first read after recovery 3.1ms
+[15:30:22] LiteDB: space/recovery — inserting 1,000,000 records, measuring footprint and cold-open RTO...
+[15:30:28] LiteDB: insert 5,873.5ms | size 154.46 MB | recovery 1.8ms | first read after recovery 22.5ms
+| Engine Name | Insert Execution Time (ms) | Disk Size (MB) | Recovery Time (ms) | Total GC Allocated (MB) |
+|---|---:|---:|---:|---:|
+| DataVo (LSM Production) [DataVo.Core net10.0] | 1435.576 | 28.155 | 22.480 | 398.946 |
+| DataVo (LSM Relaxed) [DataVo.Core net10.0] | 998.070 | 28.155 | 1.271 | 379.649 |
+| SQLite (WAL,normal) | 1594.962 | 29.082 | 0.565 | 630.378 |
+| LiteDB | 5873.478 | 154.461 | 1.768 | 15106.414 |
+
+========================================
+SCENARIO: sql-workload
+========================================
+[15:30:32] DataVo (LSM) [DataVo.Core net10.0]: loaded 1,000,000 orders
+[15:30:33] DataVo (LSM) [DataVo.Core net10.0]: loaded 1,000,000 GUID rows
+[15:30:34] DataVo (LSM) [DataVo.Core net10.0]: point and range reads done
+[15:30:39] DataVo (LSM) [DataVo.Core net10.0]: analytic queries done
+[15:30:39] DataVo (LSM) [DataVo.Core net10.0]: writes done
+[15:30:45] SQLite: loaded 1,000,000 orders
+[15:30:50] SQLite: loaded 1,000,000 GUID rows
+[15:30:51] SQLite: point and range reads done
+[15:30:57] SQLite: analytic queries done
+[15:30:58] SQLite: writes done
+[15:30:59] DuckDB: loaded 1,000,000 orders
+[15:31:00] DuckDB: loaded 1,000,000 GUID rows
+[15:31:15] DuckDB: point and range reads done
+[15:31:15] DuckDB: analytic queries done
+[15:31:25] DuckDB: writes done
+[15:31:42] LiteDB: loaded 1,000,000 orders
+[15:31:54] LiteDB: loaded 1,000,000 GUID rows
+[15:32:00] LiteDB: point and range reads done
+[15:32:46] LiteDB: analytic queries done
+[15:32:48] LiteDB: writes done
+## SQL workload, 1,000,000 orders (10,000 customers, 1,000,000 GUID rows)
+
+| Operation | DataVo (LSM) [DataVo.Core net10.0] | SQLite | DuckDB | LiteDB |
+|---|---|---|---|---|
+| Load orders + customers | 3.24 s | 5.38 s | 972.3 ms | 14.72 s |
+| Load GUID-keyed rows | 1.45 s | 5.13 s | 1.13 s | 11.49 s |
+| Point read by INT key | 2.4 µs (p99 9.9 µs) | 5.0 µs (p99 6.3 µs) | 323.6 µs (p99 386.7 µs) | 45.1 µs (p99 75.8 µs) |
+| Point read by GUID key | 2.2 µs (p99 5.1 µs) | 5.4 µs (p99 7.3 µs) | 268.1 µs (p99 316.9 µs) | 27.0 µs (p99 63.4 µs) |
+| Secondary-index lookup (~100 rows) | 207.6 µs (p99 277.3 µs) | 178.5 µs (p99 247.8 µs) | 602.2 µs (p99 851.9 µs) | 1.1 ms (p99 4.5 ms) |
+| Key range scan (100 rows) | 40.8 µs (p99 62.8 µs) | 15.1 µs (p99 23.6 µs) | 486.3 µs (p99 642.5 µs) | 1.4 ms (p99 2.4 ms) |
+| COUNT with filter (full scan) | 68.7 ms (p99 71.1 ms) | 44.9 ms (p99 45.2 ms) | 1.5 ms (p99 1.5 ms) | 812.3 ms (p99 818.7 ms) |
+| GROUP BY (full scan) | 97.9 ms (p99 108.6 ms) | 320.5 ms (p99 324.9 ms) | 2.8 ms (p99 3.0 ms) | 3.17 s (p99 3.26 s) |
+| JOIN + GROUP BY | 190.3 ms (p99 196.0 ms) | 465.7 ms (p99 467.9 ms) | 4.2 ms (p99 4.5 ms) | 979.5 ms (p99 1.00 s) |
+| ORDER BY ... LIMIT 10 | 119.6 ms (p99 123.5 ms) | 58.5 ms (p99 58.7 ms) | 4.4 ms (p99 4.5 ms) | 1.37 s (p99 1.38 s) |
+| UPDATE by key (autocommit) | 8.2 µs (p99 39.6 µs) | 11.9 µs (p99 33.7 µs) | 594.1 µs (p99 4.0 ms) | 86.9 µs (p99 182.3 µs) |
+| DELETE by key (autocommit) | 18.2 µs (p99 36.1 µs) | 15.2 µs (p99 33.8 µs) | 601.0 µs (p99 2.9 ms) | 68.0 µs (p99 377.5 µs) |
+| Close (flush to disk) | 450.3 ms | 9.7 ms | 560.8 ms | 7.0 ms |
+| Size on disk (MB) | 74.4 MB | 75.3 MB | 99.1 MB | 384.2 MB |
+| Reopen + first point read | 10.4 ms | 0.6 ms | 9.2 ms | 0.4 ms |
+| Point read after reopen | 3.4 µs (p99 8.7 µs) | 5.9 µs (p99 14.3 µs) | 322.3 µs (p99 388.4 µs) | 27.0 µs (p99 83.0 µs) |
+
+Repeated operations show the median and p99 latency of one call; single steps show total time.
+
+- **DataVo (LSM) [DataVo.Core net10.0]**: LSM mode, commit log without fsync per commit; prepared statements with bound parameters, bulk load via InsertTypedBatch.
+- **SQLite**: WAL, synchronous=NORMAL; prepared statements with parameters; bulk load in one transaction; GUIDs as 16-byte BLOB keys in a WITHOUT ROWID table.
+- **DuckDB**: File database with its default WAL; appender for bulk load; prepared statements with parameters; GUIDs as UUID.
+- **LiteDB**: Default journal; BsonDocument API with InsertBulk; GROUP BY and JOIN done in application code (LiteDB has no relational joins).
+
+Result check (the same query must give the same answer everywhere):
+
+- every other operation returned identical results on all engines.
+
+========================================
+SCENARIO: sql-matrix
+========================================
+[15:32:48] sql-matrix: generating 1,000,000 orders and computing the oracle's answers...
+[15:32:57] DataVo (LSM) [DataVo.Core net10.0]: loaded 1,000,000 orders in 6,300 ms
+[15:33:01] DataVo (LSM) [DataVo.Core net10.0]: J1 p50 147.45 ms p99 159.17 ms alloc 40.8 KB/call
+[15:33:01] DataVo (LSM) [DataVo.Core net10.0]: J2 p50 24.55 ms p99 37.90 ms alloc 1.0 MB/call
+[15:33:02] DataVo (LSM) [DataVo.Core net10.0]: J3 p50 29.02 ms p99 33.81 ms alloc 5.2 MB/call
+[15:33:04] DataVo (LSM) [DataVo.Core net10.0]: J4 p50 140.88 ms p99 157.22 ms alloc 34.6 KB/call
+[15:33:05] DataVo (LSM) [DataVo.Core net10.0]: J5 p50 91.61 ms p99 105.20 ms alloc 31.3 KB/call
+[15:33:09] DataVo (LSM) [DataVo.Core net10.0]: J6 p50 266.20 ms p99 283.75 ms alloc 21.3 MB/call
+[15:33:09] DataVo (LSM) [DataVo.Core net10.0]: J7 p50 14.18 ms p99 16.52 ms alloc 30.3 KB/call
+[15:33:10] DataVo (LSM) [DataVo.Core net10.0]: W1 p50 492.8 µs p99 1.16 ms alloc 329.1 KB/call
+[15:33:11] DataVo (LSM) [DataVo.Core net10.0]: W2 p50 67.59 ms p99 76.50 ms alloc 318.2 KB/call
+[15:33:13] DataVo (LSM) [DataVo.Core net10.0]: W3 p50 123.79 ms p99 154.46 ms alloc 22.8 KB/call
+[15:33:15] DataVo (LSM) [DataVo.Core net10.0]: W4 p50 145.66 ms p99 157.56 ms alloc 23.8 KB/call
+[15:33:16] DataVo (LSM) [DataVo.Core net10.0]: W5 p50 87.21 ms p99 94.32 ms alloc 16.5 KB/call
+[15:33:18] DataVo (LSM) [DataVo.Core net10.0]: W6 p50 101.40 ms p99 105.08 ms alloc 16.5 KB/call
+[15:33:18] DataVo (LSM) [DataVo.Core net10.0]: R1 p50 35.9 µs p99 55.7 µs alloc 31.1 KB/call
+[15:33:18] DataVo (LSM) [DataVo.Core net10.0]: R2 p50 24.9 µs p99 34.8 µs alloc 31.1 KB/call
+[15:33:19] DataVo (LSM) [DataVo.Core net10.0]: R3 p50 3.33 ms p99 22.05 ms alloc 3.0 MB/call
+[15:33:19] DataVo (LSM) [DataVo.Core net10.0]: R4 p50 2.07 ms p99 16.40 ms alloc 3.0 MB/call
+[15:33:20] DataVo (LSM) [DataVo.Core net10.0]: G1 p50 90.36 ms p99 93.60 ms alloc 26.9 KB/call
+[15:33:22] DataVo (LSM) [DataVo.Core net10.0]: G2 p50 123.37 ms p99 128.78 ms alloc 2.1 MB/call
+[15:33:23] DataVo (LSM) [DataVo.Core net10.0]: G3 p50 54.29 ms p99 54.76 ms alloc 909.2 KB/call
+[15:33:25] DataVo (LSM) [DataVo.Core net10.0]: C1 p50 117.08 ms p99 119.11 ms alloc 16.6 KB/call
+[15:33:26] DataVo (LSM) [DataVo.Core net10.0]: C2 p50 127.72 ms p99 129.37 ms alloc 17.0 KB/call
+[15:33:28] DataVo (LSM) [DataVo.Core net10.0]: C3 p50 126.75 ms p99 135.27 ms alloc 17.0 KB/call
+[15:33:30] DataVo (LSM) [DataVo.Core net10.0]: C4 p50 175.68 ms p99 179.12 ms alloc 24.4 KB/call
+[15:33:31] DataVo (LSM) [DataVo.Core net10.0]: C5 p50 83.22 ms p99 87.50 ms alloc 17.7 KB/call
+[15:33:33] DataVo (LSM) [DataVo.Core net10.0]: C6 p50 120.53 ms p99 127.45 ms alloc 17.6 KB/call
+[15:33:35] DataVo (LSM) [DataVo.Core net10.0]: C7 p50 124.81 ms p99 132.18 ms alloc 2.1 MB/call
+[15:33:36] DataVo (LSM) [DataVo.Core net10.0]: C8 p50 117.56 ms p99 122.49 ms alloc 49.6 KB/call
+[15:33:37] DataVo (LSM) [DataVo.Core net10.0]: columnar index created in 1,061 ms
+[15:33:37] DataVo (LSM) [DataVo.Core net10.0]: C1+columnar p50 3.90 ms p99 4.06 ms alloc 16.4 KB/call [pushed]
+[15:33:37] DataVo (LSM) [DataVo.Core net10.0]: C2+columnar p50 4.64 ms p99 4.78 ms alloc 16.7 KB/call [pushed]
+[15:33:39] DataVo (LSM) [DataVo.Core net10.0]: C3+columnar p50 127.44 ms p99 134.04 ms alloc 17.0 KB/call [row scan]
+[15:33:39] DataVo (LSM) [DataVo.Core net10.0]: C4+columnar p50 10.72 ms p99 10.93 ms alloc 23.8 KB/call [pushed]
+[15:33:40] DataVo (LSM) [DataVo.Core net10.0]: C5+columnar p50 83.15 ms p99 86.33 ms alloc 17.7 KB/call [row scan]
+[15:33:40] DataVo (LSM) [DataVo.Core net10.0]: C6+columnar p50 4.65 ms p99 4.92 ms alloc 17.3 KB/call [pushed]
+[15:33:42] DataVo (LSM) [DataVo.Core net10.0]: C7+columnar p50 123.55 ms p99 129.39 ms alloc 2.1 MB/call [row scan]
+[15:33:44] DataVo (LSM) [DataVo.Core net10.0]: C8+columnar p50 119.43 ms p99 144.49 ms alloc 49.5 KB/call [row scan]
+[15:33:45] DataVo (InMemory) [DataVo.Core net10.0]: loaded 1,000,000 orders in 1,064 ms
+[15:33:49] DataVo (InMemory) [DataVo.Core net10.0]: J1 p50 274.49 ms p99 279.31 ms alloc 36.2 KB/call
+[15:33:49] DataVo (InMemory) [DataVo.Core net10.0]: J2 p50 22.98 ms p99 24.52 ms alloc 1.0 MB/call
+[15:33:49] DataVo (InMemory) [DataVo.Core net10.0]: J3 p50 26.16 ms p99 29.29 ms alloc 4.7 MB/call
+[15:33:53] DataVo (InMemory) [DataVo.Core net10.0]: J4 p50 256.01 ms p99 286.95 ms alloc 33.5 KB/call
+[15:33:56] DataVo (InMemory) [DataVo.Core net10.0]: J5 p50 236.96 ms p99 242.58 ms alloc 30.1 KB/call
+[15:34:03] DataVo (InMemory) [DataVo.Core net10.0]: J6 p50 510.39 ms p99 541.88 ms alloc 21.3 MB/call
+[15:34:03] DataVo (InMemory) [DataVo.Core net10.0]: J7 p50 13.08 ms p99 13.29 ms alloc 21.0 KB/call
+[15:34:03] DataVo (InMemory) [DataVo.Core net10.0]: W1 p50 341.3 µs p99 761.4 µs alloc 312.6 KB/call
+[15:34:07] DataVo (InMemory) [DataVo.Core net10.0]: W2 p50 218.80 ms p99 230.81 ms alloc 318.2 KB/call
+[15:34:09] DataVo (InMemory) [DataVo.Core net10.0]: W3 p50 167.61 ms p99 172.09 ms alloc 21.6 KB/call
+[15:34:12] DataVo (InMemory) [DataVo.Core net10.0]: W4 p50 196.83 ms p99 218.62 ms alloc 22.7 KB/call
+[15:34:13] DataVo (InMemory) [DataVo.Core net10.0]: W5 p50 84.23 ms p99 88.58 ms alloc 15.4 KB/call
+[15:34:15] DataVo (InMemory) [DataVo.Core net10.0]: W6 p50 96.02 ms p99 96.54 ms alloc 15.5 KB/call
+[15:34:15] DataVo (InMemory) [DataVo.Core net10.0]: R1 p50 44.2 µs p99 81.3 µs alloc 34.9 KB/call
+[15:34:15] DataVo (InMemory) [DataVo.Core net10.0]: R2 p50 37.8 µs p99 74.9 µs alloc 34.9 KB/call
+[15:34:16] DataVo (InMemory) [DataVo.Core net10.0]: R3 p50 5.17 ms p99 24.70 ms alloc 3.4 MB/call
+[15:34:17] DataVo (InMemory) [DataVo.Core net10.0]: R4 p50 3.79 ms p99 22.63 ms alloc 3.4 MB/call
+[15:34:19] DataVo (InMemory) [DataVo.Core net10.0]: G1 p50 145.04 ms p99 145.79 ms alloc 25.9 KB/call
+[15:34:21] DataVo (InMemory) [DataVo.Core net10.0]: G2 p50 124.52 ms p99 127.30 ms alloc 2.1 MB/call
+[15:34:21] DataVo (InMemory) [DataVo.Core net10.0]: G3 p50 38.80 ms p99 41.43 ms alloc 921.0 KB/call
+[15:34:23] DataVo (InMemory) [DataVo.Core net10.0]: C1 p50 124.20 ms p99 124.72 ms alloc 15.6 KB/call
+[15:34:25] DataVo (InMemory) [DataVo.Core net10.0]: C2 p50 116.44 ms p99 122.06 ms alloc 16.0 KB/call
+[15:34:26] DataVo (InMemory) [DataVo.Core net10.0]: C3 p50 124.27 ms p99 125.22 ms alloc 16.0 KB/call
+[15:34:29] DataVo (InMemory) [DataVo.Core net10.0]: C4 p50 189.22 ms p99 191.84 ms alloc 23.4 KB/call
+[15:34:30] DataVo (InMemory) [DataVo.Core net10.0]: C5 p50 116.16 ms p99 117.49 ms alloc 16.7 KB/call
+[15:34:32] DataVo (InMemory) [DataVo.Core net10.0]: C6 p50 133.93 ms p99 136.87 ms alloc 16.6 KB/call
+[15:34:34] DataVo (InMemory) [DataVo.Core net10.0]: C7 p50 123.01 ms p99 124.90 ms alloc 2.1 MB/call
+[15:34:36] DataVo (InMemory) [DataVo.Core net10.0]: C8 p50 121.05 ms p99 122.29 ms alloc 48.5 KB/call
+[15:34:36] DataVo (InMemory) [DataVo.Core net10.0]: columnar index created in 349 ms
+[15:34:36] DataVo (InMemory) [DataVo.Core net10.0]: C1+columnar p50 4.91 ms p99 5.02 ms alloc 15.4 KB/call [pushed]
+[15:34:36] DataVo (InMemory) [DataVo.Core net10.0]: C2+columnar p50 4.76 ms p99 4.98 ms alloc 15.7 KB/call [pushed]
+[15:34:36] DataVo (InMemory) [DataVo.Core net10.0]: C3+columnar p50 3.31 ms p99 3.68 ms alloc 15.8 KB/call [pushed]
+[15:34:36] DataVo (InMemory) [DataVo.Core net10.0]: C4+columnar p50 11.12 ms p99 11.42 ms alloc 22.8 KB/call [pushed]
+[15:34:38] DataVo (InMemory) [DataVo.Core net10.0]: C5+columnar p50 116.20 ms p99 125.04 ms alloc 16.7 KB/call [row scan]
+[15:34:38] DataVo (InMemory) [DataVo.Core net10.0]: C6+columnar p50 438.0 µs p99 1.03 ms alloc 16.3 KB/call [pushed]
+[15:34:40] DataVo (InMemory) [DataVo.Core net10.0]: C7+columnar p50 123.09 ms p99 129.39 ms alloc 2.1 MB/call [row scan]
+[15:34:41] DataVo (InMemory) [DataVo.Core net10.0]: C8+columnar p50 120.91 ms p99 146.87 ms alloc 48.5 KB/call [row scan]
+[15:34:51] SQLite: loaded 1,000,000 orders in 9,864 ms
+[15:35:10] SQLite: J1 p50 1.43 s p99 1.45 s alloc 432 B/call
+[15:35:13] SQLite: J2 p50 169.98 ms p99 179.97 ms alloc 696 B/call
+[15:35:15] SQLite: J3 p50 170.49 ms p99 173.46 ms alloc 6.5 KB/call
+[15:35:21] SQLite: J4 p50 389.99 ms p99 393.42 ms alloc 456 B/call
+[15:35:22] SQLite: J5 p50 72.79 ms p99 73.27 ms alloc 408 B/call
+[15:35:41] SQLite: J6 p50 1.49 s p99 1.49 s alloc 1.0 KB/call
+[15:35:41] SQLite: J7 p50 32.35 ms p99 33.77 ms alloc 560 B/call
+[15:35:43] SQLite: W1 p50 1.92 ms p99 2.25 ms alloc 48.6 KB/call
+[15:35:44] SQLite: W2 p50 48.34 ms p99 50.20 ms alloc 48.7 KB/call
+[15:35:46] SQLite: W3 p50 95.98 ms p99 96.78 ms alloc 688 B/call
+[15:35:47] SQLite: W4 p50 98.88 ms p99 99.86 ms alloc 816 B/call
+[15:35:48] SQLite: W5 p50 80.22 ms p99 80.51 ms alloc 552 B/call
+[15:35:50] SQLite: W6 p50 82.90 ms p99 83.13 ms alloc 552 B/call
+[15:35:50] SQLite: R1 p50 42.8 µs p99 56.3 µs alloc 5.3 KB/call
+[15:35:50] SQLite: R2 p50 39.3 µs p99 54.3 µs alloc 5.3 KB/call
+[15:35:50] SQLite: R3 p50 3.75 ms p99 3.93 ms alloc 469.4 KB/call
+[15:35:51] SQLite: R4 p50 3.77 ms p99 4.05 ms alloc 469.4 KB/call
+[15:35:55] SQLite: G1 p50 360.16 ms p99 360.85 ms alloc 720 B/call
+[15:36:00] SQLite: G2 p50 327.79 ms p99 330.68 ms alloc 70.7 KB/call
+[15:36:00] SQLite: G3 p50 53.21 ms p99 54.82 ms alloc 5.2 KB/call
+[15:36:01] SQLite: C1 p50 71.40 ms p99 71.86 ms alloc 664 B/call
+[15:36:02] SQLite: C2 p50 66.27 ms p99 68.59 ms alloc 536 B/call
+[15:36:03] SQLite: C3 p50 67.27 ms p99 72.52 ms alloc 536 B/call
+[15:36:04] SQLite: C4 p50 110.91 ms p99 116.62 ms alloc 608 B/call
+[15:36:05] SQLite: C5 p50 70.11 ms p99 70.83 ms alloc 672 B/call
+[15:36:06] SQLite: C6 p50 60.66 ms p99 61.31 ms alloc 536 B/call
+[15:36:10] SQLite: C7 p50 316.58 ms p99 327.04 ms alloc 70.7 KB/call
+[15:36:11] SQLite: C8 p50 77.28 ms p99 78.45 ms alloc 864 B/call
+[15:36:13] DuckDB: loaded 1,000,000 orders in 1,918 ms
+[15:36:14] DuckDB: J1 p50 6.24 ms p99 6.89 ms alloc 1.3 KB/call
+[15:36:14] DuckDB: J2 p50 4.27 ms p99 4.53 ms alloc 1.7 KB/call
+[15:36:14] DuckDB: J3 p50 5.72 ms p99 12.62 ms alloc 10.3 KB/call
+[15:36:15] DuckDB: J4 p50 12.10 ms p99 17.51 ms alloc 1.5 KB/call
+[15:36:15] DuckDB: J5 p50 10.72 ms p99 12.11 ms alloc 1.1 KB/call
+[15:36:15] DuckDB: J6 p50 13.18 ms p99 14.96 ms alloc 2.5 KB/call
+[15:36:15] DuckDB: J7 p50 2.89 ms p99 3.21 ms alloc 1.5 KB/call
+[15:36:17] DuckDB: W1 p50 2.28 ms p99 2.98 ms alloc 97.4 KB/call
+[15:36:17] DuckDB: W2 p50 1.79 ms p99 2.15 ms alloc 98.0 KB/call
+[15:36:18] DuckDB: W3 p50 7.70 ms p99 8.66 ms alloc 1.6 KB/call
+[15:36:18] DuckDB: W4 p50 8.34 ms p99 9.12 ms alloc 1.7 KB/call
+[15:36:18] DuckDB: W5 p50 10.76 ms p99 11.30 ms alloc 1.3 KB/call
+[15:36:18] DuckDB: W6 p50 15.07 ms p99 15.71 ms alloc 1.3 KB/call
+[15:36:19] DuckDB: R1 p50 498.9 µs p99 666.1 µs alloc 10.7 KB/call
+[15:36:19] DuckDB: R2 p50 491.0 µs p99 628.1 µs alloc 10.7 KB/call
+[15:36:19] DuckDB: R3 p50 1.17 ms p99 1.41 ms alloc 939.0 KB/call
+[15:36:20] DuckDB: R4 p50 1.18 ms p99 1.68 ms alloc 939.0 KB/call
+[15:36:20] DuckDB: G1 p50 2.79 ms p99 3.39 ms alloc 1.9 KB/call
+[15:36:20] DuckDB: G2 p50 2.71 ms p99 3.22 ms alloc 142.0 KB/call
+[15:36:20] DuckDB: G3 p50 22.96 ms p99 23.62 ms alloc 10.8 KB/call
+[15:36:20] DuckDB: C1 p50 5.58 ms p99 7.02 ms alloc 1.4 KB/call
+[15:36:20] DuckDB: C2 p50 1.44 ms p99 1.74 ms alloc 1.3 KB/call
+[15:36:20] DuckDB: C3 p50 1.73 ms p99 2.09 ms alloc 1.3 KB/call
+[15:36:20] DuckDB: C4 p50 5.56 ms p99 5.91 ms alloc 2.1 KB/call
+[15:36:20] DuckDB: C5 p50 3.66 ms p99 4.43 ms alloc 1.4 KB/call
+[15:36:21] DuckDB: C6 p50 5.72 ms p99 6.62 ms alloc 1.3 KB/call
+[15:36:21] DuckDB: C7 p50 2.48 ms p99 3.38 ms alloc 126.4 KB/call
+[15:36:21] DuckDB: C8 p50 5.85 ms p99 6.42 ms alloc 2.1 KB/call
+## SQL capability matrix: 1,000,000 orders, 100,000 customers, 1,000 products
+
+Machine: 4 logical cores, Ubuntu 26.04.1 LTS, X64, .NET 10.0.15. Run at 2026-11-27 15:36 +00:00.
+
+Cells are the median latency of one call (p99 in brackets). `✗` marks an answer that differs from the oracle; such a cell is not a result. The last column is SQLite's median divided by DataVo LSM's (above 1: DataVo LSM is faster).
+
+| Setup | DataVo (LSM) [DataVo.Core net10.0] | DataVo (InMemory) [DataVo.Core net10.0] | SQLite | DuckDB |
+|---|---:|---:|---:|---:|
+| Load (ms) | 6,300 | 1,064 | 9,864 | 1,918 |
+| Close and reopen after the load (ms) | 1,192.9 | 0.0 | 16.1 | 528.8 |
+| Close and reopen again, nothing to write (ms) | 2.8 | 0.0 | 0.3 | 7.1 |
+| Size on disk (MB) | 92.5 | in memory | 83.8 | 54.0 |
+| Create columnar index (ms) | 1,061 | 349 | - | - |
+
+### Joins
+
+| Query | DataVo (LSM) [DataVo.Core net10.0] | DataVo (InMemory) [DataVo.Core net10.0] | SQLite | DuckDB | SQLite / DataVo LSM |
+|---|---:|---:|---:|---:|---:|
+| J1 3-table inner join, no filter | 147.45 ms (159.17 ms) | 274.49 ms (279.31 ms) | 1.43 s (1.45 s) | 6.24 ms (6.89 ms) | 9.68x |
+| J2 3-table inner join, filter on both dimensions (~0.2%) | 24.55 ms (37.90 ms) | 22.98 ms (24.52 ms) | 169.98 ms (179.97 ms) | 4.27 ms (4.53 ms) | 6.92x |
+| J3 3-table join, selective filter, ORDER BY ... LIMIT 50 | 29.02 ms (33.81 ms) | 26.16 ms (29.29 ms) | 170.49 ms (173.46 ms) | 5.72 ms (12.62 ms) | 5.88x |
+| J4 LEFT JOIN with ~25% unmatched keys: COUNT(*), COUNT(c.Id), SUM | 140.88 ms (157.22 ms) | 256.01 ms (286.95 ms) | 389.99 ms (393.42 ms) | 12.10 ms (17.51 ms) | 2.77x |
+| J5 LEFT JOIN anti-join: orders without a customer (WHERE c.Id IS NULL) | 91.61 ms (105.20 ms) | 236.96 ms (242.58 ms) | 72.79 ms (73.27 ms) | 10.72 ms (12.11 ms) | 0.79x |
+| J6 Large x medium: Orders x Customers, GROUP BY Region | 266.20 ms (283.75 ms) | 510.39 ms (541.88 ms) | 1.49 s (1.49 s) | 13.18 ms (14.96 ms) | 5.59x |
+| J7 Small x large: Products (1 category, 2%) x Orders | 14.18 ms (16.52 ms) | 13.08 ms (13.29 ms) | 32.35 ms (33.77 ms) | 2.89 ms (3.21 ms) | 2.28x |
+
+### Filters
+
+| Query | DataVo (LSM) [DataVo.Core net10.0] | DataVo (InMemory) [DataVo.Core net10.0] | SQLite | DuckDB | SQLite / DataVo LSM |
+|---|---:|---:|---:|---:|---:|
+| W1 Equality, 0.1% of rows, secondary index (ProductId) | 492.8 µs (1.16 ms) | 341.3 µs (761.4 µs) | 1.92 ms (2.25 ms) | 2.28 ms (2.98 ms) | 3.89x |
+| W2 Equality, 0.1% of rows, no index (ProductTag) | 67.59 ms (76.50 ms) | 218.80 ms (230.81 ms) | 48.34 ms (50.20 ms) | 1.79 ms (2.15 ms) | 0.72x |
+| W3 (Status = A OR Status = B) AND Amount range | 123.79 ms (154.46 ms) | 167.61 ms (172.09 ms) | 95.98 ms (96.78 ms) | 7.70 ms (8.66 ms) | 0.78x |
+| W4 W3 + NULL-aware: Discount IS NOT NULL AND Discount < x | 145.66 ms (157.56 ms) | 196.83 ms (218.62 ms) | 98.88 ms (99.86 ms) | 8.34 ms (9.12 ms) | 0.68x |
+| W5 Prefix LIKE 'S0042%' (0.01%, no index) | 87.21 ms (94.32 ms) | 84.23 ms (88.58 ms) | 80.22 ms (80.51 ms) | 10.76 ms (11.30 ms) | 0.92x |
+| W6 Substring LIKE '%042-%' (0.1%, no index) | 101.40 ms (105.08 ms) | 96.02 ms (96.54 ms) | 82.90 ms (83.13 ms) | 15.07 ms (15.71 ms) | 0.82x |
+
+### Primary-key ranges
+
+| Query | DataVo (LSM) [DataVo.Core net10.0] | DataVo (InMemory) [DataVo.Core net10.0] | SQLite | DuckDB | SQLite / DataVo LSM |
+|---|---:|---:|---:|---:|---:|
+| R1 PK range, 100 rows, BETWEEN | 35.9 µs (55.7 µs) | 44.2 µs (81.3 µs) | 42.8 µs (56.3 µs) | 498.9 µs (666.1 µs) | 1.19x |
+| R2 PK range, 100 rows, >= AND < | 24.9 µs (34.8 µs) | 37.8 µs (74.9 µs) | 39.3 µs (54.3 µs) | 491.0 µs (628.1 µs) | 1.57x |
+| R3 PK range, 10,000 rows, BETWEEN | 3.33 ms (22.05 ms) | 5.17 ms (24.70 ms) | 3.75 ms (3.93 ms) | 1.17 ms (1.41 ms) | 1.12x |
+| R4 PK range, 10,000 rows, >= AND < | 2.07 ms (16.40 ms) | 3.79 ms (22.63 ms) | 3.77 ms (4.05 ms) | 1.18 ms (1.68 ms) | 1.82x |
+
+### GROUP BY cardinality
+
+| Query | DataVo (LSM) [DataVo.Core net10.0] | DataVo (InMemory) [DataVo.Core net10.0] | SQLite | DuckDB | SQLite / DataVo LSM |
+|---|---:|---:|---:|---:|---:|
+| G1 GROUP BY Status (4 groups) | 90.36 ms (93.60 ms) | 145.04 ms (145.79 ms) | 360.16 ms (360.85 ms) | 2.79 ms (3.39 ms) | 3.99x |
+| G2 GROUP BY Bucket (1,000 groups) | 123.37 ms (128.78 ms) | 124.52 ms (127.30 ms) | 327.79 ms (330.68 ms) | 2.71 ms (3.22 ms) | 2.66x |
+| G3 GROUP BY CustomerId (~125,000 groups) HAVING COUNT(*) >= k ORDER BY count LIMIT 100 | 54.29 ms (54.76 ms) | 38.80 ms (41.43 ms) | 53.21 ms (54.82 ms) | 22.96 ms (23.62 ms) | 0.98x |
+
+### Columnar index
+
+| Query | DataVo (LSM) [DataVo.Core net10.0] | DataVo (InMemory) [DataVo.Core net10.0] | SQLite | DuckDB | SQLite / DataVo LSM |
+|---|---:|---:|---:|---:|---:|
+| C1 COUNT(*) WHERE Amount range | 117.08 ms (119.11 ms) | 124.20 ms (124.72 ms) | 71.40 ms (71.86 ms) | 5.58 ms (7.02 ms) | 0.61x |
+| C1 + columnar index | 3.90 ms (4.06 ms) pushed | 4.91 ms (5.02 ms) pushed |  |  | 18.31x |
+| C2 SUM(Qty) WHERE Bucket < b (INT sum) | 127.72 ms (129.37 ms) | 116.44 ms (122.06 ms) | 66.27 ms (68.59 ms) | 1.44 ms (1.74 ms) | 0.52x |
+| C2 + columnar index | 4.64 ms (4.78 ms) pushed | 4.76 ms (4.98 ms) pushed |  |  | 14.27x |
+| C3 SUM(Amount) WHERE Qty >= q (DOUBLE sum) | 126.75 ms (135.27 ms) | 124.27 ms (125.22 ms) | 67.27 ms (72.52 ms) | 1.73 ms (2.09 ms) | 0.53x |
+| C3 + columnar index | 127.44 ms (134.04 ms) row scan | 3.31 ms (3.68 ms) pushed |  |  | 0.53x |
+| C4 COUNT, SUM(Qty), MIN/MAX(Amount) WHERE Bucket < b AND Discount IS NOT NULL | 175.68 ms (179.12 ms) | 189.22 ms (191.84 ms) | 110.91 ms (116.62 ms) | 5.56 ms (5.91 ms) | 0.63x |
+| C4 + columnar index | 10.72 ms (10.93 ms) pushed | 11.12 ms (11.42 ms) pushed |  |  | 10.34x |
+| C5 COUNT(*) WHERE Status = s AND Amount >= x (string column) | 83.22 ms (87.50 ms) | 116.16 ms (117.49 ms) | 70.11 ms (70.83 ms) | 3.66 ms (4.43 ms) | 0.84x |
+| C5 + columnar index | 83.15 ms (86.33 ms) row scan | 116.20 ms (125.04 ms) row scan |  |  | 0.84x |
+| C6 COUNT(*) WHERE (Qty = 1 OR Qty = 2) AND Amount >= x | 120.53 ms (127.45 ms) | 133.93 ms (136.87 ms) | 60.66 ms (61.31 ms) | 5.72 ms (6.62 ms) | 0.50x |
+| C6 + columnar index | 4.65 ms (4.92 ms) pushed | 438.0 µs (1.03 ms) pushed |  |  | 13.04x |
+| C7 GROUP BY Bucket: COUNT, SUM(Qty) | 124.81 ms (132.18 ms) | 123.01 ms (124.90 ms) | 316.58 ms (327.04 ms) | 2.48 ms (3.38 ms) | 2.54x |
+| C7 + columnar index | 123.55 ms (129.39 ms) row scan | 123.09 ms (129.39 ms) row scan |  |  | 2.56x |
+| C8 ORDER BY Amount DESC LIMIT 10 | 117.56 ms (122.49 ms) | 121.05 ms (122.29 ms) | 77.28 ms (78.45 ms) | 5.85 ms (6.42 ms) | 0.66x |
+| C8 + columnar index | 119.43 ms (144.49 ms) row scan | 120.91 ms (146.87 ms) row scan |  |  | 0.65x |
+
+### Managed allocation per call and GC collections during the timed calls
+
+Bytes allocated on the calling thread per call (`GC.GetAllocatedBytesForCurrentThread`), with gen0/gen1/gen2 collections over all timed calls. SQLite's and DuckDB's native memory is not visible to this counter; their figures are only what the ADO.NET layer allocates.
+
+| Query | DataVo (LSM) [DataVo.Core net10.0] | DataVo (InMemory) [DataVo.Core net10.0] | SQLite | DuckDB |
+|---|---:|---:|---:|---:|
+| J1 3-table inner join, no filter | 40.8 KB (0/0/0) | 36.2 KB (0/0/0) | 432 B (0/0/0) | 1.3 KB (0/0/0) |
+| J2 3-table inner join, filter on both dimensions (~0.2%) | 1.0 MB (0/0/0) | 1.0 MB (0/0/0) | 696 B (0/0/0) | 1.7 KB (0/0/0) |
+| J3 3-table join, selective filter, ORDER BY ... LIMIT 50 | 5.2 MB (2/1/0) | 4.7 MB (1/0/0) | 6.5 KB (0/0/0) | 10.3 KB (0/0/0) |
+| J4 LEFT JOIN with ~25% unmatched keys: COUNT(*), COUNT(c.Id), SUM | 34.6 KB (0/0/0) | 33.5 KB (0/0/0) | 456 B (0/0/0) | 1.5 KB (0/0/0) |
+| J5 LEFT JOIN anti-join: orders without a customer (WHERE c.Id IS NULL) | 31.3 KB (0/0/0) | 30.1 KB (0/0/0) | 408 B (0/0/0) | 1.1 KB (0/0/0) |
+| J6 Large x medium: Orders x Customers, GROUP BY Region | 21.3 MB (13/12/2) | 21.3 MB (12/11/1) | 1.0 KB (0/0/0) | 2.5 KB (0/0/0) |
+| J7 Small x large: Products (1 category, 2%) x Orders | 30.3 KB (0/0/0) | 21.0 KB (0/0/0) | 560 B (0/0/0) | 1.5 KB (0/0/0) |
+| W1 Equality, 0.1% of rows, secondary index (ProductId) | 329.1 KB (20/0/0) | 312.6 KB (19/6/0) | 48.6 KB (2/0/0) | 97.4 KB (5/0/0) |
+| W2 Equality, 0.1% of rows, no index (ProductTag) | 318.2 KB (0/0/0) | 318.2 KB (0/0/0) | 48.7 KB (0/0/0) | 98.0 KB (0/0/0) |
+| W3 (Status = A OR Status = B) AND Amount range | 22.8 KB (0/0/0) | 21.6 KB (0/0/0) | 688 B (0/0/0) | 1.6 KB (0/0/0) |
+| W4 W3 + NULL-aware: Discount IS NOT NULL AND Discount < x | 23.8 KB (0/0/0) | 22.7 KB (0/0/0) | 816 B (0/0/0) | 1.7 KB (0/0/0) |
+| W5 Prefix LIKE 'S0042%' (0.01%, no index) | 16.5 KB (0/0/0) | 15.4 KB (0/0/0) | 552 B (0/0/0) | 1.3 KB (0/0/0) |
+| W6 Substring LIKE '%042-%' (0.1%, no index) | 16.5 KB (0/0/0) | 15.5 KB (0/0/0) | 552 B (0/0/0) | 1.3 KB (0/0/0) |
+| R1 PK range, 100 rows, BETWEEN | 31.1 KB (1/0/0) | 34.9 KB (2/0/0) | 5.3 KB (0/0/0) | 10.7 KB (0/0/0) |
+| R2 PK range, 100 rows, >= AND < | 31.1 KB (1/0/0) | 34.9 KB (2/0/0) | 5.3 KB (0/0/0) | 10.7 KB (0/0/0) |
+| R3 PK range, 10,000 rows, BETWEEN | 3.0 MB (22/21/4) | 3.4 MB (20/19/2) | 469.4 KB (2/0/0) | 939.0 KB (5/0/0) |
+| R4 PK range, 10,000 rows, >= AND < | 3.0 MB (22/21/4) | 3.4 MB (20/19/2) | 469.4 KB (2/0/0) | 939.0 KB (5/0/0) |
+| G1 GROUP BY Status (4 groups) | 26.9 KB (0/0/0) | 25.9 KB (0/0/0) | 720 B (0/0/0) | 1.9 KB (0/0/0) |
+| G2 GROUP BY Bucket (1,000 groups) | 2.1 MB (1/0/0) | 2.1 MB (1/0/0) | 70.7 KB (0/0/0) | 142.0 KB (0/0/0) |
+| G3 GROUP BY CustomerId (~125,000 groups) HAVING COUNT(*) >= k ORDER BY count LIMIT 100 | 909.2 KB (0/0/0) | 921.0 KB (0/0/0) | 5.2 KB (0/0/0) | 10.8 KB (0/0/0) |
+| C1 COUNT(*) WHERE Amount range | 16.6 KB (0/0/0) | 15.6 KB (0/0/0) | 664 B (0/0/0) | 1.4 KB (0/0/0) |
+| C1 + columnar index | 16.4 KB (0/0/0) | 15.4 KB (0/0/0) | - | - |
+| C2 SUM(Qty) WHERE Bucket < b (INT sum) | 17.0 KB (0/0/0) | 16.0 KB (0/0/0) | 536 B (0/0/0) | 1.3 KB (0/0/0) |
+| C2 + columnar index | 16.7 KB (0/0/0) | 15.7 KB (0/0/0) | - | - |
+| C3 SUM(Amount) WHERE Qty >= q (DOUBLE sum) | 17.0 KB (0/0/0) | 16.0 KB (0/0/0) | 536 B (0/0/0) | 1.3 KB (0/0/0) |
+| C3 + columnar index | 17.0 KB (0/0/0) | 15.8 KB (0/0/0) | - | - |
+| C4 COUNT, SUM(Qty), MIN/MAX(Amount) WHERE Bucket < b AND Discount IS NOT NULL | 24.4 KB (0/0/0) | 23.4 KB (0/0/0) | 608 B (0/0/0) | 2.1 KB (0/0/0) |
+| C4 + columnar index | 23.8 KB (0/0/0) | 22.8 KB (0/0/0) | - | - |
+| C5 COUNT(*) WHERE Status = s AND Amount >= x (string column) | 17.7 KB (0/0/0) | 16.7 KB (0/0/0) | 672 B (0/0/0) | 1.4 KB (0/0/0) |
+| C5 + columnar index | 17.7 KB (0/0/0) | 16.7 KB (0/0/0) | - | - |
+| C6 COUNT(*) WHERE (Qty = 1 OR Qty = 2) AND Amount >= x | 17.6 KB (0/0/0) | 16.6 KB (0/0/0) | 536 B (0/0/0) | 1.3 KB (0/0/0) |
+| C6 + columnar index | 17.3 KB (0/0/0) | 16.3 KB (0/0/0) | - | - |
+| C7 GROUP BY Bucket: COUNT, SUM(Qty) | 2.1 MB (1/0/0) | 2.1 MB (1/0/0) | 70.7 KB (0/0/0) | 126.4 KB (0/0/0) |
+| C7 + columnar index | 2.1 MB (1/0/0) | 2.1 MB (1/0/0) | - | - |
+| C8 ORDER BY Amount DESC LIMIT 10 | 49.6 KB (0/0/0) | 48.5 KB (0/0/0) | 864 B (0/0/0) | 2.1 KB (0/0/0) |
+| C8 + columnar index | 49.5 KB (0/0/0) | 48.5 KB (0/0/0) | - | - |
+
+### Answer check
+
+- Every engine returned the oracle's answer for every query and parameter set.
+
+### Columnar pushdown (DataVo)
+
+- DataVo (LSM) [DataVo.Core net10.0], C1: answered by the columnar index
+- DataVo (LSM) [DataVo.Core net10.0], C2: answered by the columnar index
+- DataVo (LSM) [DataVo.Core net10.0], C3: row scan (index not used)
+- DataVo (LSM) [DataVo.Core net10.0], C4: answered by the columnar index
+- DataVo (LSM) [DataVo.Core net10.0], C5: row scan (index not used)
+- DataVo (LSM) [DataVo.Core net10.0], C6: answered by the columnar index
+- DataVo (LSM) [DataVo.Core net10.0], C7: row scan (index not used)
+- DataVo (LSM) [DataVo.Core net10.0], C8: row scan (index not used)
+- DataVo (InMemory) [DataVo.Core net10.0], C1: answered by the columnar index
+- DataVo (InMemory) [DataVo.Core net10.0], C2: answered by the columnar index
+- DataVo (InMemory) [DataVo.Core net10.0], C3: answered by the columnar index
+- DataVo (InMemory) [DataVo.Core net10.0], C4: answered by the columnar index
+- DataVo (InMemory) [DataVo.Core net10.0], C5: row scan (index not used)
+- DataVo (InMemory) [DataVo.Core net10.0], C6: answered by the columnar index
+- DataVo (InMemory) [DataVo.Core net10.0], C7: row scan (index not used)
+- DataVo (InMemory) [DataVo.Core net10.0], C8: row scan (index not used)
+
+### Engines
+
+- **DataVo (LSM) [DataVo.Core net10.0]**: LSM, LsmStrictFsync=false (Relaxed: no flush per commit); bulk load via InsertTypedBatch, then close and reopen; prepared statements with bound parameters.
+- **DataVo (InMemory) [DataVo.Core net10.0]**: InMemory engine; bulk load via InsertTypedBatch; prepared statements with bound parameters.
+- **SQLite**: File, journal_mode=WAL, synchronous=NORMAL; load in one transaction then ANALYZE; prepared commands with parameters (Microsoft.Data.Sqlite).
+- **DuckDB**: File database, default threads (4 cores); appender for bulk load, then close and reopen; prepared commands with named parameters (DuckDB.NET).
+
+### Queries
+
+Timed calls: 10 for scans, 100 for 10,000-row ranges, 1000 for selective queries, after unmeasured warm-up calls; parameter sets are cycled.
+
+- **J1** (3-table inner join, no filter): `SELECT COUNT(*), SUM(o.Amount) FROM Orders o JOIN Customers c ON o.CustomerId = c.Id JOIN Products p ON o.ProductId = p.Id` with no parameters
+- **J2** (3-table inner join, filter on both dimensions (~0.2%)): `SELECT COUNT(*), SUM(o.Amount) FROM Orders o JOIN Customers c ON o.CustomerId = c.Id JOIN Products p ON o.ProductId = p.Id WHERE c.Region = @region AND p.CategoryId = @cat` with @region=R3, @cat=7; @region=R5, @cat=12; @region=R0, @cat=33; @region=R6, @cat=48
+- **J3** (3-table join, selective filter, ORDER BY ... LIMIT 50): `SELECT o.Id, o.Amount, c.Name AS CustomerName, p.Name AS ProductName FROM Orders o JOIN Customers c ON o.CustomerId = c.Id JOIN Products p ON o.ProductId = p.Id WHERE c.Region = @region AND p.CategoryId = @cat ORDER BY o.Amount DESC, o.Id ASC LIMIT 50` with @region=R3, @cat=7; @region=R5, @cat=12; @region=R0, @cat=33; @region=R6, @cat=48
+- **J4** (LEFT JOIN with ~25% unmatched keys: COUNT(*), COUNT(c.Id), SUM): `SELECT COUNT(*), COUNT(c.Id), SUM(o.Amount) FROM Orders o LEFT JOIN Customers c ON o.CustomerId = c.Id` with no parameters
+- **J5** (LEFT JOIN anti-join: orders without a customer (WHERE c.Id IS NULL)): `SELECT COUNT(*) FROM Orders o LEFT JOIN Customers c ON o.CustomerId = c.Id WHERE c.Id IS NULL` with no parameters
+- **J6** (Large x medium: Orders x Customers, GROUP BY Region): `SELECT c.Region, COUNT(*), SUM(o.Amount) FROM Orders o JOIN Customers c ON o.CustomerId = c.Id GROUP BY c.Region` with no parameters
+- **J7** (Small x large: Products (1 category, 2%) x Orders): `SELECT COUNT(*), SUM(o.Amount) FROM Products p JOIN Orders o ON o.ProductId = p.Id WHERE p.CategoryId = @cat` with @cat=3; @cat=17; @cat=29; @cat=41
+- **W1** (Equality, 0.1% of rows, secondary index (ProductId)): `SELECT Id, Amount FROM Orders WHERE ProductId = @p` with @p=7; @p=333; @p=500; @p=997
+- **W2** (Equality, 0.1% of rows, no index (ProductTag)): `SELECT Id, Amount FROM Orders WHERE ProductTag = @p` with @p=7; @p=333; @p=500; @p=997
+- **W3** ((Status = A OR Status = B) AND Amount range): `SELECT COUNT(*), SUM(Amount) FROM Orders WHERE (Status = 'PAID' OR Status = 'SHIPPED') AND Amount >= @lo AND Amount < @hi` with @lo=200, @hi=500; @lo=0, @hi=250; @lo=600, @hi=900
+- **W4** (W3 + NULL-aware: Discount IS NOT NULL AND Discount < x): `SELECT COUNT(*), SUM(Amount) FROM Orders WHERE (Status = 'PAID' OR Status = 'SHIPPED') AND Amount >= @lo AND Amount < @hi AND Discount IS NOT NULL AND Discount < @disc` with @lo=200, @hi=500, @disc=5; @lo=0, @hi=250, @disc=2.5
+- **W5** (Prefix LIKE 'S0042%' (0.01%, no index)): `SELECT COUNT(*) FROM Orders WHERE Sku LIKE @pattern` with @pattern=S0042%; @pattern=S1234%; @pattern=S9001%
+- **W6** (Substring LIKE '%042-%' (0.1%, no index)): `SELECT COUNT(*) FROM Orders WHERE Sku LIKE @pattern` with @pattern=%042-%; @pattern=%777-%; @pattern=%123-%
+- **R1** (PK range, 100 rows, BETWEEN): `SELECT Id, Amount FROM Orders WHERE Id BETWEEN @lo AND @hi` with @lo=573458, @hi=573557; @lo=877952, @hi=878051; @lo=127708, @hi=127807; @lo=107237, @hi=107336; @lo=248771, @hi=248870; @lo=644366, @hi=644465; @lo=734256, @hi=734355; @lo=319601, @hi=319700
+- **R2** (PK range, 100 rows, >= AND <): `SELECT Id, Amount FROM Orders WHERE Id >= @lo AND Id < @hi` with @lo=148328, @hi=148428; @lo=300629, @hi=300729; @lo=505758, @hi=505858; @lo=842462, @hi=842562; @lo=905413, @hi=905513; @lo=788997, @hi=789097; @lo=750280, @hi=750380; @lo=105541, @hi=105641
+- **R3** (PK range, 10,000 rows, BETWEEN): `SELECT Id, Amount FROM Orders WHERE Id BETWEEN @lo AND @hi` with @lo=894434, @hi=904433; @lo=40310, @hi=50309; @lo=852389, @hi=862388; @lo=572542, @hi=582541; @lo=929676, @hi=939675; @lo=639063, @hi=649062; @lo=765558, @hi=775557; @lo=711894, @hi=721893
+- **R4** (PK range, 10,000 rows, >= AND <): `SELECT Id, Amount FROM Orders WHERE Id >= @lo AND Id < @hi` with @lo=626976, @hi=636976; @lo=815920, @hi=825920; @lo=869764, @hi=879764; @lo=192402, @hi=202402; @lo=541593, @hi=551593; @lo=553843, @hi=563843; @lo=491710, @hi=501710; @lo=103530, @hi=113530
+- **G1** (GROUP BY Status (4 groups)): `SELECT Status, COUNT(*), SUM(Amount) FROM Orders GROUP BY Status` with no parameters
+- **G2** (GROUP BY Bucket (1,000 groups)): `SELECT Bucket, COUNT(*), SUM(Amount) FROM Orders GROUP BY Bucket` with no parameters
+- **G3** (GROUP BY CustomerId (~125,000 groups) HAVING COUNT(*) >= k ORDER BY count LIMIT 100): `SELECT CustomerId, COUNT(*) AS N FROM Orders GROUP BY CustomerId HAVING COUNT(*) >= @k ORDER BY N DESC, CustomerId ASC LIMIT 100` with @k=12; @k=16
+- **C1** (COUNT(*) WHERE Amount range): `SELECT COUNT(*) FROM Orders WHERE Amount >= @lo AND Amount < @hi` with @lo=200, @hi=500; @lo=0, @hi=100
+- **C2** (SUM(Qty) WHERE Bucket < b (INT sum)): `SELECT SUM(Qty) FROM Orders WHERE Bucket < @b` with @b=100; @b=500
+- **C3** (SUM(Amount) WHERE Qty >= q (DOUBLE sum)): `SELECT SUM(Amount) FROM Orders WHERE Qty >= @q` with @q=5; @q=9
+- **C4** (COUNT, SUM(Qty), MIN/MAX(Amount) WHERE Bucket < b AND Discount IS NOT NULL): `SELECT COUNT(*), SUM(Qty), MIN(Amount), MAX(Amount) FROM Orders WHERE Bucket < @b AND Discount IS NOT NULL` with @b=100; @b=700
+- **C5** (COUNT(*) WHERE Status = s AND Amount >= x (string column)): `SELECT COUNT(*) FROM Orders WHERE Status = @status AND Amount >= @lo` with @status=PAID, @lo=200; @status=NEW, @lo=900
+- **C6** (COUNT(*) WHERE (Qty = 1 OR Qty = 2) AND Amount >= x): `SELECT COUNT(*) FROM Orders WHERE (Qty = 1 OR Qty = 2) AND Amount >= @lo` with @lo=200; @lo=900
+- **C7** (GROUP BY Bucket: COUNT, SUM(Qty)): `SELECT Bucket, COUNT(*), SUM(Qty) FROM Orders GROUP BY Bucket` with no parameters
+- **C8** (ORDER BY Amount DESC LIMIT 10): `SELECT Id, Amount FROM Orders ORDER BY Amount DESC, Id ASC LIMIT 10` with no parameters
+
+========================================
+SCENARIO: hybrid-vector
+========================================
+[15:36:21] hybrid-vector: generating 50,000 x 384 clustered embeddings and the exact filtered top-10...
+[15:36:22] DataVo Flat [DataVo.Core net10.0]: loaded 50,000 x 384-dim documents (index build included) in 708 ms
+[15:36:25] DataVo Flat [DataVo.Core net10.0]: V0Unfiltered p50 4.99 ms p99 6.47 ms recall 100.0 % (min 100 %) short 0 invalid 0 | vector index 200/200; candidates (top-k) median 10 (max 10); expansion passes mean 0.00; full table scan 0/200; routes: hybrid.orderby.accept 200/200, hybrid.orderby.initial_topk.baseline 200/200
+[15:36:27] DataVo Flat [DataVo.Core net10.0]: V1Selective p50 4.29 ms p99 10.46 ms recall 100.0 % (min 100 %) short 0 invalid 0 | vector index 200/200; candidates (top-k) median 286 (max 572); expansion passes mean 0.10; full table scan 0/200; routes: hybrid.orderby.accept 200/200, hybrid.orderby.initial_topk.adaptive 200/200
+[15:36:29] DataVo Flat [DataVo.Core net10.0]: V2Broad p50 3.53 ms p99 7.20 ms recall 100.0 % (min 100 %) short 0 invalid 0 | vector index 200/200; candidates (top-k) median 29 (max 58); expansion passes mean 0.05; full table scan 0/200; routes: hybrid.orderby.accept 200/200, hybrid.orderby.initial_topk.adaptive 200/200
+[15:36:31] DataVo Flat [DataVo.Core net10.0]: V3JoinDocFilter p50 4.31 ms p99 10.55 ms recall 100.0 % (min 100 %) short 0 invalid 0 | vector index 200/200; candidates (top-k) median 286 (max 1073); expansion passes mean 0.10; full table scan 0/200; routes: hybrid.orderby.accept 200/200, hybrid.orderby.initial_topk.adaptive 200/200
+[15:36:35] DataVo Flat [DataVo.Core net10.0]: V4JoinAuthorFilter p50 8.51 ms p99 12.95 ms recall 100.0 % (min 100 %) short 0 invalid 0 | vector index 200/200; candidates (top-k) median 150 (max 600); expansion passes mean 1.49; full table scan 0/200; routes: hybrid.orderby.accept 200/200, hybrid.orderby.initial_topk.baseline 200/200
+[15:36:41] DataVo HNSW [DataVo.Core net10.0]: loaded 50,000 x 384-dim documents (index build included) in 5,839 ms
+[15:36:41] DataVo HNSW [DataVo.Core net10.0]: V0Unfiltered p50 383.0 µs p99 587.3 µs recall 100.0 % (min 100 %) short 0 invalid 0 | vector index 200/200; candidates (top-k) median 10 (max 10); expansion passes mean 0.00; full table scan 0/200; routes: hybrid.orderby.accept 200/200, hybrid.orderby.initial_topk.baseline 200/200
+[15:36:43] DataVo HNSW [DataVo.Core net10.0]: V1Selective p50 4.50 ms p99 10.45 ms recall 100.0 % (min 100 %) short 0 invalid 0 | vector index 200/200; candidates (top-k) median 286 (max 572); expansion passes mean 0.10; full table scan 0/200; routes: hybrid.orderby.accept 200/200, hybrid.orderby.initial_topk.adaptive 200/200
+[15:36:44] DataVo HNSW [DataVo.Core net10.0]: V2Broad p50 1.10 ms p99 3.05 ms recall 100.0 % (min 100 %) short 0 invalid 0 | vector index 200/200; candidates (top-k) median 29 (max 58); expansion passes mean 0.05; full table scan 0/200; routes: hybrid.orderby.accept 200/200, hybrid.orderby.initial_topk.adaptive 200/200
+[15:36:46] DataVo HNSW [DataVo.Core net10.0]: V3JoinDocFilter p50 4.58 ms p99 9.70 ms recall 100.0 % (min 100 %) short 0 invalid 0 | vector index 200/200; candidates (top-k) median 286 (max 1073); expansion passes mean 0.10; full table scan 0/200; routes: hybrid.orderby.accept 200/200, hybrid.orderby.initial_topk.adaptive 200/200
+[15:36:49] DataVo HNSW [DataVo.Core net10.0]: V4JoinAuthorFilter p50 6.29 ms p99 10.81 ms recall 100.0 % (min 100 %) short 0 invalid 0 | vector index 200/200; candidates (top-k) median 150 (max 600); expansion passes mean 1.49; full table scan 0/200; routes: hybrid.orderby.accept 200/200, hybrid.orderby.initial_topk.baseline 200/200
+[15:36:51] SQLite + sqlite-vec: loaded 50,000 x 384-dim documents (index build included) in 1,439 ms
+[15:36:58] SQLite + sqlite-vec: V0Unfiltered p50 32.86 ms p99 33.92 ms recall 100.0 % (min 100 %) short 0 invalid 0
+[15:37:03] SQLite + sqlite-vec: V1Selective p50 19.86 ms p99 20.51 ms recall 100.0 % (min 100 %) short 0 invalid 0
+[15:37:09] SQLite + sqlite-vec: V2Broad p50 26.92 ms p99 27.36 ms recall 100.0 % (min 100 %) short 0 invalid 0
+[15:37:13] SQLite + sqlite-vec: V3JoinDocFilter p50 19.92 ms p99 20.15 ms recall 100.0 % (min 100 %) short 0 invalid 0
+[15:37:18] SQLite + sqlite-vec: V4JoinAuthorFilter p50 23.36 ms p99 23.96 ms recall 100.0 % (min 100 %) short 0 invalid 0
+## Hybrid vector + SQL: 50,000 documents x 384 dimensions (clustered), 2,000 authors, 200 held-out queries per shape
+
+Machine: 4 logical cores, Ubuntu 26.04.1 LTS, X64, .NET 10.0.15. Run at 2026-11-27 15:37 +00:00.
+
+Recall@10 is measured against the exact top-10 among the rows that satisfy the query's WHERE clause (cosine distance). *Short* counts queries that returned fewer than min(10, matching rows) rows; *invalid* counts returned rows that fail the filter.
+
+| Engine | Load + index build |
+|---|---:|
+| DataVo Flat [DataVo.Core net10.0] | 708 ms |
+| DataVo HNSW [DataVo.Core net10.0] | 5,839 ms |
+| SQLite + sqlite-vec | 1,439 ms |
+
+### V0: top-10, no filter
+
+| Engine | p50 | p99 | Recall@10 mean | min | Short | Invalid | Alloc/query |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| DataVo Flat [DataVo.Core net10.0] | 4.99 ms | 6.47 ms | 100.0 % | 100 % | 0 | 0 | 137.5 KB |
+| DataVo HNSW [DataVo.Core net10.0] | 383.0 µs | 587.3 µs | 100.0 % | 100 % | 0 | 0 | 135.1 KB |
+| SQLite + sqlite-vec | 32.86 ms | 33.92 ms | 100.0 % | 100 % | 0 | 0 | 2.2 KB |
+
+- DataVo Flat [DataVo.Core net10.0] planner: vector index 200/200; candidates (top-k) median 10 (max 10); expansion passes mean 0.00; full table scan 0/200; routes: hybrid.orderby.accept 200/200, hybrid.orderby.initial_topk.baseline 200/200
+- DataVo HNSW [DataVo.Core net10.0] planner: vector index 200/200; candidates (top-k) median 10 (max 10); expansion passes mean 0.00; full table scan 0/200; routes: hybrid.orderby.accept 200/200, hybrid.orderby.initial_topk.baseline 200/200
+- DataVo Flat [DataVo.Core net10.0] SQL: `SELECT Id, Emb <=> @q AS dist FROM Docs ORDER BY dist LIMIT 10`
+- DataVo HNSW [DataVo.Core net10.0] SQL: `SELECT Id, Emb <=> @q AS dist FROM Docs ORDER BY dist LIMIT 10`
+- SQLite + sqlite-vec SQL: `SELECT id FROM vd WHERE emb MATCH @q AND k = 10 ORDER BY distance`
+
+### V1: top-10 WHERE Category = c AND Price < 50 (about 5% of rows)
+
+| Engine | p50 | p99 | Recall@10 mean | min | Short | Invalid | Alloc/query |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| DataVo Flat [DataVo.Core net10.0] | 4.29 ms | 10.46 ms | 100.0 % | 100 % | 0 | 0 | 210.2 KB |
+| DataVo HNSW [DataVo.Core net10.0] | 4.50 ms | 10.45 ms | 100.0 % | 100 % | 0 | 0 | 210.3 KB |
+| SQLite + sqlite-vec | 19.86 ms | 20.51 ms | 100.0 % | 100 % | 0 | 0 | 2.4 KB |
+
+- DataVo Flat [DataVo.Core net10.0] planner: vector index 200/200; candidates (top-k) median 286 (max 572); expansion passes mean 0.10; full table scan 0/200; routes: hybrid.orderby.accept 200/200, hybrid.orderby.initial_topk.adaptive 200/200
+- DataVo HNSW [DataVo.Core net10.0] planner: vector index 200/200; candidates (top-k) median 286 (max 572); expansion passes mean 0.10; full table scan 0/200; routes: hybrid.orderby.accept 200/200, hybrid.orderby.initial_topk.adaptive 200/200
+- DataVo Flat [DataVo.Core net10.0] SQL: `SELECT Id, Emb <=> @q AS dist FROM Docs WHERE Category = @c AND Price < @p ORDER BY dist LIMIT 10`
+- DataVo HNSW [DataVo.Core net10.0] SQL: `SELECT Id, Emb <=> @q AS dist FROM Docs WHERE Category = @c AND Price < @p ORDER BY dist LIMIT 10`
+- SQLite + sqlite-vec SQL: `SELECT id FROM vd WHERE emb MATCH @q AND k = 10 AND category = @c AND price < @p ORDER BY distance`
+
+### V2: top-10 WHERE Price < 50 (about 50% of rows)
+
+| Engine | p50 | p99 | Recall@10 mean | min | Short | Invalid | Alloc/query |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| DataVo Flat [DataVo.Core net10.0] | 3.53 ms | 7.20 ms | 100.0 % | 100 % | 0 | 0 | 197.3 KB |
+| DataVo HNSW [DataVo.Core net10.0] | 1.10 ms | 3.05 ms | 100.0 % | 100 % | 0 | 0 | 197.5 KB |
+| SQLite + sqlite-vec | 26.92 ms | 27.36 ms | 100.0 % | 100 % | 0 | 0 | 2.3 KB |
+
+- DataVo Flat [DataVo.Core net10.0] planner: vector index 200/200; candidates (top-k) median 29 (max 58); expansion passes mean 0.05; full table scan 0/200; routes: hybrid.orderby.accept 200/200, hybrid.orderby.initial_topk.adaptive 200/200
+- DataVo HNSW [DataVo.Core net10.0] planner: vector index 200/200; candidates (top-k) median 29 (max 58); expansion passes mean 0.05; full table scan 0/200; routes: hybrid.orderby.accept 200/200, hybrid.orderby.initial_topk.adaptive 200/200
+- DataVo Flat [DataVo.Core net10.0] SQL: `SELECT Id, Emb <=> @q AS dist FROM Docs WHERE Price < @p ORDER BY dist LIMIT 10`
+- DataVo HNSW [DataVo.Core net10.0] SQL: `SELECT Id, Emb <=> @q AS dist FROM Docs WHERE Price < @p ORDER BY dist LIMIT 10`
+- SQLite + sqlite-vec SQL: `SELECT id FROM vd WHERE emb MATCH @q AND k = 10 AND price < @p ORDER BY distance`
+
+### V3: V1 + JOIN Authors (filter on the documents)
+
+| Engine | p50 | p99 | Recall@10 mean | min | Short | Invalid | Alloc/query |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| DataVo Flat [DataVo.Core net10.0] | 4.31 ms | 10.55 ms | 100.0 % | 100 % | 0 | 0 | 186.2 KB |
+| DataVo HNSW [DataVo.Core net10.0] | 4.58 ms | 9.70 ms | 100.0 % | 100 % | 0 | 0 | 185.9 KB |
+| SQLite + sqlite-vec | 19.92 ms | 20.15 ms | 100.0 % | 100 % | 0 | 0 | 2.4 KB |
+
+- DataVo Flat [DataVo.Core net10.0] planner: vector index 200/200; candidates (top-k) median 286 (max 1073); expansion passes mean 0.10; full table scan 0/200; routes: hybrid.orderby.accept 200/200, hybrid.orderby.initial_topk.adaptive 200/200
+- DataVo HNSW [DataVo.Core net10.0] planner: vector index 200/200; candidates (top-k) median 286 (max 1073); expansion passes mean 0.10; full table scan 0/200; routes: hybrid.orderby.accept 200/200, hybrid.orderby.initial_topk.adaptive 200/200
+- DataVo Flat [DataVo.Core net10.0] SQL: `SELECT d.Id, a.Name, d.Emb <=> @q AS dist FROM Docs d JOIN Authors a ON d.AuthorId = a.Id WHERE d.Category = @c AND d.Price < @p ORDER BY dist LIMIT 10`
+- DataVo HNSW [DataVo.Core net10.0] SQL: `SELECT d.Id, a.Name, d.Emb <=> @q AS dist FROM Docs d JOIN Authors a ON d.AuthorId = a.Id WHERE d.Category = @c AND d.Price < @p ORDER BY dist LIMIT 10`
+- SQLite + sqlite-vec SQL: `WITH knn AS MATERIALIZED (SELECT id, distance, author_id FROM vd WHERE emb MATCH @q AND k = 10 AND category = @c AND price < @p) SELECT knn.id, a.Name FROM knn JOIN Authors a ON a.Id = knn.author_id ORDER BY knn.distance, knn.id`
+
+### V4: JOIN Authors WHERE a.Country = k (about 10% of rows, filter on the joined table)
+
+| Engine | p50 | p99 | Recall@10 mean | min | Short | Invalid | Alloc/query |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| DataVo Flat [DataVo.Core net10.0] | 8.51 ms | 12.95 ms | 100.0 % | 100 % | 0 | 0 | 235.3 KB |
+| DataVo HNSW [DataVo.Core net10.0] | 6.29 ms | 10.81 ms | 100.0 % | 100 % | 0 | 0 | 235.9 KB |
+| SQLite + sqlite-vec | 23.36 ms | 23.96 ms | 100.0 % | 100 % | 0 | 0 | 2.2 KB |
+
+- DataVo Flat [DataVo.Core net10.0] planner: vector index 200/200; candidates (top-k) median 150 (max 600); expansion passes mean 1.49; full table scan 0/200; routes: hybrid.orderby.accept 200/200, hybrid.orderby.initial_topk.baseline 200/200
+- DataVo HNSW [DataVo.Core net10.0] planner: vector index 200/200; candidates (top-k) median 150 (max 600); expansion passes mean 1.49; full table scan 0/200; routes: hybrid.orderby.accept 200/200, hybrid.orderby.initial_topk.baseline 200/200
+- DataVo Flat [DataVo.Core net10.0] SQL: `SELECT d.Id, a.Name, d.Emb <=> @q AS dist FROM Docs d JOIN Authors a ON d.AuthorId = a.Id WHERE a.Country = @k ORDER BY dist LIMIT 10`
+- DataVo HNSW [DataVo.Core net10.0] SQL: `SELECT d.Id, a.Name, d.Emb <=> @q AS dist FROM Docs d JOIN Authors a ON d.AuthorId = a.Id WHERE a.Country = @k ORDER BY dist LIMIT 10`
+- SQLite + sqlite-vec SQL: `WITH knn AS MATERIALIZED (SELECT id, distance, author_id FROM vd WHERE emb MATCH @q AND k = 10 AND author_id IN (SELECT Id FROM Authors WHERE Country = @k)) SELECT knn.id, a.Name FROM knn JOIN Authors a ON a.Id = knn.author_id ORDER BY knn.distance, knn.id`
+
+### Engines
+
+- **DataVo Flat [DataVo.Core net10.0]**: LSM, LsmStrictFsync=false; CREATE INDEX ... USING FLAT (default parameters); InsertTypedBatch load; prepared SQL with the query vector bound as float[].
+- **DataVo HNSW [DataVo.Core net10.0]**: LSM, LsmStrictFsync=false; CREATE INDEX ... USING HNSW (default parameters); InsertTypedBatch load; prepared SQL with the query vector bound as float[].
+- **SQLite + sqlite-vec**: File, WAL, synchronous=NORMAL; vec0(id, emb float[d] distance_metric=cosine, category, price, author_id as metadata columns); exact KNN with metadata filters; joins via MATERIALIZED CTE; author-country filter: KNN with author_id IN (SELECT Id FROM Authors WHERE Country = @k).

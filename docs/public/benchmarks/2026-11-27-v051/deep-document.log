@@ -1,0 +1,36 @@
+[18:03:03] DataVo [DataVo.Core net10.0]: deep document — saving 5 000 nested orders (5 items, 2 addresses each) then loading 5 000...
+[18:03:03] DataVo [DataVo.Core net10.0]: saved 1 000/5 000, elapsed 0,0s
+[18:03:03] DataVo [DataVo.Core net10.0]: saved 2 000/5 000, elapsed 0,0s
+[18:03:03] DataVo [DataVo.Core net10.0]: saved 3 000/5 000, elapsed 0,0s
+[18:03:03] DataVo [DataVo.Core net10.0]: saved 4 000/5 000, elapsed 0,0s
+[18:03:03] DataVo [DataVo.Core net10.0]: saved 5 000/5 000, elapsed 0,0s
+[18:03:03] DataVo [DataVo.Core net10.0]: save phase complete in 0,1s; starting 5 000 loads...
+[18:03:03] DataVo [DataVo.Core net10.0]: 1 000/5 000 loads, elapsed 0,1s
+[18:03:03] DataVo [DataVo.Core net10.0]: 2 000/5 000 loads, elapsed 0,1s
+[18:03:03] DataVo [DataVo.Core net10.0]: 3 000/5 000 loads, elapsed 0,1s
+[18:03:03] DataVo [DataVo.Core net10.0]: 4 000/5 000 loads, elapsed 0,1s
+[18:03:03] DataVo [DataVo.Core net10.0]: 5 000/5 000 loads, elapsed 0,1s
+[18:03:03] LiteDB: deep document — saving 5 000 nested orders (5 items, 2 addresses each) then loading 5 000...
+[18:03:03] LiteDB: saved 1 000/5 000, elapsed 0,0s
+[18:03:03] LiteDB: saved 2 000/5 000, elapsed 0,1s
+[18:03:03] LiteDB: saved 3 000/5 000, elapsed 0,1s
+[18:03:03] LiteDB: saved 4 000/5 000, elapsed 0,1s
+[18:03:03] LiteDB: saved 5 000/5 000, elapsed 0,2s
+[18:03:03] LiteDB: save phase complete in 0,2s; starting 5 000 loads...
+[18:03:03] LiteDB: 1 000/5 000 loads, elapsed 0,2s
+[18:03:03] LiteDB: 2 000/5 000 loads, elapsed 0,3s
+[18:03:03] LiteDB: 3 000/5 000 loads, elapsed 0,3s
+[18:03:03] LiteDB: 4 000/5 000 loads, elapsed 0,4s
+[18:03:03] LiteDB: 5 000/5 000 loads, elapsed 0,4s
+[18:03:03] SQLite: deep document — saving 5 000 nested orders (5 items, 2 addresses each) then loading 5 000...
+[18:03:03] SQLite: saved 1 000/5 000, elapsed 0,0s
+[18:03:03] SQLite: saved 2 000/5 000, elapsed 0,0s
+[18:03:03] SQLite: saved 3 000/5 000, elapsed 0,1s
+[18:03:04] SQLite: saved 4 000/5 000, elapsed 0,1s
+[18:03:04] SQLite: saved 5 000/5 000, elapsed 0,1s
+[18:03:04] SQLite: save phase complete in 0,1s; starting 5 000 loads...
+[18:03:04] SQLite: 1 000/5 000 loads, elapsed 0,1s
+[18:03:04] SQLite: 2 000/5 000 loads, elapsed 0,1s
+[18:03:04] SQLite: 3 000/5 000 loads, elapsed 0,1s
+[18:03:04] SQLite: 4 000/5 000 loads, elapsed 0,1s
+[18:03:04] SQLite: 5 000/5 000 loads, elapsed 0,1s

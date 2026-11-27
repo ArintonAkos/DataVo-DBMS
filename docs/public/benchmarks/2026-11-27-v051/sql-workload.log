@@ -1,0 +1,20 @@
+[18:03:06] DataVo (LSM) [DataVo.Core net10.0]: loaded 1 000 000 orders
+[18:03:07] DataVo (LSM) [DataVo.Core net10.0]: loaded 1 000 000 GUID rows
+[18:03:07] DataVo (LSM) [DataVo.Core net10.0]: point and range reads done
+[18:03:10] DataVo (LSM) [DataVo.Core net10.0]: analytic queries done
+[18:03:10] DataVo (LSM) [DataVo.Core net10.0]: writes done
+[18:03:13] SQLite: loaded 1 000 000 orders
+[18:03:16] SQLite: loaded 1 000 000 GUID rows
+[18:03:16] SQLite: point and range reads done
+[18:03:21] SQLite: analytic queries done
+[18:03:21] SQLite: writes done
+[18:03:22] DuckDB: loaded 1 000 000 orders
+[18:03:22] DuckDB: loaded 1 000 000 GUID rows
+[18:03:29] DuckDB: point and range reads done
+[18:03:29] DuckDB: analytic queries done
+[18:03:32] DuckDB: writes done
+[18:03:41] LiteDB: loaded 1 000 000 orders
+[18:03:48] LiteDB: loaded 1 000 000 GUID rows
+[18:03:51] LiteDB: point and range reads done
+[18:04:16] LiteDB: analytic queries done
+[18:04:17] LiteDB: writes done

@@ -1,0 +1,156 @@
+[17:17:12] DataVo [DataVo.Core net10.0]: preloading 10 000 baseline orders...
+[17:17:12] DataVo [DataVo.Core net10.0]: measuring 50 000 insert+read iterations...
+[17:17:13] DataVo [DataVo.Core net10.0]: 1 000/50 000 iterations, elapsed 0,0s
+[17:17:13] DataVo [DataVo.Core net10.0]: 2 000/50 000 iterations, elapsed 0,0s
+[17:17:13] DataVo [DataVo.Core net10.0]: 3 000/50 000 iterations, elapsed 0,1s
+[17:17:13] DataVo [DataVo.Core net10.0]: 4 000/50 000 iterations, elapsed 0,1s
+[17:17:13] DataVo [DataVo.Core net10.0]: 5 000/50 000 iterations, elapsed 0,1s
+[17:17:13] DataVo [DataVo.Core net10.0]: 6 000/50 000 iterations, elapsed 0,1s
+[17:17:13] DataVo [DataVo.Core net10.0]: 7 000/50 000 iterations, elapsed 0,1s
+[17:17:13] DataVo [DataVo.Core net10.0]: 8 000/50 000 iterations, elapsed 0,2s
+[17:17:13] DataVo [DataVo.Core net10.0]: 9 000/50 000 iterations, elapsed 0,2s
+[17:17:13] DataVo [DataVo.Core net10.0]: 10 000/50 000 iterations, elapsed 0,2s
+[17:17:13] DataVo [DataVo.Core net10.0]: 11 000/50 000 iterations, elapsed 0,2s
+[17:17:13] DataVo [DataVo.Core net10.0]: 12 000/50 000 iterations, elapsed 0,2s
+[17:17:13] DataVo [DataVo.Core net10.0]: 13 000/50 000 iterations, elapsed 0,3s
+[17:17:13] DataVo [DataVo.Core net10.0]: 14 000/50 000 iterations, elapsed 0,3s
+[17:17:13] DataVo [DataVo.Core net10.0]: 15 000/50 000 iterations, elapsed 0,3s
+[17:17:13] DataVo [DataVo.Core net10.0]: 16 000/50 000 iterations, elapsed 0,3s
+[17:17:13] DataVo [DataVo.Core net10.0]: 17 000/50 000 iterations, elapsed 0,3s
+[17:17:13] DataVo [DataVo.Core net10.0]: 18 000/50 000 iterations, elapsed 0,3s
+[17:17:13] DataVo [DataVo.Core net10.0]: 19 000/50 000 iterations, elapsed 0,3s
+[17:17:13] DataVo [DataVo.Core net10.0]: 20 000/50 000 iterations, elapsed 0,3s
+[17:17:13] DataVo [DataVo.Core net10.0]: 21 000/50 000 iterations, elapsed 0,3s
+[17:17:13] DataVo [DataVo.Core net10.0]: 22 000/50 000 iterations, elapsed 0,4s
+[17:17:13] DataVo [DataVo.Core net10.0]: 23 000/50 000 iterations, elapsed 0,4s
+[17:17:13] DataVo [DataVo.Core net10.0]: 24 000/50 000 iterations, elapsed 0,4s
+[17:17:13] DataVo [DataVo.Core net10.0]: 25 000/50 000 iterations, elapsed 0,4s
+[17:17:13] DataVo [DataVo.Core net10.0]: 26 000/50 000 iterations, elapsed 0,4s
+[17:17:13] DataVo [DataVo.Core net10.0]: 27 000/50 000 iterations, elapsed 0,4s
+[17:17:13] DataVo [DataVo.Core net10.0]: 28 000/50 000 iterations, elapsed 0,4s
+[17:17:13] DataVo [DataVo.Core net10.0]: 29 000/50 000 iterations, elapsed 0,4s
+[17:17:13] DataVo [DataVo.Core net10.0]: 30 000/50 000 iterations, elapsed 0,4s
+[17:17:13] DataVo [DataVo.Core net10.0]: 31 000/50 000 iterations, elapsed 0,4s
+[17:17:13] DataVo [DataVo.Core net10.0]: 32 000/50 000 iterations, elapsed 0,4s
+[17:17:13] DataVo [DataVo.Core net10.0]: 33 000/50 000 iterations, elapsed 0,4s
+[17:17:13] DataVo [DataVo.Core net10.0]: 34 000/50 000 iterations, elapsed 0,4s
+[17:17:13] DataVo [DataVo.Core net10.0]: 35 000/50 000 iterations, elapsed 0,5s
+[17:17:13] DataVo [DataVo.Core net10.0]: 36 000/50 000 iterations, elapsed 0,5s
+[17:17:13] DataVo [DataVo.Core net10.0]: 37 000/50 000 iterations, elapsed 0,5s
+[17:17:13] DataVo [DataVo.Core net10.0]: 38 000/50 000 iterations, elapsed 0,5s
+[17:17:13] DataVo [DataVo.Core net10.0]: 39 000/50 000 iterations, elapsed 0,5s
+[17:17:13] DataVo [DataVo.Core net10.0]: 40 000/50 000 iterations, elapsed 0,5s
+[17:17:13] DataVo [DataVo.Core net10.0]: 41 000/50 000 iterations, elapsed 0,5s
+[17:17:13] DataVo [DataVo.Core net10.0]: 42 000/50 000 iterations, elapsed 0,5s
+[17:17:13] DataVo [DataVo.Core net10.0]: 43 000/50 000 iterations, elapsed 0,5s
+[17:17:13] DataVo [DataVo.Core net10.0]: 44 000/50 000 iterations, elapsed 0,5s
+[17:17:13] DataVo [DataVo.Core net10.0]: 45 000/50 000 iterations, elapsed 0,5s
+[17:17:13] DataVo [DataVo.Core net10.0]: 46 000/50 000 iterations, elapsed 0,5s
+[17:17:13] DataVo [DataVo.Core net10.0]: 47 000/50 000 iterations, elapsed 0,5s
+[17:17:13] DataVo [DataVo.Core net10.0]: 48 000/50 000 iterations, elapsed 0,5s
+[17:17:13] DataVo [DataVo.Core net10.0]: 49 000/50 000 iterations, elapsed 0,6s
+[17:17:13] DataVo [DataVo.Core net10.0]: 50 000/50 000 iterations, elapsed 0,6s
+[17:17:13] DuckDB: preloading 10 000 baseline orders...
+[17:17:22] DuckDB: measuring 50 000 insert+read iterations...
+[17:17:23] DuckDB: 1 000/50 000 iterations, elapsed 1,0s
+[17:17:24] DuckDB: 2 000/50 000 iterations, elapsed 2,1s
+[17:17:25] DuckDB: 3 000/50 000 iterations, elapsed 3,1s
+[17:17:26] DuckDB: 4 000/50 000 iterations, elapsed 4,3s
+[17:17:27] DuckDB: 5 000/50 000 iterations, elapsed 5,3s
+[17:17:28] DuckDB: 6 000/50 000 iterations, elapsed 6,3s
+[17:17:29] DuckDB: 7 000/50 000 iterations, elapsed 7,3s
+[17:17:30] DuckDB: 8 000/50 000 iterations, elapsed 8,3s
+[17:17:32] DuckDB: 9 000/50 000 iterations, elapsed 9,4s
+[17:17:33] DuckDB: 10 000/50 000 iterations, elapsed 10,4s
+[17:17:34] DuckDB: 11 000/50 000 iterations, elapsed 11,6s
+[17:17:35] DuckDB: 12 000/50 000 iterations, elapsed 12,6s
+[17:17:36] DuckDB: 13 000/50 000 iterations, elapsed 13,7s
+[17:17:37] DuckDB: 14 000/50 000 iterations, elapsed 14,7s
+[17:17:38] DuckDB: 15 000/50 000 iterations, elapsed 15,8s
+[17:17:39] DuckDB: 16 000/50 000 iterations, elapsed 16,9s
+[17:17:40] DuckDB: 17 000/50 000 iterations, elapsed 18,1s
+[17:17:41] DuckDB: 18 000/50 000 iterations, elapsed 19,2s
+[17:17:43] DuckDB: 19 000/50 000 iterations, elapsed 20,3s
+[17:17:44] DuckDB: 20 000/50 000 iterations, elapsed 21,5s
+[17:17:45] DuckDB: 21 000/50 000 iterations, elapsed 22,6s
+[17:17:46] DuckDB: 22 000/50 000 iterations, elapsed 23,7s
+[17:17:47] DuckDB: 23 000/50 000 iterations, elapsed 25,0s
+[17:17:48] DuckDB: 24 000/50 000 iterations, elapsed 26,2s
+[17:17:49] DuckDB: 25 000/50 000 iterations, elapsed 27,3s
+[17:17:51] DuckDB: 26 000/50 000 iterations, elapsed 28,5s
+[17:17:52] DuckDB: 27 000/50 000 iterations, elapsed 29,6s
+[17:17:53] DuckDB: 28 000/50 000 iterations, elapsed 30,7s
+[17:17:54] DuckDB: 29 000/50 000 iterations, elapsed 31,8s
+[17:17:55] DuckDB: 30 000/50 000 iterations, elapsed 33,0s
+[17:17:56] DuckDB: 31 000/50 000 iterations, elapsed 34,2s
+[17:17:58] DuckDB: 32 000/50 000 iterations, elapsed 35,4s
+[17:17:59] DuckDB: 33 000/50 000 iterations, elapsed 36,6s
+[17:18:00] DuckDB: 34 000/50 000 iterations, elapsed 37,6s
+[17:18:01] DuckDB: 35 000/50 000 iterations, elapsed 38,8s
+[17:18:02] DuckDB: 36 000/50 000 iterations, elapsed 40,0s
+[17:18:03] DuckDB: 37 000/50 000 iterations, elapsed 41,2s
+[17:18:05] DuckDB: 38 000/50 000 iterations, elapsed 42,5s
+[17:18:06] DuckDB: 39 000/50 000 iterations, elapsed 43,7s
+[17:18:07] DuckDB: 40 000/50 000 iterations, elapsed 45,0s
+[17:18:08] DuckDB: 41 000/50 000 iterations, elapsed 46,1s
+[17:18:10] DuckDB: 42 000/50 000 iterations, elapsed 47,4s
+[17:18:11] DuckDB: 43 000/50 000 iterations, elapsed 48,5s
+[17:18:12] DuckDB: 44 000/50 000 iterations, elapsed 49,8s
+[17:18:13] DuckDB: 45 000/50 000 iterations, elapsed 51,0s
+[17:18:14] DuckDB: 46 000/50 000 iterations, elapsed 52,2s
+[17:18:16] DuckDB: 47 000/50 000 iterations, elapsed 53,5s
+[17:18:17] DuckDB: 48 000/50 000 iterations, elapsed 54,7s
+[17:18:18] DuckDB: 49 000/50 000 iterations, elapsed 55,8s
+[17:18:19] DuckDB: 50 000/50 000 iterations, elapsed 57,0s
+[17:18:19] SQLite: preloading 10 000 baseline orders...
+[17:18:19] SQLite: measuring 50 000 insert+read iterations...
+[17:18:19] SQLite: 1 000/50 000 iterations, elapsed 0,0s
+[17:18:19] SQLite: 2 000/50 000 iterations, elapsed 0,0s
+[17:18:19] SQLite: 3 000/50 000 iterations, elapsed 0,1s
+[17:18:19] SQLite: 4 000/50 000 iterations, elapsed 0,1s
+[17:18:19] SQLite: 5 000/50 000 iterations, elapsed 0,1s
+[17:18:19] SQLite: 6 000/50 000 iterations, elapsed 0,1s
+[17:18:19] SQLite: 7 000/50 000 iterations, elapsed 0,1s
+[17:18:19] SQLite: 8 000/50 000 iterations, elapsed 0,1s
+[17:18:19] SQLite: 9 000/50 000 iterations, elapsed 0,2s
+[17:18:19] SQLite: 10 000/50 000 iterations, elapsed 0,2s
+[17:18:19] SQLite: 11 000/50 000 iterations, elapsed 0,2s
+[17:18:19] SQLite: 12 000/50 000 iterations, elapsed 0,2s
+[17:18:19] SQLite: 13 000/50 000 iterations, elapsed 0,2s
+[17:18:19] SQLite: 14 000/50 000 iterations, elapsed 0,2s
+[17:18:19] SQLite: 15 000/50 000 iterations, elapsed 0,2s
+[17:18:19] SQLite: 16 000/50 000 iterations, elapsed 0,2s
+[17:18:20] SQLite: 17 000/50 000 iterations, elapsed 0,2s
+[17:18:20] SQLite: 18 000/50 000 iterations, elapsed 0,3s
+[17:18:20] SQLite: 19 000/50 000 iterations, elapsed 0,3s
+[17:18:20] SQLite: 20 000/50 000 iterations, elapsed 0,3s
+[17:18:20] SQLite: 21 000/50 000 iterations, elapsed 0,3s
+[17:18:20] SQLite: 22 000/50 000 iterations, elapsed 0,3s
+[17:18:20] SQLite: 23 000/50 000 iterations, elapsed 0,3s
+[17:18:20] SQLite: 24 000/50 000 iterations, elapsed 0,3s
+[17:18:20] SQLite: 25 000/50 000 iterations, elapsed 0,3s
+[17:18:20] SQLite: 26 000/50 000 iterations, elapsed 0,3s
+[17:18:20] SQLite: 27 000/50 000 iterations, elapsed 0,4s
+[17:18:20] SQLite: 28 000/50 000 iterations, elapsed 0,4s
+[17:18:20] SQLite: 29 000/50 000 iterations, elapsed 0,4s
+[17:18:20] SQLite: 30 000/50 000 iterations, elapsed 0,4s
+[17:18:20] SQLite: 31 000/50 000 iterations, elapsed 0,4s
+[17:18:20] SQLite: 32 000/50 000 iterations, elapsed 0,4s
+[17:18:20] SQLite: 33 000/50 000 iterations, elapsed 0,4s
+[17:18:20] SQLite: 34 000/50 000 iterations, elapsed 0,4s
+[17:18:20] SQLite: 35 000/50 000 iterations, elapsed 0,4s
+[17:18:20] SQLite: 36 000/50 000 iterations, elapsed 0,5s
+[17:18:20] SQLite: 37 000/50 000 iterations, elapsed 0,5s
+[17:18:20] SQLite: 38 000/50 000 iterations, elapsed 0,5s
+[17:18:20] SQLite: 39 000/50 000 iterations, elapsed 0,5s
+[17:18:20] SQLite: 40 000/50 000 iterations, elapsed 0,5s
+[17:18:20] SQLite: 41 000/50 000 iterations, elapsed 0,5s
+[17:18:20] SQLite: 42 000/50 000 iterations, elapsed 0,5s
+[17:18:20] SQLite: 43 000/50 000 iterations, elapsed 0,6s
+[17:18:20] SQLite: 44 000/50 000 iterations, elapsed 0,6s
+[17:18:20] SQLite: 45 000/50 000 iterations, elapsed 0,6s
+[17:18:20] SQLite: 46 000/50 000 iterations, elapsed 0,6s
+[17:18:20] SQLite: 47 000/50 000 iterations, elapsed 0,6s
+[17:18:20] SQLite: 48 000/50 000 iterations, elapsed 0,6s
+[17:18:20] SQLite: 49 000/50 000 iterations, elapsed 0,6s
+[17:18:20] SQLite: 50 000/50 000 iterations, elapsed 0,6s

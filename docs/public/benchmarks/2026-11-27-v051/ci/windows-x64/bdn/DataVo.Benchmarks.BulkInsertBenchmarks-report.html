@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang='en'>
+<head>
+<meta charset='utf-8' />
+<title>DataVo.Benchmarks.BulkInsertBenchmarks-20261127-150534</title>
+
+<style type="text/css">
+	table { border-collapse: collapse; display: block; width: 100%; overflow: auto; }
+	td, th { padding: 6px 13px; border: 1px solid #ddd; text-align: right; }
+	tr { background-color: #fff; border-top: 1px solid #ccc; }
+	tr:nth-child(even) { background: #f8f8f8; }
+</style>
+</head>
+<body>
+<pre><code>
+BenchmarkDotNet v0.15.8, Windows 11 (10.0.26100.33828/24H2/2024Update/HudsonValley) (Hyper-V)
+Intel Xeon Platinum 8370C CPU 2.80GHz (Max: 2.79GHz), 1 CPU, 4 logical and 2 physical cores
+.NET SDK 11.0.100
+  [Host]     : .NET 10.0.15 (10.0.15, 10.0.1526.53008), X64 RyuJIT x86-64-v4
+  Job-CVTXAR : .NET 10.0.15 (10.0.15, 10.0.1526.53008), X64 RyuJIT x86-64-v4
+</code></pre>
+<pre><code>InvocationCount=1  IterationCount=10  RunStrategy=Monitoring  
+UnrollFactor=1  WarmupCount=2  
+</code></pre>
+
+<table>
+<thead><tr><th>Method </th><th>Rows</th><th>Storage</th><th>Mean</th><th>Error</th><th>StdDev</th><th>Ratio</th><th>RatioSD</th><th>Gen0</th><th>Gen1</th><th>Gen2</th><th>Allocated</th><th>Alloc Ratio</th>
+</tr>
+</thead><tbody><tr><td>DataVo</td><td>100000</td><td>Memory</td><td>94.22 ms</td><td>51.537 ms</td><td>34.089 ms</td><td>1.10</td><td>0.49</td><td>2000.0000</td><td>1000.0000</td><td>1000.0000</td><td>51.5 MB</td><td>1.00</td>
+</tr><tr><td>Sqlite</td><td>100000</td><td>Memory</td><td>174.65 ms</td><td>11.642 ms</td><td>7.701 ms</td><td>2.03</td><td>0.54</td><td>3000.0000</td><td>-</td><td>-</td><td>93.84 MB</td><td>1.82</td>
+</tr><tr><td>DuckDb</td><td>100000</td><td>Memory</td><td>93.65 ms</td><td>13.644 ms</td><td>9.025 ms</td><td>1.09</td><td>0.31</td><td>-</td><td>-</td><td>-</td><td>19.08 MB</td><td>0.37</td>
+</tr><tr><td>DuckDb1Thread</td><td>100000</td><td>Memory</td><td>89.56 ms</td><td>15.445 ms</td><td>10.216 ms</td><td>1.04</td><td>0.30</td><td>-</td><td>-</td><td>-</td><td>19.08 MB</td><td>0.37</td>
+</tr><tr><td>DataVo</td><td>100000</td><td>File</td><td>203.05 ms</td><td>114.171 ms</td><td>75.517 ms</td><td>1.09</td><td>0.47</td><td>2000.0000</td><td>1000.0000</td><td>1000.0000</td><td>75.26 MB</td><td>1.00</td>
+</tr><tr><td>Sqlite</td><td>100000</td><td>File</td><td>181.48 ms</td><td>3.014 ms</td><td>1.993 ms</td><td>0.97</td><td>0.23</td><td>3000.0000</td><td>-</td><td>-</td><td>93.84 MB</td><td>1.25</td>
+</tr><tr><td>DuckDb</td><td>100000</td><td>File</td><td>129.46 ms</td><td>18.642 ms</td><td>12.331 ms</td><td>0.69</td><td>0.18</td><td>-</td><td>-</td><td>-</td><td>19.08 MB</td><td>0.25</td>
+</tr><tr><td>DuckDb1Thread</td><td>100000</td><td>File</td><td>132.09 ms</td><td>23.903 ms</td><td>15.810 ms</td><td>0.71</td><td>0.19</td><td>-</td><td>-</td><td>-</td><td>19.08 MB</td><td>0.25</td>
+</tr></tbody></table>
+</body>
+</html>

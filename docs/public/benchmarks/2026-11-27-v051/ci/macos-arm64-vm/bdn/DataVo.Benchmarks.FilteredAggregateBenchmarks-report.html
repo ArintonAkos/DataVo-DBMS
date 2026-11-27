@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang='en'>
+<head>
+<meta charset='utf-8' />
+<title>DataVo.Benchmarks.FilteredAggregateBenchmarks-20261127-163610</title>
+
+<style type="text/css">
+	table { border-collapse: collapse; display: block; width: 100%; overflow: auto; }
+	td, th { padding: 6px 13px; border: 1px solid #ddd; text-align: right; }
+	tr { background-color: #fff; border-top: 1px solid #ccc; }
+	tr:nth-child(even) { background: #f8f8f8; }
+</style>
+</head>
+<body>
+<pre><code>
+BenchmarkDotNet v0.15.8, macOS Tahoe 26.7.2 (25G332) [Darwin 25.6.0]
+Apple M1 (Virtual), 1 CPU, 3 logical and 3 physical cores
+.NET SDK 11.0.100
+  [Host]     : .NET 10.0.15 (10.0.15, 10.0.1526.53008), Arm64 RyuJIT armv8.0-a
+  DefaultJob : .NET 10.0.15 (10.0.15, 10.0.1526.53008), Arm64 RyuJIT armv8.0-a
+</code></pre>
+<pre><code></code></pre>
+
+<table>
+<thead><tr><th>Method       </th><th>Categories</th><th>Rows</th><th>Storage</th><th>Mean  </th><th>Error</th><th>StdDev</th><th>Median</th><th>Ratio</th><th>RatioSD</th><th>Allocated</th><th>Alloc Ratio</th>
+</tr>
+</thead><tbody><tr><td>DataVo_Count</td><td>Count</td><td>200000</td><td>Memory</td><td>58.21 &mu;s</td><td>2.048 &mu;s</td><td>6.007 &mu;s</td><td>58.24 &mu;s</td><td>1.01</td><td>0.15</td><td>-</td><td>NA</td>
+</tr><tr><td>Sqlite_Count</td><td>Count</td><td>200000</td><td>Memory</td><td>8,928.68 &mu;s</td><td>323.012 &mu;s</td><td>926.782 &mu;s</td><td>8,912.05 &mu;s</td><td>155.04</td><td>22.86</td><td>504 B</td><td>NA</td>
+</tr><tr><td>DuckDb_Count</td><td>Count</td><td>200000</td><td>Memory</td><td>366.33 &mu;s</td><td>40.669 &mu;s</td><td>119.913 &mu;s</td><td>372.55 &mu;s</td><td>6.36</td><td>2.19</td><td>1145 B</td><td>NA</td>
+</tr><tr><td>DuckDb1Thread_Count</td><td>Count</td><td>200000</td><td>Memory</td><td>316.58 &mu;s</td><td>26.747 &mu;s</td><td>78.863 &mu;s</td><td>295.32 &mu;s</td><td>5.50</td><td>1.49</td><td>1145 B</td><td>NA</td>
+</tr><tr><td>DataVo_Count</td><td>Count</td><td>200000</td><td>File</td><td>52.63 &mu;s</td><td>1.799 &mu;s</td><td>5.163 &mu;s</td><td>51.68 &mu;s</td><td>1.01</td><td>0.14</td><td>-</td><td>NA</td>
+</tr><tr><td>Sqlite_Count</td><td>Count</td><td>200000</td><td>File</td><td>8,770.63 &mu;s</td><td>218.710 &mu;s</td><td>634.518 &mu;s</td><td>8,580.30 &mu;s</td><td>168.17</td><td>19.80</td><td>504 B</td><td>NA</td>
+</tr><tr><td>DuckDb_Count</td><td>Count</td><td>200000</td><td>File</td><td>466.18 &mu;s</td><td>57.147 &mu;s</td><td>168.500 &mu;s</td><td>437.85 &mu;s</td><td>8.94</td><td>3.33</td><td>1145 B</td><td>NA</td>
+</tr><tr><td>DuckDb1Thread_Count</td><td>Count</td><td>200000</td><td>File</td><td>412.88 &mu;s</td><td>16.932 &mu;s</td><td>48.853 &mu;s</td><td>398.63 &mu;s</td><td>7.92</td><td>1.19</td><td>1145 B</td><td>NA</td>
+</tr><tr><td>DataVo_Max</td><td>Max</td><td>200000</td><td>Memory</td><td>141.81 &mu;s</td><td>2.826 &mu;s</td><td>7.877 &mu;s</td><td>139.25 &mu;s</td><td>1.00</td><td>0.08</td><td>-</td><td>NA</td>
+</tr><tr><td>Sqlite_Max</td><td>Max</td><td>200000</td><td>Memory</td><td>8,772.19 &mu;s</td><td>173.258 &mu;s</td><td>264.584 &mu;s</td><td>8,704.64 &mu;s</td><td>62.04</td><td>3.71</td><td>504 B</td><td>NA</td>
+</tr><tr><td>DuckDb_Max</td><td>Max</td><td>200000</td><td>Memory</td><td>923.94 &mu;s</td><td>31.914 &mu;s</td><td>91.052 &mu;s</td><td>917.28 &mu;s</td><td>6.53</td><td>0.73</td><td>1145 B</td><td>NA</td>
+</tr><tr><td>DuckDb1Thread_Max</td><td>Max</td><td>200000</td><td>Memory</td><td>699.76 &mu;s</td><td>17.684 &mu;s</td><td>50.166 &mu;s</td><td>678.99 &mu;s</td><td>4.95</td><td>0.44</td><td>1145 B</td><td>NA</td>
+</tr><tr><td>DataVo_Max</td><td>Max</td><td>200000</td><td>File</td><td>152.45 &mu;s</td><td>6.018 &mu;s</td><td>17.460 &mu;s</td><td>147.70 &mu;s</td><td>1.01</td><td>0.16</td><td>-</td><td>NA</td>
+</tr><tr><td>Sqlite_Max</td><td>Max</td><td>200000</td><td>File</td><td>11,578.93 &mu;s</td><td>425.424 &mu;s</td><td>1,206.856 &mu;s</td><td>11,614.02 &mu;s</td><td>76.87</td><td>11.40</td><td>504 B</td><td>NA</td>
+</tr><tr><td>DuckDb_Max</td><td>Max</td><td>200000</td><td>File</td><td>1,609.07 &mu;s</td><td>69.739 &mu;s</td><td>201.214 &mu;s</td><td>1,610.81 &mu;s</td><td>10.68</td><td>1.75</td><td>1146 B</td><td>NA</td>
+</tr><tr><td>DuckDb1Thread_Max</td><td>Max</td><td>200000</td><td>File</td><td>1,434.49 &mu;s</td><td>48.029 &mu;s</td><td>130.667 &mu;s</td><td>1,414.25 &mu;s</td><td>9.52</td><td>1.33</td><td>1146 B</td><td>NA</td>
+</tr><tr><td>DataVo_Min</td><td>Min</td><td>200000</td><td>Memory</td><td>130.73 &mu;s</td><td>4.187 &mu;s</td><td>12.080 &mu;s</td><td>126.49 &mu;s</td><td>1.01</td><td>0.13</td><td>-</td><td>NA</td>
+</tr><tr><td>Sqlite_Min</td><td>Min</td><td>200000</td><td>Memory</td><td>8,859.14 &mu;s</td><td>233.503 &mu;s</td><td>677.435 &mu;s</td><td>8,595.89 &mu;s</td><td>68.31</td><td>7.93</td><td>504 B</td><td>NA</td>
+</tr><tr><td>DuckDb_Min</td><td>Min</td><td>200000</td><td>Memory</td><td>302.81 &mu;s</td><td>13.390 &mu;s</td><td>37.767 &mu;s</td><td>285.47 &mu;s</td><td>2.34</td><td>0.36</td><td>1137 B</td><td>NA</td>
+</tr><tr><td>DuckDb1Thread_Min</td><td>Min</td><td>200000</td><td>Memory</td><td>333.61 &mu;s</td><td>9.165 &mu;s</td><td>26.148 &mu;s</td><td>324.77 &mu;s</td><td>2.57</td><td>0.30</td><td>1137 B</td><td>NA</td>
+</tr><tr><td>DataVo_Min</td><td>Min</td><td>200000</td><td>File</td><td>113.45 &mu;s</td><td>2.268 &mu;s</td><td>3.325 &mu;s</td><td>112.46 &mu;s</td><td>1.00</td><td>0.04</td><td>-</td><td>NA</td>
+</tr><tr><td>Sqlite_Min</td><td>Min</td><td>200000</td><td>File</td><td>10,280.40 &mu;s</td><td>226.743 &mu;s</td><td>650.569 &mu;s</td><td>10,243.52 &mu;s</td><td>90.69</td><td>6.27</td><td>504 B</td><td>NA</td>
+</tr><tr><td>DuckDb_Min</td><td>Min</td><td>200000</td><td>File</td><td>538.19 &mu;s</td><td>33.455 &mu;s</td><td>98.119 &mu;s</td><td>509.01 &mu;s</td><td>4.75</td><td>0.87</td><td>1138 B</td><td>NA</td>
+</tr><tr><td>DuckDb1Thread_Min</td><td>Min</td><td>200000</td><td>File</td><td>549.48 &mu;s</td><td>17.251 &mu;s</td><td>50.047 &mu;s</td><td>532.33 &mu;s</td><td>4.85</td><td>0.46</td><td>1137 B</td><td>NA</td>
+</tr><tr><td>DataVo_Sum</td><td>Sum</td><td>200000</td><td>Memory</td><td>124.74 &mu;s</td><td>2.481 &mu;s</td><td>6.578 &mu;s</td><td>123.33 &mu;s</td><td>1.00</td><td>0.07</td><td>-</td><td>NA</td>
+</tr><tr><td>Sqlite_Sum</td><td>Sum</td><td>200000</td><td>Memory</td><td>9,368.06 &mu;s</td><td>184.493 &mu;s</td><td>239.892 &mu;s</td><td>9,395.85 &mu;s</td><td>75.30</td><td>4.19</td><td>504 B</td><td>NA</td>
+</tr><tr><td>DuckDb_Sum</td><td>Sum</td><td>200000</td><td>Memory</td><td>317.61 &mu;s</td><td>16.361 &mu;s</td><td>46.414 &mu;s</td><td>307.94 &mu;s</td><td>2.55</td><td>0.39</td><td>1169 B</td><td>NA</td>
+</tr><tr><td>DuckDb1Thread_Sum</td><td>Sum</td><td>200000</td><td>Memory</td><td>374.15 &mu;s</td><td>24.959 &mu;s</td><td>73.199 &mu;s</td><td>352.47 &mu;s</td><td>3.01</td><td>0.60</td><td>1169 B</td><td>NA</td>
+</tr><tr><td>DataVo_Sum</td><td>Sum</td><td>200000</td><td>File</td><td>134.50 &mu;s</td><td>3.963 &mu;s</td><td>11.433 &mu;s</td><td>132.84 &mu;s</td><td>1.01</td><td>0.12</td><td>-</td><td>NA</td>
+</tr><tr><td>Sqlite_Sum</td><td>Sum</td><td>200000</td><td>File</td><td>9,479.21 &mu;s</td><td>187.872 &mu;s</td><td>523.712 &mu;s</td><td>9,458.77 &mu;s</td><td>70.96</td><td>6.94</td><td>504 B</td><td>NA</td>
+</tr><tr><td>DuckDb_Sum</td><td>Sum</td><td>200000</td><td>File</td><td>592.16 &mu;s</td><td>52.074 &mu;s</td><td>152.724 &mu;s</td><td>550.45 &mu;s</td><td>4.43</td><td>1.20</td><td>1169 B</td><td>NA</td>
+</tr><tr><td>DuckDb1Thread_Sum</td><td>Sum</td><td>200000</td><td>File</td><td>624.81 &mu;s</td><td>25.213 &mu;s</td><td>73.146 &mu;s</td><td>606.73 &mu;s</td><td>4.68</td><td>0.66</td><td>1169 B</td><td>NA</td>
+</tr></tbody></table>
+</body>
+</html>

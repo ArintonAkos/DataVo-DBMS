@@ -1,0 +1,36 @@
+fdea08a6c0fafb29897a03ad560e4ef23efdd447
+.NET SDK:
+ Version:           10.0.103
+ Commit:            c2435c3e0f
+ Workload version:  10.0.104
+ MSBuild version:   18.0.11+c2435c3e0
+
+Runtime Environment:
+ OS Name:     Mac OS X
+ OS Version:  26.3
+ OS Platform: Darwin
+ RID:         osx-arm64
+ Base Path:   /usr/local/share/dotnet/sdk/10.0.103/
+
+.NET workloads installed:
+ [wasm-tools]
+   Installation Source: SDK 10.0.100
+   Manifest Version:    10.0.104/10.0.100
+   Manifest Path:       /usr/local/share/dotnet/sdk-manifests/10.0.100/microsoft.net.workload.mono.toolchain.current/10.0.104/WorkloadManifest.json
+   Install Type:        FileBased
+
+Configured to use workload sets when installing new manifests.
+
+Host:
+  Version:      10.0.3
+  Architecture: arm64
+  Commit:       c2435c3e0f
+
+.NET SDKs installed:
+  10.0.103 [/usr/local/share/dotnet/sdk]
+
+Darwin Akoss-Mac-mini.local 25.3.0 Darwin Kernel Version 25.3.0: Wed Jan 28 20:48:41 PST 2026; root:xnu-12377.81.4~5/RELEASE_ARM64_T6041 arm64
+Apple M4 Pro
+ProductName:		macOS
+ProductVersion:		26.3
+BuildVersion:		25D125

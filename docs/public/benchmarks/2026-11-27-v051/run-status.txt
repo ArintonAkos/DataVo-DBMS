@@ -1,0 +1,37 @@
+17:05:49 START sql-matrix
+17:07:42 END sql-matrix rc=0
+17:07:42 START hybrid-vector
+17:08:13 END hybrid-vector rc=0
+17:08:13 START hybrid-vector-1536
+17:09:04 END hybrid-vector-1536 rc=0
+17:09:04 START flat-crud
+17:09:06 END flat-crud rc=0
+17:09:06 START disk-crud-wal
+17:12:02 END disk-crud-wal rc=0
+17:12:02 START thread-scaling
+17:14:36 END thread-scaling rc=0
+17:14:36 START ycsb-mixed
+17:15:06 END ycsb-mixed rc=0
+17:15:06 START space-and-recovery
+17:15:11 END space-and-recovery rc=0
+17:15:11 START vector-search
+17:16:40 END vector-search rc=0
+17:16:40 START vector-recall
+17:17:12 END vector-recall rc=0
+17:17:12 START simple-exposure
+17:18:20 END simple-exposure rc=0
+17:18:20 START complex-vip
+17:21:10 END complex-vip rc=0
+17:21:10 START concurrent-ops
+17:21:26 END concurrent-ops rc=0
+17:21:26 START arena-gameplay
+17:21:37 END arena-gameplay rc=0
+17:21:37 START arena-ivm-stress
+17:26:56 END arena-ivm-stress rc=0
+17:26:56 START bdn
+18:02:55 END bdn rc=0
+ALL DONE
+18:03:03 START deep-document
+18:03:04 END deep-document rc=0
+18:03:04 START sql-workload
+18:04:17 END sql-workload rc=0

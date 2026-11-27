@@ -1,0 +1,60 @@
+﻿{
+  "seed": 20260721,
+  "profile": {
+    "id": "ivm-stress",
+    "seed": 20260721,
+    "logicalNpcCount": 10000,
+    "mutationsPerBatch": 24,
+    "warmupBatches": 120,
+    "measuredBatches": 1200,
+    "simulatedCadenceHz": 60
+  },
+  "engine": "duckdb",
+  "architecture": "EmbeddedPollingRecompute",
+  "schemaQueryRevision": "arena-live-views-v1",
+  "totalMilliseconds": 30199.516545999955,
+  "batch": {
+    "count": 1200,
+    "p50Milliseconds": 24.928149,
+    "p95Milliseconds": 26.550002,
+    "p99Milliseconds": 31.810262,
+    "maxMilliseconds": 52.38824,
+    "meanMilliseconds": 25.166263788333307
+  },
+  "leaderboard": {
+    "count": 1200,
+    "p50Milliseconds": 0.627931,
+    "p95Milliseconds": 0.712977,
+    "p99Milliseconds": 0.790823,
+    "maxMilliseconds": 1.301389,
+    "meanMilliseconds": 0.6314954675000002
+  },
+  "aliveByTeam": {
+    "count": 1200,
+    "p50Milliseconds": 1.265837,
+    "p95Milliseconds": 1.538692,
+    "p99Milliseconds": 1.664849,
+    "maxMilliseconds": 2.14491,
+    "meanMilliseconds": 1.2792793466666659
+  },
+  "zoneInventory": {
+    "count": 1200,
+    "p50Milliseconds": 1.609987,
+    "p95Milliseconds": 1.91533,
+    "p99Milliseconds": 7.570784,
+    "maxMilliseconds": 22.4678,
+    "meanMilliseconds": 1.7555564166666666
+  },
+  "writesApplied": 28800,
+  "reactiveChanges": 0,
+  "pollingRows": 3088870,
+  "hashes": {
+    "leaderboard": "1383e14479d8d778d93f9ff743aef17670faa5d7bd9fcbd557299db81e798beb",
+    "aliveByTeam": "f3a541425bb775d4d9c92ff774de0b63ceaa5581495f0f8f7cfafc5bc43a415c",
+    "zoneInventory": "740089a8153e9583e7917c4f181f627e7d72f0090de2cbf707a6d0ab060ba23d"
+  },
+  "operatingSystem": "Ubuntu 26.04.1 LTS",
+  "cpu": "X64; 4 logical processors",
+  "dotNetVersion": ".NET 10.0.15",
+  "success": true
+}

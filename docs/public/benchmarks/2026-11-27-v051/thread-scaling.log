@@ -1,0 +1,28 @@
+[17:12:02] DataVo (LSM Production) [DataVo.Core net10.0]: thread scaling — preloading 100 000 records, then 100 000 reads + 10 000 updates at 1..32 threads...
+[17:12:49] DataVo (LSM Production) [DataVo.Core net10.0]: 1 threads completed 110 000 ops in 47 029,5ms (2 339 OPS)
+[17:13:26] DataVo (LSM Production) [DataVo.Core net10.0]: 2 threads completed 110 000 ops in 37 115,3ms (2 964 OPS)
+[17:13:49] DataVo (LSM Production) [DataVo.Core net10.0]: 4 threads completed 110 000 ops in 22 903,3ms (4 803 OPS)
+[17:14:04] DataVo (LSM Production) [DataVo.Core net10.0]: 8 threads completed 110 000 ops in 14 939,8ms (7 363 OPS)
+[17:14:12] DataVo (LSM Production) [DataVo.Core net10.0]: 16 threads completed 110 000 ops in 8 443,1ms (13 028 OPS)
+[17:14:22] DataVo (LSM Production) [DataVo.Core net10.0]: 32 threads completed 110 000 ops in 9 857,3ms (11 159 OPS)
+[17:14:22] DataVo (LSM Relaxed) [DataVo.Core net10.0]: thread scaling — preloading 100 000 records, then 100 000 reads + 10 000 updates at 1..32 threads...
+[17:14:22] DataVo (LSM Relaxed) [DataVo.Core net10.0]: 1 threads completed 110 000 ops in 67,4ms (1 633 223 OPS)
+[17:14:22] DataVo (LSM Relaxed) [DataVo.Core net10.0]: 2 threads completed 110 000 ops in 56,7ms (1 938 692 OPS)
+[17:14:23] DataVo (LSM Relaxed) [DataVo.Core net10.0]: 4 threads completed 110 000 ops in 108,7ms (1 012 395 OPS)
+[17:14:23] DataVo (LSM Relaxed) [DataVo.Core net10.0]: 8 threads completed 110 000 ops in 209,0ms (526 350 OPS)
+[17:14:23] DataVo (LSM Relaxed) [DataVo.Core net10.0]: 16 threads completed 110 000 ops in 69,7ms (1 579 126 OPS)
+[17:14:23] DataVo (LSM Relaxed) [DataVo.Core net10.0]: 32 threads completed 110 000 ops in 74,1ms (1 483 774 OPS)
+[17:14:23] SQLite (WAL,normal): thread scaling — preloading 100 000 records, then 100 000 reads + 10 000 updates at 1..32 threads...
+[17:14:24] SQLite (WAL,normal): 1 threads completed 110 000 ops in 345,0ms (318 828 OPS)
+[17:14:24] SQLite (WAL,normal): 2 threads completed 110 000 ops in 240,1ms (458 077 OPS)
+[17:14:24] SQLite (WAL,normal): 4 threads completed 110 000 ops in 248,3ms (443 080 OPS)
+[17:14:24] SQLite (WAL,normal): 8 threads completed 110 000 ops in 242,6ms (453 386 OPS)
+[17:14:24] SQLite (WAL,normal): 16 threads completed 110 000 ops in 209,9ms (523 953 OPS)
+[17:14:25] SQLite (WAL,normal): 32 threads completed 110 000 ops in 194,5ms (565 621 OPS)
+[17:14:25] LiteDB: thread scaling — preloading 100 000 records, then 100 000 reads + 10 000 updates at 1..32 threads...
+[17:14:27] LiteDB: 1 threads completed 110 000 ops in 2 242,2ms (49 059 OPS)
+[17:14:29] LiteDB: 2 threads completed 110 000 ops in 1 663,5ms (66 124 OPS)
+[17:14:31] LiteDB: 4 threads completed 110 000 ops in 1 666,5ms (66 005 OPS)
+[17:14:33] LiteDB: 8 threads completed 110 000 ops in 1 752,6ms (62 765 OPS)
+[17:14:34] LiteDB: 16 threads completed 110 000 ops in 1 723,3ms (63 832 OPS)
+[17:14:36] LiteDB: 32 threads completed 110 000 ops in 1 802,2ms (61 037 OPS)

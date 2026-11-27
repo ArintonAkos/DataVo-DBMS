@@ -1,0 +1,1350 @@
+﻿{
+  "schemaRevision": "arena-live-views-v1",
+  "profile": {
+    "id": "gameplay",
+    "seed": 20260721,
+    "logicalNpcCount": 1000,
+    "mutationsPerBatch": 4,
+    "warmupBatches": 30,
+    "measuredBatches": 300,
+    "simulatedCadenceHz": 10
+  },
+  "engines": [
+    {
+      "engineId": "datavo-reactive",
+      "architecture": "EmbeddedReactiveIvm",
+      "runs": [
+        {
+          "engineId": "datavo-reactive",
+          "repetition": 1,
+          "totalMilliseconds": 368.80049999999994,
+          "batch": {
+            "count": 300,
+            "p50Milliseconds": 1.1144,
+            "p95Milliseconds": 1.8253,
+            "p99Milliseconds": 2.4644,
+            "maxMilliseconds": 3.7824,
+            "meanMilliseconds": 1.229335000000001
+          },
+          "leaderboard": {
+            "count": 300,
+            "p50Milliseconds": 0.0055,
+            "p95Milliseconds": 0.0084,
+            "p99Milliseconds": 0.0101,
+            "maxMilliseconds": 0.0404,
+            "meanMilliseconds": 0.005931333333333323
+          },
+          "aliveByTeam": {
+            "count": 300,
+            "p50Milliseconds": 0.0022,
+            "p95Milliseconds": 0.0032,
+            "p99Milliseconds": 0.0049,
+            "maxMilliseconds": 0.0254,
+            "meanMilliseconds": 0.0024456666666666633
+          },
+          "zoneInventory": {
+            "count": 300,
+            "p50Milliseconds": 0.0119,
+            "p95Milliseconds": 0.0306,
+            "p99Milliseconds": 0.044,
+            "maxMilliseconds": 0.1078,
+            "meanMilliseconds": 0.01586333333333333
+          },
+          "writesApplied": 1200,
+          "reactiveChanges": 643,
+          "pollingRows": 0,
+          "hashes": {
+            "leaderboard": "a46739e54ee2aa79a3bbd472f0563125f63136e5d3f9a9455a2430205ca052bf",
+            "aliveByTeam": "2f0095dc6ae44e5f7781f02cab0e9d013e9f847bde648bc5995914feec43f710",
+            "zoneInventory": "091c40b4da7b3668d73a35560dc3225c9f493841f0dda25a2b2e816cae16adc6"
+          },
+          "artifactPath": "datavo-reactive\\repetition-1.json"
+        },
+        {
+          "engineId": "datavo-reactive",
+          "repetition": 2,
+          "totalMilliseconds": 396.7933999999996,
+          "batch": {
+            "count": 300,
+            "p50Milliseconds": 1.2294,
+            "p95Milliseconds": 1.9219,
+            "p99Milliseconds": 2.1285,
+            "maxMilliseconds": 2.3214,
+            "meanMilliseconds": 1.322644666666667
+          },
+          "leaderboard": {
+            "count": 300,
+            "p50Milliseconds": 0.007,
+            "p95Milliseconds": 0.0102,
+            "p99Milliseconds": 0.0123,
+            "maxMilliseconds": 0.0162,
+            "meanMilliseconds": 0.007264000000000021
+          },
+          "aliveByTeam": {
+            "count": 300,
+            "p50Milliseconds": 0.0024,
+            "p95Milliseconds": 0.0035,
+            "p99Milliseconds": 0.0049,
+            "maxMilliseconds": 0.01,
+            "meanMilliseconds": 0.00260166666666667
+          },
+          "zoneInventory": {
+            "count": 300,
+            "p50Milliseconds": 0.0456,
+            "p95Milliseconds": 0.07,
+            "p99Milliseconds": 0.0926,
+            "maxMilliseconds": 0.1035,
+            "meanMilliseconds": 0.04391199999999997
+          },
+          "writesApplied": 1200,
+          "reactiveChanges": 643,
+          "pollingRows": 0,
+          "hashes": {
+            "leaderboard": "a46739e54ee2aa79a3bbd472f0563125f63136e5d3f9a9455a2430205ca052bf",
+            "aliveByTeam": "2f0095dc6ae44e5f7781f02cab0e9d013e9f847bde648bc5995914feec43f710",
+            "zoneInventory": "091c40b4da7b3668d73a35560dc3225c9f493841f0dda25a2b2e816cae16adc6"
+          },
+          "artifactPath": "datavo-reactive\\repetition-2.json"
+        },
+        {
+          "engineId": "datavo-reactive",
+          "repetition": 3,
+          "totalMilliseconds": 439.07520000000005,
+          "batch": {
+            "count": 300,
+            "p50Milliseconds": 1.2638,
+            "p95Milliseconds": 2.0268,
+            "p99Milliseconds": 2.1512,
+            "maxMilliseconds": 3.2166,
+            "meanMilliseconds": 1.4635840000000007
+          },
+          "leaderboard": {
+            "count": 300,
+            "p50Milliseconds": 0.0078,
+            "p95Milliseconds": 0.0118,
+            "p99Milliseconds": 0.0189,
+            "maxMilliseconds": 0.0652,
+            "meanMilliseconds": 0.008848000000000002
+          },
+          "aliveByTeam": {
+            "count": 300,
+            "p50Milliseconds": 0.0027,
+            "p95Milliseconds": 0.0044,
+            "p99Milliseconds": 0.0074,
+            "maxMilliseconds": 0.0365,
+            "meanMilliseconds": 0.003154999999999996
+          },
+          "zoneInventory": {
+            "count": 300,
+            "p50Milliseconds": 0.0565,
+            "p95Milliseconds": 0.0866,
+            "p99Milliseconds": 0.1228,
+            "maxMilliseconds": 0.2226,
+            "meanMilliseconds": 0.06528066666666664
+          },
+          "writesApplied": 1200,
+          "reactiveChanges": 643,
+          "pollingRows": 0,
+          "hashes": {
+            "leaderboard": "a46739e54ee2aa79a3bbd472f0563125f63136e5d3f9a9455a2430205ca052bf",
+            "aliveByTeam": "2f0095dc6ae44e5f7781f02cab0e9d013e9f847bde648bc5995914feec43f710",
+            "zoneInventory": "091c40b4da7b3668d73a35560dc3225c9f493841f0dda25a2b2e816cae16adc6"
+          },
+          "artifactPath": "datavo-reactive\\repetition-3.json"
+        },
+        {
+          "engineId": "datavo-reactive",
+          "repetition": 4,
+          "totalMilliseconds": 410.24149999999986,
+          "batch": {
+            "count": 300,
+            "p50Milliseconds": 1.1973,
+            "p95Milliseconds": 1.8953,
+            "p99Milliseconds": 1.9673,
+            "maxMilliseconds": 2.0505,
+            "meanMilliseconds": 1.3674716666666666
+          },
+          "leaderboard": {
+            "count": 300,
+            "p50Milliseconds": 0.0056,
+            "p95Milliseconds": 0.008,
+            "p99Milliseconds": 0.0101,
+            "maxMilliseconds": 0.0398,
+            "meanMilliseconds": 0.005927333333333331
+          },
+          "aliveByTeam": {
+            "count": 300,
+            "p50Milliseconds": 0.0018,
+            "p95Milliseconds": 0.0029,
+            "p99Milliseconds": 0.0037,
+            "maxMilliseconds": 0.0369,
+            "meanMilliseconds": 0.001949
+          },
+          "zoneInventory": {
+            "count": 300,
+            "p50Milliseconds": 0.0507,
+            "p95Milliseconds": 0.0843,
+            "p99Milliseconds": 0.0916,
+            "maxMilliseconds": 0.1222,
+            "meanMilliseconds": 0.05197233333333333
+          },
+          "writesApplied": 1200,
+          "reactiveChanges": 643,
+          "pollingRows": 0,
+          "hashes": {
+            "leaderboard": "a46739e54ee2aa79a3bbd472f0563125f63136e5d3f9a9455a2430205ca052bf",
+            "aliveByTeam": "2f0095dc6ae44e5f7781f02cab0e9d013e9f847bde648bc5995914feec43f710",
+            "zoneInventory": "091c40b4da7b3668d73a35560dc3225c9f493841f0dda25a2b2e816cae16adc6"
+          },
+          "artifactPath": "datavo-reactive\\repetition-4.json"
+        },
+        {
+          "engineId": "datavo-reactive",
+          "repetition": 5,
+          "totalMilliseconds": 317.97529999999995,
+          "batch": {
+            "count": 300,
+            "p50Milliseconds": 0.9659,
+            "p95Milliseconds": 1.5106,
+            "p99Milliseconds": 1.6933,
+            "maxMilliseconds": 1.9702,
+            "meanMilliseconds": 1.0599176666666665
+          },
+          "leaderboard": {
+            "count": 300,
+            "p50Milliseconds": 0.0049,
+            "p95Milliseconds": 0.0072,
+            "p99Milliseconds": 0.0083,
+            "maxMilliseconds": 0.0098,
+            "meanMilliseconds": 0.005347666666666659
+          },
+          "aliveByTeam": {
+            "count": 300,
+            "p50Milliseconds": 0.0014,
+            "p95Milliseconds": 0.0021,
+            "p99Milliseconds": 0.0028,
+            "maxMilliseconds": 0.008,
+            "meanMilliseconds": 0.0016163333333333375
+          },
+          "zoneInventory": {
+            "count": 300,
+            "p50Milliseconds": 0.0404,
+            "p95Milliseconds": 0.0625,
+            "p99Milliseconds": 0.0801,
+            "maxMilliseconds": 0.0967,
+            "meanMilliseconds": 0.045111666666666654
+          },
+          "writesApplied": 1200,
+          "reactiveChanges": 643,
+          "pollingRows": 0,
+          "hashes": {
+            "leaderboard": "a46739e54ee2aa79a3bbd472f0563125f63136e5d3f9a9455a2430205ca052bf",
+            "aliveByTeam": "2f0095dc6ae44e5f7781f02cab0e9d013e9f847bde648bc5995914feec43f710",
+            "zoneInventory": "091c40b4da7b3668d73a35560dc3225c9f493841f0dda25a2b2e816cae16adc6"
+          },
+          "artifactPath": "datavo-reactive\\repetition-5.json"
+        },
+        {
+          "engineId": "datavo-reactive",
+          "repetition": 6,
+          "totalMilliseconds": 231.22740000000005,
+          "batch": {
+            "count": 300,
+            "p50Milliseconds": 0.6804,
+            "p95Milliseconds": 1.1429,
+            "p99Milliseconds": 1.4009,
+            "maxMilliseconds": 2.4308,
+            "meanMilliseconds": 0.770758
+          },
+          "leaderboard": {
+            "count": 300,
+            "p50Milliseconds": 0.0038,
+            "p95Milliseconds": 0.0056,
+            "p99Milliseconds": 0.0101,
+            "maxMilliseconds": 0.1466,
+            "meanMilliseconds": 0.004602333333333338
+          },
+          "aliveByTeam": {
+            "count": 300,
+            "p50Milliseconds": 0.0012,
+            "p95Milliseconds": 0.0019,
+            "p99Milliseconds": 0.0029,
+            "maxMilliseconds": 0.0077,
+            "meanMilliseconds": 0.0014100000000000009
+          },
+          "zoneInventory": {
+            "count": 300,
+            "p50Milliseconds": 0.0161,
+            "p95Milliseconds": 0.0255,
+            "p99Milliseconds": 0.0289,
+            "maxMilliseconds": 0.0599,
+            "meanMilliseconds": 0.01863666666666667
+          },
+          "writesApplied": 1200,
+          "reactiveChanges": 643,
+          "pollingRows": 0,
+          "hashes": {
+            "leaderboard": "a46739e54ee2aa79a3bbd472f0563125f63136e5d3f9a9455a2430205ca052bf",
+            "aliveByTeam": "2f0095dc6ae44e5f7781f02cab0e9d013e9f847bde648bc5995914feec43f710",
+            "zoneInventory": "091c40b4da7b3668d73a35560dc3225c9f493841f0dda25a2b2e816cae16adc6"
+          },
+          "artifactPath": "datavo-reactive\\repetition-6.json"
+        },
+        {
+          "engineId": "datavo-reactive",
+          "repetition": 7,
+          "totalMilliseconds": 224.148,
+          "batch": {
+            "count": 300,
+            "p50Milliseconds": 0.7091,
+            "p95Milliseconds": 1.0044,
+            "p99Milliseconds": 1.9339,
+            "maxMilliseconds": 2.56,
+            "meanMilliseconds": 0.7471599999999996
+          },
+          "leaderboard": {
+            "count": 300,
+            "p50Milliseconds": 0.0046,
+            "p95Milliseconds": 0.0061,
+            "p99Milliseconds": 0.0065,
+            "maxMilliseconds": 0.0067,
+            "meanMilliseconds": 0.004466666666666683
+          },
+          "aliveByTeam": {
+            "count": 300,
+            "p50Milliseconds": 0.0016,
+            "p95Milliseconds": 0.0019,
+            "p99Milliseconds": 0.003,
+            "maxMilliseconds": 0.0048,
+            "meanMilliseconds": 0.0015613333333333338
+          },
+          "zoneInventory": {
+            "count": 300,
+            "p50Milliseconds": 0.0223,
+            "p95Milliseconds": 0.0254,
+            "p99Milliseconds": 0.0297,
+            "maxMilliseconds": 0.0858,
+            "meanMilliseconds": 0.02076466666666667
+          },
+          "writesApplied": 1200,
+          "reactiveChanges": 643,
+          "pollingRows": 0,
+          "hashes": {
+            "leaderboard": "a46739e54ee2aa79a3bbd472f0563125f63136e5d3f9a9455a2430205ca052bf",
+            "aliveByTeam": "2f0095dc6ae44e5f7781f02cab0e9d013e9f847bde648bc5995914feec43f710",
+            "zoneInventory": "091c40b4da7b3668d73a35560dc3225c9f493841f0dda25a2b2e816cae16adc6"
+          },
+          "artifactPath": "datavo-reactive\\repetition-7.json"
+        }
+      ],
+      "canonicalHashes": {
+        "leaderboard": "a46739e54ee2aa79a3bbd472f0563125f63136e5d3f9a9455a2430205ca052bf",
+        "aliveByTeam": "2f0095dc6ae44e5f7781f02cab0e9d013e9f847bde648bc5995914feec43f710",
+        "zoneInventory": "091c40b4da7b3668d73a35560dc3225c9f493841f0dda25a2b2e816cae16adc6"
+      },
+      "medianTotalMilliseconds": 368.80049999999994
+    },
+    {
+      "engineId": "datavo-polling",
+      "architecture": "EmbeddedPollingRecompute",
+      "runs": [
+        {
+          "engineId": "datavo-polling",
+          "repetition": 1,
+          "totalMilliseconds": 1628.9788,
+          "batch": {
+            "count": 300,
+            "p50Milliseconds": 5.9661,
+            "p95Milliseconds": 6.7161,
+            "p99Milliseconds": 7.8015,
+            "maxMilliseconds": 17.1235,
+            "meanMilliseconds": 5.429929333333335
+          },
+          "leaderboard": {
+            "count": 300,
+            "p50Milliseconds": 0.9998,
+            "p95Milliseconds": 1.0752,
+            "p99Milliseconds": 1.1747,
+            "maxMilliseconds": 1.5722,
+            "meanMilliseconds": 0.8800153333333329
+          },
+          "aliveByTeam": {
+            "count": 300,
+            "p50Milliseconds": 1.3288,
+            "p95Milliseconds": 1.4426,
+            "p99Milliseconds": 1.7806,
+            "maxMilliseconds": 9.3774,
+            "meanMilliseconds": 1.2295773333333335
+          },
+          "zoneInventory": {
+            "count": 300,
+            "p50Milliseconds": 3.385,
+            "p95Milliseconds": 3.7501,
+            "p99Milliseconds": 4.9894,
+            "maxMilliseconds": 8.3078,
+            "meanMilliseconds": 3.089574000000003
+          },
+          "writesApplied": 1200,
+          "reactiveChanges": 0,
+          "pollingRows": 81891,
+          "hashes": {
+            "leaderboard": "a46739e54ee2aa79a3bbd472f0563125f63136e5d3f9a9455a2430205ca052bf",
+            "aliveByTeam": "2f0095dc6ae44e5f7781f02cab0e9d013e9f847bde648bc5995914feec43f710",
+            "zoneInventory": "091c40b4da7b3668d73a35560dc3225c9f493841f0dda25a2b2e816cae16adc6"
+          },
+          "artifactPath": "datavo-polling\\repetition-1.json"
+        },
+        {
+          "engineId": "datavo-polling",
+          "repetition": 2,
+          "totalMilliseconds": 1352.2113000000018,
+          "batch": {
+            "count": 300,
+            "p50Milliseconds": 3.869,
+            "p95Milliseconds": 6.6788,
+            "p99Milliseconds": 7.3054,
+            "maxMilliseconds": 21.3132,
+            "meanMilliseconds": 4.507371000000001
+          },
+          "leaderboard": {
+            "count": 300,
+            "p50Milliseconds": 0.6491,
+            "p95Milliseconds": 1.1405,
+            "p99Milliseconds": 1.1922,
+            "maxMilliseconds": 1.3255,
+            "meanMilliseconds": 0.7272383333333333
+          },
+          "aliveByTeam": {
+            "count": 300,
+            "p50Milliseconds": 0.8834,
+            "p95Milliseconds": 1.5768,
+            "p99Milliseconds": 1.7056,
+            "maxMilliseconds": 16.0412,
+            "meanMilliseconds": 1.0306356666666667
+          },
+          "zoneInventory": {
+            "count": 300,
+            "p50Milliseconds": 2.2188,
+            "p95Milliseconds": 3.744,
+            "p99Milliseconds": 4.359,
+            "maxMilliseconds": 5.0151,
+            "meanMilliseconds": 2.5898379999999985
+          },
+          "writesApplied": 1200,
+          "reactiveChanges": 0,
+          "pollingRows": 81891,
+          "hashes": {
+            "leaderboard": "a46739e54ee2aa79a3bbd472f0563125f63136e5d3f9a9455a2430205ca052bf",
+            "aliveByTeam": "2f0095dc6ae44e5f7781f02cab0e9d013e9f847bde648bc5995914feec43f710",
+            "zoneInventory": "091c40b4da7b3668d73a35560dc3225c9f493841f0dda25a2b2e816cae16adc6"
+          },
+          "artifactPath": "datavo-polling\\repetition-2.json"
+        },
+        {
+          "engineId": "datavo-polling",
+          "repetition": 3,
+          "totalMilliseconds": 539.9461999999999,
+          "batch": {
+            "count": 300,
+            "p50Milliseconds": 1.5047,
+            "p95Milliseconds": 2.544,
+            "p99Milliseconds": 3.5544,
+            "maxMilliseconds": 3.8854,
+            "meanMilliseconds": 1.7998206666666663
+          },
+          "leaderboard": {
+            "count": 300,
+            "p50Milliseconds": 0.2543,
+            "p95Milliseconds": 0.436,
+            "p99Milliseconds": 0.5094,
+            "maxMilliseconds": 0.8604,
+            "meanMilliseconds": 0.30051433333333333
+          },
+          "aliveByTeam": {
+            "count": 300,
+            "p50Milliseconds": 0.2582,
+            "p95Milliseconds": 0.442,
+            "p99Milliseconds": 0.4653,
+            "maxMilliseconds": 0.4772,
+            "meanMilliseconds": 0.29745
+          },
+          "zoneInventory": {
+            "count": 300,
+            "p50Milliseconds": 0.8761,
+            "p95Milliseconds": 1.5317,
+            "p99Milliseconds": 2.6658,
+            "maxMilliseconds": 2.8357,
+            "meanMilliseconds": 1.0654949999999999
+          },
+          "writesApplied": 1200,
+          "reactiveChanges": 0,
+          "pollingRows": 81891,
+          "hashes": {
+            "leaderboard": "a46739e54ee2aa79a3bbd472f0563125f63136e5d3f9a9455a2430205ca052bf",
+            "aliveByTeam": "2f0095dc6ae44e5f7781f02cab0e9d013e9f847bde648bc5995914feec43f710",
+            "zoneInventory": "091c40b4da7b3668d73a35560dc3225c9f493841f0dda25a2b2e816cae16adc6"
+          },
+          "artifactPath": "datavo-polling\\repetition-3.json"
+        },
+        {
+          "engineId": "datavo-polling",
+          "repetition": 4,
+          "totalMilliseconds": 487.93679999999983,
+          "batch": {
+            "count": 300,
+            "p50Milliseconds": 1.3162,
+            "p95Milliseconds": 2.2393,
+            "p99Milliseconds": 2.6977,
+            "maxMilliseconds": 3.1677,
+            "meanMilliseconds": 1.6264559999999995
+          },
+          "leaderboard": {
+            "count": 300,
+            "p50Milliseconds": 0.2151,
+            "p95Milliseconds": 0.3695,
+            "p99Milliseconds": 0.4572,
+            "maxMilliseconds": 0.5928,
+            "meanMilliseconds": 0.2597133333333331
+          },
+          "aliveByTeam": {
+            "count": 300,
+            "p50Milliseconds": 0.2057,
+            "p95Milliseconds": 0.3693,
+            "p99Milliseconds": 0.4028,
+            "maxMilliseconds": 0.7011,
+            "meanMilliseconds": 0.25227333333333324
+          },
+          "zoneInventory": {
+            "count": 300,
+            "p50Milliseconds": 0.7882,
+            "p95Milliseconds": 1.533,
+            "p99Milliseconds": 1.8624,
+            "maxMilliseconds": 2.3123,
+            "meanMilliseconds": 0.9852566666666663
+          },
+          "writesApplied": 1200,
+          "reactiveChanges": 0,
+          "pollingRows": 81891,
+          "hashes": {
+            "leaderboard": "a46739e54ee2aa79a3bbd472f0563125f63136e5d3f9a9455a2430205ca052bf",
+            "aliveByTeam": "2f0095dc6ae44e5f7781f02cab0e9d013e9f847bde648bc5995914feec43f710",
+            "zoneInventory": "091c40b4da7b3668d73a35560dc3225c9f493841f0dda25a2b2e816cae16adc6"
+          },
+          "artifactPath": "datavo-polling\\repetition-4.json"
+        },
+        {
+          "engineId": "datavo-polling",
+          "repetition": 5,
+          "totalMilliseconds": 462.5658000000002,
+          "batch": {
+            "count": 300,
+            "p50Milliseconds": 1.2662,
+            "p95Milliseconds": 2.1699,
+            "p99Milliseconds": 2.9506,
+            "maxMilliseconds": 3.3677,
+            "meanMilliseconds": 1.5418859999999992
+          },
+          "leaderboard": {
+            "count": 300,
+            "p50Milliseconds": 0.2051,
+            "p95Milliseconds": 0.3423,
+            "p99Milliseconds": 0.3966,
+            "maxMilliseconds": 0.6469,
+            "meanMilliseconds": 0.2431246666666668
+          },
+          "aliveByTeam": {
+            "count": 300,
+            "p50Milliseconds": 0.1931,
+            "p95Milliseconds": 0.3461,
+            "p99Milliseconds": 0.3701,
+            "maxMilliseconds": 0.726,
+            "meanMilliseconds": 0.23450733333333323
+          },
+          "zoneInventory": {
+            "count": 300,
+            "p50Milliseconds": 0.7603,
+            "p95Milliseconds": 1.4651,
+            "p99Milliseconds": 2.0863,
+            "maxMilliseconds": 2.5278,
+            "meanMilliseconds": 0.9413473333333328
+          },
+          "writesApplied": 1200,
+          "reactiveChanges": 0,
+          "pollingRows": 81891,
+          "hashes": {
+            "leaderboard": "a46739e54ee2aa79a3bbd472f0563125f63136e5d3f9a9455a2430205ca052bf",
+            "aliveByTeam": "2f0095dc6ae44e5f7781f02cab0e9d013e9f847bde648bc5995914feec43f710",
+            "zoneInventory": "091c40b4da7b3668d73a35560dc3225c9f493841f0dda25a2b2e816cae16adc6"
+          },
+          "artifactPath": "datavo-polling\\repetition-5.json"
+        },
+        {
+          "engineId": "datavo-polling",
+          "repetition": 6,
+          "totalMilliseconds": 410.8346999999999,
+          "batch": {
+            "count": 300,
+            "p50Milliseconds": 1.2499,
+            "p95Milliseconds": 2.0408,
+            "p99Milliseconds": 2.3472,
+            "maxMilliseconds": 2.6367,
+            "meanMilliseconds": 1.3694489999999995
+          },
+          "leaderboard": {
+            "count": 300,
+            "p50Milliseconds": 0.2024,
+            "p95Milliseconds": 0.3194,
+            "p99Milliseconds": 0.4573,
+            "maxMilliseconds": 0.7344,
+            "meanMilliseconds": 0.22158633333333355
+          },
+          "aliveByTeam": {
+            "count": 300,
+            "p50Milliseconds": 0.1903,
+            "p95Milliseconds": 0.3228,
+            "p99Milliseconds": 0.3574,
+            "maxMilliseconds": 0.4997,
+            "meanMilliseconds": 0.20865533333333336
+          },
+          "zoneInventory": {
+            "count": 300,
+            "p50Milliseconds": 0.7458,
+            "p95Milliseconds": 1.2913,
+            "p99Milliseconds": 1.5743,
+            "maxMilliseconds": 2.0545,
+            "meanMilliseconds": 0.8332423333333339
+          },
+          "writesApplied": 1200,
+          "reactiveChanges": 0,
+          "pollingRows": 81891,
+          "hashes": {
+            "leaderboard": "a46739e54ee2aa79a3bbd472f0563125f63136e5d3f9a9455a2430205ca052bf",
+            "aliveByTeam": "2f0095dc6ae44e5f7781f02cab0e9d013e9f847bde648bc5995914feec43f710",
+            "zoneInventory": "091c40b4da7b3668d73a35560dc3225c9f493841f0dda25a2b2e816cae16adc6"
+          },
+          "artifactPath": "datavo-polling\\repetition-6.json"
+        },
+        {
+          "engineId": "datavo-polling",
+          "repetition": 7,
+          "totalMilliseconds": 437.6283999999996,
+          "batch": {
+            "count": 300,
+            "p50Milliseconds": 1.2531,
+            "p95Milliseconds": 2.0938,
+            "p99Milliseconds": 2.4498,
+            "maxMilliseconds": 3.3427,
+            "meanMilliseconds": 1.458761333333333
+          },
+          "leaderboard": {
+            "count": 300,
+            "p50Milliseconds": 0.2041,
+            "p95Milliseconds": 0.3381,
+            "p99Milliseconds": 0.3967,
+            "maxMilliseconds": 0.7815,
+            "meanMilliseconds": 0.23498533333333327
+          },
+          "aliveByTeam": {
+            "count": 300,
+            "p50Milliseconds": 0.1919,
+            "p95Milliseconds": 0.3303,
+            "p99Milliseconds": 0.3747,
+            "maxMilliseconds": 0.4907,
+            "meanMilliseconds": 0.22465766666666667
+          },
+          "zoneInventory": {
+            "count": 300,
+            "p50Milliseconds": 0.7521,
+            "p95Milliseconds": 1.3254,
+            "p99Milliseconds": 1.638,
+            "maxMilliseconds": 2.5135,
+            "meanMilliseconds": 0.886008333333333
+          },
+          "writesApplied": 1200,
+          "reactiveChanges": 0,
+          "pollingRows": 81891,
+          "hashes": {
+            "leaderboard": "a46739e54ee2aa79a3bbd472f0563125f63136e5d3f9a9455a2430205ca052bf",
+            "aliveByTeam": "2f0095dc6ae44e5f7781f02cab0e9d013e9f847bde648bc5995914feec43f710",
+            "zoneInventory": "091c40b4da7b3668d73a35560dc3225c9f493841f0dda25a2b2e816cae16adc6"
+          },
+          "artifactPath": "datavo-polling\\repetition-7.json"
+        }
+      ],
+      "canonicalHashes": {
+        "leaderboard": "a46739e54ee2aa79a3bbd472f0563125f63136e5d3f9a9455a2430205ca052bf",
+        "aliveByTeam": "2f0095dc6ae44e5f7781f02cab0e9d013e9f847bde648bc5995914feec43f710",
+        "zoneInventory": "091c40b4da7b3668d73a35560dc3225c9f493841f0dda25a2b2e816cae16adc6"
+      },
+      "medianTotalMilliseconds": 487.93679999999983
+    },
+    {
+      "engineId": "sqlite",
+      "architecture": "EmbeddedPollingRecompute",
+      "runs": [
+        {
+          "engineId": "sqlite",
+          "repetition": 1,
+          "totalMilliseconds": 294.37580000000014,
+          "batch": {
+            "count": 300,
+            "p50Milliseconds": 0.8195,
+            "p95Milliseconds": 1.4484,
+            "p99Milliseconds": 1.5263,
+            "maxMilliseconds": 1.5568,
+            "meanMilliseconds": 0.981252666666667
+          },
+          "leaderboard": {
+            "count": 300,
+            "p50Milliseconds": 0.1306,
+            "p95Milliseconds": 0.2618,
+            "p99Milliseconds": 0.2792,
+            "maxMilliseconds": 0.389,
+            "meanMilliseconds": 0.1680080000000001
+          },
+          "aliveByTeam": {
+            "count": 300,
+            "p50Milliseconds": 0.2655,
+            "p95Milliseconds": 0.4822,
+            "p99Milliseconds": 0.5139,
+            "maxMilliseconds": 0.553,
+            "meanMilliseconds": 0.3329543333333334
+          },
+          "zoneInventory": {
+            "count": 300,
+            "p50Milliseconds": 0.3341,
+            "p95Milliseconds": 0.5931,
+            "p99Milliseconds": 0.6251,
+            "maxMilliseconds": 0.6562,
+            "meanMilliseconds": 0.37872599999999995
+          },
+          "writesApplied": 1200,
+          "reactiveChanges": 0,
+          "pollingRows": 81891,
+          "hashes": {
+            "leaderboard": "a46739e54ee2aa79a3bbd472f0563125f63136e5d3f9a9455a2430205ca052bf",
+            "aliveByTeam": "2f0095dc6ae44e5f7781f02cab0e9d013e9f847bde648bc5995914feec43f710",
+            "zoneInventory": "091c40b4da7b3668d73a35560dc3225c9f493841f0dda25a2b2e816cae16adc6"
+          },
+          "artifactPath": "sqlite\\repetition-1.json"
+        },
+        {
+          "engineId": "sqlite",
+          "repetition": 2,
+          "totalMilliseconds": 218.3862000000001,
+          "batch": {
+            "count": 300,
+            "p50Milliseconds": 0.6689,
+            "p95Milliseconds": 1.1497,
+            "p99Milliseconds": 1.213,
+            "maxMilliseconds": 1.323,
+            "meanMilliseconds": 0.7279539999999998
+          },
+          "leaderboard": {
+            "count": 300,
+            "p50Milliseconds": 0.1146,
+            "p95Milliseconds": 0.2162,
+            "p99Milliseconds": 0.2258,
+            "maxMilliseconds": 0.2573,
+            "meanMilliseconds": 0.1289609999999999
+          },
+          "aliveByTeam": {
+            "count": 300,
+            "p50Milliseconds": 0.2458,
+            "p95Milliseconds": 0.4243,
+            "p99Milliseconds": 0.4609,
+            "maxMilliseconds": 0.4687,
+            "meanMilliseconds": 0.27124433333333314
+          },
+          "zoneInventory": {
+            "count": 300,
+            "p50Milliseconds": 0.2454,
+            "p95Milliseconds": 0.4207,
+            "p99Milliseconds": 0.457,
+            "maxMilliseconds": 0.499,
+            "meanMilliseconds": 0.27038566666666647
+          },
+          "writesApplied": 1200,
+          "reactiveChanges": 0,
+          "pollingRows": 81891,
+          "hashes": {
+            "leaderboard": "a46739e54ee2aa79a3bbd472f0563125f63136e5d3f9a9455a2430205ca052bf",
+            "aliveByTeam": "2f0095dc6ae44e5f7781f02cab0e9d013e9f847bde648bc5995914feec43f710",
+            "zoneInventory": "091c40b4da7b3668d73a35560dc3225c9f493841f0dda25a2b2e816cae16adc6"
+          },
+          "artifactPath": "sqlite\\repetition-2.json"
+        },
+        {
+          "engineId": "sqlite",
+          "repetition": 3,
+          "totalMilliseconds": 226.01760000000004,
+          "batch": {
+            "count": 300,
+            "p50Milliseconds": 0.6501,
+            "p95Milliseconds": 1.1934,
+            "p99Milliseconds": 1.2253,
+            "maxMilliseconds": 1.2795,
+            "meanMilliseconds": 0.7533920000000006
+          },
+          "leaderboard": {
+            "count": 300,
+            "p50Milliseconds": 0.1122,
+            "p95Milliseconds": 0.2146,
+            "p99Milliseconds": 0.2428,
+            "maxMilliseconds": 0.2573,
+            "meanMilliseconds": 0.13453199999999996
+          },
+          "aliveByTeam": {
+            "count": 300,
+            "p50Milliseconds": 0.2443,
+            "p95Milliseconds": 0.4465,
+            "p99Milliseconds": 0.4763,
+            "maxMilliseconds": 0.5351,
+            "meanMilliseconds": 0.28770766666666675
+          },
+          "zoneInventory": {
+            "count": 300,
+            "p50Milliseconds": 0.229,
+            "p95Milliseconds": 0.4431,
+            "p99Milliseconds": 0.4734,
+            "maxMilliseconds": 0.4786,
+            "meanMilliseconds": 0.2734856666666667
+          },
+          "writesApplied": 1200,
+          "reactiveChanges": 0,
+          "pollingRows": 81891,
+          "hashes": {
+            "leaderboard": "a46739e54ee2aa79a3bbd472f0563125f63136e5d3f9a9455a2430205ca052bf",
+            "aliveByTeam": "2f0095dc6ae44e5f7781f02cab0e9d013e9f847bde648bc5995914feec43f710",
+            "zoneInventory": "091c40b4da7b3668d73a35560dc3225c9f493841f0dda25a2b2e816cae16adc6"
+          },
+          "artifactPath": "sqlite\\repetition-3.json"
+        },
+        {
+          "engineId": "sqlite",
+          "repetition": 4,
+          "totalMilliseconds": 203.56139999999996,
+          "batch": {
+            "count": 300,
+            "p50Milliseconds": 0.6375,
+            "p95Milliseconds": 1.1045,
+            "p99Milliseconds": 1.184,
+            "maxMilliseconds": 1.2121,
+            "meanMilliseconds": 0.678538
+          },
+          "leaderboard": {
+            "count": 300,
+            "p50Milliseconds": 0.1113,
+            "p95Milliseconds": 0.203,
+            "p99Milliseconds": 0.2211,
+            "maxMilliseconds": 0.2593,
+            "meanMilliseconds": 0.121947
+          },
+          "aliveByTeam": {
+            "count": 300,
+            "p50Milliseconds": 0.2429,
+            "p95Milliseconds": 0.4134,
+            "p99Milliseconds": 0.4495,
+            "maxMilliseconds": 0.4689,
+            "meanMilliseconds": 0.25952966666666655
+          },
+          "zoneInventory": {
+            "count": 300,
+            "p50Milliseconds": 0.228,
+            "p95Milliseconds": 0.4068,
+            "p99Milliseconds": 0.4513,
+            "maxMilliseconds": 0.4656,
+            "meanMilliseconds": 0.24540266666666657
+          },
+          "writesApplied": 1200,
+          "reactiveChanges": 0,
+          "pollingRows": 81891,
+          "hashes": {
+            "leaderboard": "a46739e54ee2aa79a3bbd472f0563125f63136e5d3f9a9455a2430205ca052bf",
+            "aliveByTeam": "2f0095dc6ae44e5f7781f02cab0e9d013e9f847bde648bc5995914feec43f710",
+            "zoneInventory": "091c40b4da7b3668d73a35560dc3225c9f493841f0dda25a2b2e816cae16adc6"
+          },
+          "artifactPath": "sqlite\\repetition-4.json"
+        },
+        {
+          "engineId": "sqlite",
+          "repetition": 5,
+          "totalMilliseconds": 199.66479999999993,
+          "batch": {
+            "count": 300,
+            "p50Milliseconds": 0.6448,
+            "p95Milliseconds": 0.749,
+            "p99Milliseconds": 1.1579,
+            "maxMilliseconds": 1.1903,
+            "meanMilliseconds": 0.665549333333333
+          },
+          "leaderboard": {
+            "count": 300,
+            "p50Milliseconds": 0.1119,
+            "p95Milliseconds": 0.1576,
+            "p99Milliseconds": 0.2164,
+            "maxMilliseconds": 0.2546,
+            "meanMilliseconds": 0.11882433333333337
+          },
+          "aliveByTeam": {
+            "count": 300,
+            "p50Milliseconds": 0.244,
+            "p95Milliseconds": 0.3201,
+            "p99Milliseconds": 0.4247,
+            "maxMilliseconds": 0.4538,
+            "meanMilliseconds": 0.2565866666666665
+          },
+          "zoneInventory": {
+            "count": 300,
+            "p50Milliseconds": 0.2291,
+            "p95Milliseconds": 0.2797,
+            "p99Milliseconds": 0.4223,
+            "maxMilliseconds": 0.4536,
+            "meanMilliseconds": 0.23915566666666657
+          },
+          "writesApplied": 1200,
+          "reactiveChanges": 0,
+          "pollingRows": 81891,
+          "hashes": {
+            "leaderboard": "a46739e54ee2aa79a3bbd472f0563125f63136e5d3f9a9455a2430205ca052bf",
+            "aliveByTeam": "2f0095dc6ae44e5f7781f02cab0e9d013e9f847bde648bc5995914feec43f710",
+            "zoneInventory": "091c40b4da7b3668d73a35560dc3225c9f493841f0dda25a2b2e816cae16adc6"
+          },
+          "artifactPath": "sqlite\\repetition-5.json"
+        },
+        {
+          "engineId": "sqlite",
+          "repetition": 6,
+          "totalMilliseconds": 214.81670000000003,
+          "batch": {
+            "count": 300,
+            "p50Milliseconds": 0.6456,
+            "p95Milliseconds": 1.1753,
+            "p99Milliseconds": 1.2182,
+            "maxMilliseconds": 1.2726,
+            "meanMilliseconds": 0.7160556666666668
+          },
+          "leaderboard": {
+            "count": 300,
+            "p50Milliseconds": 0.1122,
+            "p95Milliseconds": 0.2157,
+            "p99Milliseconds": 0.2617,
+            "maxMilliseconds": 0.2891,
+            "meanMilliseconds": 0.129322
+          },
+          "aliveByTeam": {
+            "count": 300,
+            "p50Milliseconds": 0.2437,
+            "p95Milliseconds": 0.428,
+            "p99Milliseconds": 0.4672,
+            "maxMilliseconds": 0.5889,
+            "meanMilliseconds": 0.27292566666666646
+          },
+          "zoneInventory": {
+            "count": 300,
+            "p50Milliseconds": 0.2298,
+            "p95Milliseconds": 0.4303,
+            "p99Milliseconds": 0.4637,
+            "maxMilliseconds": 0.5353,
+            "meanMilliseconds": 0.26010799999999984
+          },
+          "writesApplied": 1200,
+          "reactiveChanges": 0,
+          "pollingRows": 81891,
+          "hashes": {
+            "leaderboard": "a46739e54ee2aa79a3bbd472f0563125f63136e5d3f9a9455a2430205ca052bf",
+            "aliveByTeam": "2f0095dc6ae44e5f7781f02cab0e9d013e9f847bde648bc5995914feec43f710",
+            "zoneInventory": "091c40b4da7b3668d73a35560dc3225c9f493841f0dda25a2b2e816cae16adc6"
+          },
+          "artifactPath": "sqlite\\repetition-6.json"
+        },
+        {
+          "engineId": "sqlite",
+          "repetition": 7,
+          "totalMilliseconds": 201.40370000000001,
+          "batch": {
+            "count": 300,
+            "p50Milliseconds": 0.6341,
+            "p95Milliseconds": 1.0932,
+            "p99Milliseconds": 1.188,
+            "maxMilliseconds": 1.2245,
+            "meanMilliseconds": 0.671345666666667
+          },
+          "leaderboard": {
+            "count": 300,
+            "p50Milliseconds": 0.1109,
+            "p95Milliseconds": 0.2028,
+            "p99Milliseconds": 0.2167,
+            "maxMilliseconds": 0.2609,
+            "meanMilliseconds": 0.12007133333333331
+          },
+          "aliveByTeam": {
+            "count": 300,
+            "p50Milliseconds": 0.2423,
+            "p95Milliseconds": 0.4114,
+            "p99Milliseconds": 0.4553,
+            "maxMilliseconds": 0.4659,
+            "meanMilliseconds": 0.2579149999999999
+          },
+          "zoneInventory": {
+            "count": 300,
+            "p50Milliseconds": 0.2285,
+            "p95Milliseconds": 0.4114,
+            "p99Milliseconds": 0.4311,
+            "maxMilliseconds": 0.469,
+            "meanMilliseconds": 0.24362933333333325
+          },
+          "writesApplied": 1200,
+          "reactiveChanges": 0,
+          "pollingRows": 81891,
+          "hashes": {
+            "leaderboard": "a46739e54ee2aa79a3bbd472f0563125f63136e5d3f9a9455a2430205ca052bf",
+            "aliveByTeam": "2f0095dc6ae44e5f7781f02cab0e9d013e9f847bde648bc5995914feec43f710",
+            "zoneInventory": "091c40b4da7b3668d73a35560dc3225c9f493841f0dda25a2b2e816cae16adc6"
+          },
+          "artifactPath": "sqlite\\repetition-7.json"
+        }
+      ],
+      "canonicalHashes": {
+        "leaderboard": "a46739e54ee2aa79a3bbd472f0563125f63136e5d3f9a9455a2430205ca052bf",
+        "aliveByTeam": "2f0095dc6ae44e5f7781f02cab0e9d013e9f847bde648bc5995914feec43f710",
+        "zoneInventory": "091c40b4da7b3668d73a35560dc3225c9f493841f0dda25a2b2e816cae16adc6"
+      },
+      "medianTotalMilliseconds": 214.81670000000003
+    },
+    {
+      "engineId": "duckdb",
+      "architecture": "EmbeddedPollingRecompute",
+      "runs": [
+        {
+          "engineId": "duckdb",
+          "repetition": 1,
+          "totalMilliseconds": 2790.297299999997,
+          "batch": {
+            "count": 300,
+            "p50Milliseconds": 9.2215,
+            "p95Milliseconds": 10.1529,
+            "p99Milliseconds": 11.0109,
+            "maxMilliseconds": 11.3866,
+            "meanMilliseconds": 9.300990999999998
+          },
+          "leaderboard": {
+            "count": 300,
+            "p50Milliseconds": 0.6273,
+            "p95Milliseconds": 0.7422,
+            "p99Milliseconds": 0.8159,
+            "maxMilliseconds": 0.8873,
+            "meanMilliseconds": 0.6352176666666671
+          },
+          "aliveByTeam": {
+            "count": 300,
+            "p50Milliseconds": 1.1506,
+            "p95Milliseconds": 1.3519,
+            "p99Milliseconds": 1.4483,
+            "maxMilliseconds": 1.733,
+            "meanMilliseconds": 1.1605899999999996
+          },
+          "zoneInventory": {
+            "count": 300,
+            "p50Milliseconds": 1.3549,
+            "p95Milliseconds": 1.6113,
+            "p99Milliseconds": 1.7444,
+            "maxMilliseconds": 1.8707,
+            "meanMilliseconds": 1.388438333333334
+          },
+          "writesApplied": 1200,
+          "reactiveChanges": 0,
+          "pollingRows": 81891,
+          "hashes": {
+            "leaderboard": "a46739e54ee2aa79a3bbd472f0563125f63136e5d3f9a9455a2430205ca052bf",
+            "aliveByTeam": "2f0095dc6ae44e5f7781f02cab0e9d013e9f847bde648bc5995914feec43f710",
+            "zoneInventory": "091c40b4da7b3668d73a35560dc3225c9f493841f0dda25a2b2e816cae16adc6"
+          },
+          "artifactPath": "duckdb\\repetition-1.json"
+        },
+        {
+          "engineId": "duckdb",
+          "repetition": 2,
+          "totalMilliseconds": 2589.9312000000014,
+          "batch": {
+            "count": 300,
+            "p50Milliseconds": 8.5514,
+            "p95Milliseconds": 9.1455,
+            "p99Milliseconds": 9.6658,
+            "maxMilliseconds": 10.2858,
+            "meanMilliseconds": 8.633104
+          },
+          "leaderboard": {
+            "count": 300,
+            "p50Milliseconds": 0.5791,
+            "p95Milliseconds": 0.6492,
+            "p99Milliseconds": 0.681,
+            "maxMilliseconds": 0.7947,
+            "meanMilliseconds": 0.5860366666666669
+          },
+          "aliveByTeam": {
+            "count": 300,
+            "p50Milliseconds": 1.0321,
+            "p95Milliseconds": 1.1971,
+            "p99Milliseconds": 1.2756,
+            "maxMilliseconds": 1.3811,
+            "meanMilliseconds": 1.0486539999999998
+          },
+          "zoneInventory": {
+            "count": 300,
+            "p50Milliseconds": 1.2447,
+            "p95Milliseconds": 1.4751,
+            "p99Milliseconds": 1.5522,
+            "maxMilliseconds": 1.7326,
+            "meanMilliseconds": 1.263861333333333
+          },
+          "writesApplied": 1200,
+          "reactiveChanges": 0,
+          "pollingRows": 81891,
+          "hashes": {
+            "leaderboard": "a46739e54ee2aa79a3bbd472f0563125f63136e5d3f9a9455a2430205ca052bf",
+            "aliveByTeam": "2f0095dc6ae44e5f7781f02cab0e9d013e9f847bde648bc5995914feec43f710",
+            "zoneInventory": "091c40b4da7b3668d73a35560dc3225c9f493841f0dda25a2b2e816cae16adc6"
+          },
+          "artifactPath": "duckdb\\repetition-2.json"
+        },
+        {
+          "engineId": "duckdb",
+          "repetition": 3,
+          "totalMilliseconds": 2638.443999999999,
+          "batch": {
+            "count": 300,
+            "p50Milliseconds": 8.6561,
+            "p95Milliseconds": 9.4616,
+            "p99Milliseconds": 11.3967,
+            "maxMilliseconds": 12.7218,
+            "meanMilliseconds": 8.794813333333334
+          },
+          "leaderboard": {
+            "count": 300,
+            "p50Milliseconds": 0.5808,
+            "p95Milliseconds": 0.6724,
+            "p99Milliseconds": 0.8107,
+            "maxMilliseconds": 0.8504,
+            "meanMilliseconds": 0.5915843333333333
+          },
+          "aliveByTeam": {
+            "count": 300,
+            "p50Milliseconds": 1.0188,
+            "p95Milliseconds": 1.2301,
+            "p99Milliseconds": 1.4597,
+            "maxMilliseconds": 1.6854,
+            "meanMilliseconds": 1.044426666666666
+          },
+          "zoneInventory": {
+            "count": 300,
+            "p50Milliseconds": 1.2433,
+            "p95Milliseconds": 1.4749,
+            "p99Milliseconds": 1.661,
+            "maxMilliseconds": 2.002,
+            "meanMilliseconds": 1.2702853333333328
+          },
+          "writesApplied": 1200,
+          "reactiveChanges": 0,
+          "pollingRows": 81891,
+          "hashes": {
+            "leaderboard": "a46739e54ee2aa79a3bbd472f0563125f63136e5d3f9a9455a2430205ca052bf",
+            "aliveByTeam": "2f0095dc6ae44e5f7781f02cab0e9d013e9f847bde648bc5995914feec43f710",
+            "zoneInventory": "091c40b4da7b3668d73a35560dc3225c9f493841f0dda25a2b2e816cae16adc6"
+          },
+          "artifactPath": "duckdb\\repetition-3.json"
+        },
+        {
+          "engineId": "duckdb",
+          "repetition": 4,
+          "totalMilliseconds": 2628.196399999999,
+          "batch": {
+            "count": 300,
+            "p50Milliseconds": 8.6225,
+            "p95Milliseconds": 9.2993,
+            "p99Milliseconds": 9.8866,
+            "maxMilliseconds": 25.6095,
+            "meanMilliseconds": 8.760654666666664
+          },
+          "leaderboard": {
+            "count": 300,
+            "p50Milliseconds": 0.6,
+            "p95Milliseconds": 0.6888,
+            "p99Milliseconds": 0.7778,
+            "maxMilliseconds": 2.9219,
+            "meanMilliseconds": 0.6108993333333337
+          },
+          "aliveByTeam": {
+            "count": 300,
+            "p50Milliseconds": 1.0174,
+            "p95Milliseconds": 1.1889,
+            "p99Milliseconds": 1.473,
+            "maxMilliseconds": 1.6503,
+            "meanMilliseconds": 1.0405973333333334
+          },
+          "zoneInventory": {
+            "count": 300,
+            "p50Milliseconds": 1.2488,
+            "p95Milliseconds": 1.4342,
+            "p99Milliseconds": 1.7094,
+            "maxMilliseconds": 16.0565,
+            "meanMilliseconds": 1.318364666666668
+          },
+          "writesApplied": 1200,
+          "reactiveChanges": 0,
+          "pollingRows": 81891,
+          "hashes": {
+            "leaderboard": "a46739e54ee2aa79a3bbd472f0563125f63136e5d3f9a9455a2430205ca052bf",
+            "aliveByTeam": "2f0095dc6ae44e5f7781f02cab0e9d013e9f847bde648bc5995914feec43f710",
+            "zoneInventory": "091c40b4da7b3668d73a35560dc3225c9f493841f0dda25a2b2e816cae16adc6"
+          },
+          "artifactPath": "duckdb\\repetition-4.json"
+        },
+        {
+          "engineId": "duckdb",
+          "repetition": 5,
+          "totalMilliseconds": 2600.282700000001,
+          "batch": {
+            "count": 300,
+            "p50Milliseconds": 8.6195,
+            "p95Milliseconds": 9.149,
+            "p99Milliseconds": 9.6712,
+            "maxMilliseconds": 10.0352,
+            "meanMilliseconds": 8.667608999999997
+          },
+          "leaderboard": {
+            "count": 300,
+            "p50Milliseconds": 0.5683,
+            "p95Milliseconds": 0.6398,
+            "p99Milliseconds": 0.67,
+            "maxMilliseconds": 0.7936,
+            "meanMilliseconds": 0.578331666666667
+          },
+          "aliveByTeam": {
+            "count": 300,
+            "p50Milliseconds": 1.0084,
+            "p95Milliseconds": 1.1129,
+            "p99Milliseconds": 1.1822,
+            "maxMilliseconds": 1.302,
+            "meanMilliseconds": 1.0141239999999998
+          },
+          "zoneInventory": {
+            "count": 300,
+            "p50Milliseconds": 1.2428,
+            "p95Milliseconds": 1.3497,
+            "p99Milliseconds": 1.4756,
+            "maxMilliseconds": 1.6808,
+            "meanMilliseconds": 1.2543229999999992
+          },
+          "writesApplied": 1200,
+          "reactiveChanges": 0,
+          "pollingRows": 81891,
+          "hashes": {
+            "leaderboard": "a46739e54ee2aa79a3bbd472f0563125f63136e5d3f9a9455a2430205ca052bf",
+            "aliveByTeam": "2f0095dc6ae44e5f7781f02cab0e9d013e9f847bde648bc5995914feec43f710",
+            "zoneInventory": "091c40b4da7b3668d73a35560dc3225c9f493841f0dda25a2b2e816cae16adc6"
+          },
+          "artifactPath": "duckdb\\repetition-5.json"
+        },
+        {
+          "engineId": "duckdb",
+          "repetition": 6,
+          "totalMilliseconds": 2538.9485000000027,
+          "batch": {
+            "count": 300,
+            "p50Milliseconds": 8.4161,
+            "p95Milliseconds": 8.8457,
+            "p99Milliseconds": 9.5015,
+            "maxMilliseconds": 10.1053,
+            "meanMilliseconds": 8.463161666666668
+          },
+          "leaderboard": {
+            "count": 300,
+            "p50Milliseconds": 0.5664,
+            "p95Milliseconds": 0.6349,
+            "p99Milliseconds": 0.6965,
+            "maxMilliseconds": 0.811,
+            "meanMilliseconds": 0.5742263333333334
+          },
+          "aliveByTeam": {
+            "count": 300,
+            "p50Milliseconds": 0.9889,
+            "p95Milliseconds": 1.1089,
+            "p99Milliseconds": 1.2022,
+            "maxMilliseconds": 1.3527,
+            "meanMilliseconds": 0.9981136666666669
+          },
+          "zoneInventory": {
+            "count": 300,
+            "p50Milliseconds": 1.2188,
+            "p95Milliseconds": 1.3199,
+            "p99Milliseconds": 1.5282,
+            "maxMilliseconds": 1.6778,
+            "meanMilliseconds": 1.2322923333333333
+          },
+          "writesApplied": 1200,
+          "reactiveChanges": 0,
+          "pollingRows": 81891,
+          "hashes": {
+            "leaderboard": "a46739e54ee2aa79a3bbd472f0563125f63136e5d3f9a9455a2430205ca052bf",
+            "aliveByTeam": "2f0095dc6ae44e5f7781f02cab0e9d013e9f847bde648bc5995914feec43f710",
+            "zoneInventory": "091c40b4da7b3668d73a35560dc3225c9f493841f0dda25a2b2e816cae16adc6"
+          },
+          "artifactPath": "duckdb\\repetition-6.json"
+        },
+        {
+          "engineId": "duckdb",
+          "repetition": 7,
+          "totalMilliseconds": 2627.489400000001,
+          "batch": {
+            "count": 300,
+            "p50Milliseconds": 8.6749,
+            "p95Milliseconds": 9.5115,
+            "p99Milliseconds": 10.1856,
+            "maxMilliseconds": 11.0392,
+            "meanMilliseconds": 8.758298000000003
+          },
+          "leaderboard": {
+            "count": 300,
+            "p50Milliseconds": 0.5817,
+            "p95Milliseconds": 0.6642,
+            "p99Milliseconds": 0.7868,
+            "maxMilliseconds": 1.9201,
+            "meanMilliseconds": 0.5938080000000006
+          },
+          "aliveByTeam": {
+            "count": 300,
+            "p50Milliseconds": 1.0056,
+            "p95Milliseconds": 1.115,
+            "p99Milliseconds": 1.207,
+            "maxMilliseconds": 1.3926,
+            "meanMilliseconds": 1.0133163333333335
+          },
+          "zoneInventory": {
+            "count": 300,
+            "p50Milliseconds": 1.2623,
+            "p95Milliseconds": 1.3986,
+            "p99Milliseconds": 1.467,
+            "maxMilliseconds": 1.7396,
+            "meanMilliseconds": 1.2748693333333334
+          },
+          "writesApplied": 1200,
+          "reactiveChanges": 0,
+          "pollingRows": 81891,
+          "hashes": {
+            "leaderboard": "a46739e54ee2aa79a3bbd472f0563125f63136e5d3f9a9455a2430205ca052bf",
+            "aliveByTeam": "2f0095dc6ae44e5f7781f02cab0e9d013e9f847bde648bc5995914feec43f710",
+            "zoneInventory": "091c40b4da7b3668d73a35560dc3225c9f493841f0dda25a2b2e816cae16adc6"
+          },
+          "artifactPath": "duckdb\\repetition-7.json"
+        }
+      ],
+      "canonicalHashes": {
+        "leaderboard": "a46739e54ee2aa79a3bbd472f0563125f63136e5d3f9a9455a2430205ca052bf",
+        "aliveByTeam": "2f0095dc6ae44e5f7781f02cab0e9d013e9f847bde648bc5995914feec43f710",
+        "zoneInventory": "091c40b4da7b3668d73a35560dc3225c9f493841f0dda25a2b2e816cae16adc6"
+      },
+      "medianTotalMilliseconds": 2627.489400000001
+    }
+  ]
+}

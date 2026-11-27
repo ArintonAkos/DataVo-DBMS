@@ -1,0 +1,60 @@
+﻿{
+  "seed": 20260721,
+  "profile": {
+    "id": "gameplay",
+    "seed": 20260721,
+    "logicalNpcCount": 1000,
+    "mutationsPerBatch": 4,
+    "warmupBatches": 30,
+    "measuredBatches": 300,
+    "simulatedCadenceHz": 10
+  },
+  "engine": "sqlite",
+  "architecture": "EmbeddedPollingRecompute",
+  "schemaQueryRevision": "arena-live-views-v1",
+  "totalMilliseconds": 80.85033900000005,
+  "batch": {
+    "count": 300,
+    "p50Milliseconds": 0.266917,
+    "p95Milliseconds": 0.277625,
+    "p99Milliseconds": 0.318916,
+    "maxMilliseconds": 0.539292,
+    "meanMilliseconds": 0.2695011299999997
+  },
+  "leaderboard": {
+    "count": 300,
+    "p50Milliseconds": 0.043542,
+    "p95Milliseconds": 0.046292,
+    "p99Milliseconds": 0.051208,
+    "maxMilliseconds": 0.056208,
+    "meanMilliseconds": 0.04391561333333327
+  },
+  "aliveByTeam": {
+    "count": 300,
+    "p50Milliseconds": 0.105541,
+    "p95Milliseconds": 0.110583,
+    "p99Milliseconds": 0.124666,
+    "maxMilliseconds": 0.128458,
+    "meanMilliseconds": 0.10620676000000012
+  },
+  "zoneInventory": {
+    "count": 300,
+    "p50Milliseconds": 0.10275,
+    "p95Milliseconds": 0.109875,
+    "p99Milliseconds": 0.123292,
+    "maxMilliseconds": 0.375083,
+    "meanMilliseconds": 0.10438377333333333
+  },
+  "writesApplied": 1200,
+  "reactiveChanges": 0,
+  "pollingRows": 81891,
+  "hashes": {
+    "leaderboard": "a46739e54ee2aa79a3bbd472f0563125f63136e5d3f9a9455a2430205ca052bf",
+    "aliveByTeam": "2f0095dc6ae44e5f7781f02cab0e9d013e9f847bde648bc5995914feec43f710",
+    "zoneInventory": "091c40b4da7b3668d73a35560dc3225c9f493841f0dda25a2b2e816cae16adc6"
+  },
+  "operatingSystem": "macOS 26.3.0",
+  "cpu": "Arm64; 12 logical processors",
+  "dotNetVersion": ".NET 10.0.3",
+  "success": true
+}

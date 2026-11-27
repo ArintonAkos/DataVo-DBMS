@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang='en'>
+<head>
+<meta charset='utf-8' />
+<title>DataVo.Benchmarks.OutOfCoreAggregateBenchmarks-20261127-151933</title>
+
+<style type="text/css">
+	table { border-collapse: collapse; display: block; width: 100%; overflow: auto; }
+	td, th { padding: 6px 13px; border: 1px solid #ddd; text-align: right; }
+	tr { background-color: #fff; border-top: 1px solid #ccc; }
+	tr:nth-child(even) { background: #f8f8f8; }
+</style>
+</head>
+<body>
+<pre><code>
+BenchmarkDotNet v0.15.8, Linux Ubuntu 26.04.1 LTS (Resolute Raccoon)
+AMD EPYC 9V45 4.17GHz, 1 CPU, 4 logical and 2 physical cores
+.NET SDK 11.0.100
+  [Host]     : .NET 10.0.15 (10.0.15, 10.0.1526.53008), X64 RyuJIT x86-64-v4
+  DefaultJob : .NET 10.0.15 (10.0.15, 10.0.1526.53008), X64 RyuJIT x86-64-v4
+</code></pre>
+<pre><code></code></pre>
+
+<table>
+<thead><tr><th>Method</th><th>Categories</th><th>Rows</th><th>Placement</th><th>Mean       </th><th>Error   </th><th>StdDev  </th><th>Median     </th><th>Gen0</th><th>Allocated</th>
+</tr>
+</thead><tbody><tr><td>Count</td><td>Count</td><td>1000000</td><td>Memory</td><td>55,591.6628 ns</td><td>594.3821 ns</td><td>496.3360 ns</td><td>55,581.7761 ns</td><td>-</td><td>-</td>
+</tr><tr><td>Count</td><td>Count</td><td>1000000</td><td>Files</td><td>55,339.2823 ns</td><td>921.2684 ns</td><td>816.6805 ns</td><td>55,142.4125 ns</td><td>-</td><td>-</td>
+</tr><tr><td>Max</td><td>Max</td><td>1000000</td><td>Memory</td><td>216,960.3430 ns</td><td>4,329.3672 ns</td><td>5,926.0872 ns</td><td>214,753.1909 ns</td><td>-</td><td>-</td>
+</tr><tr><td>Max</td><td>Max</td><td>1000000</td><td>Files</td><td>203,808.3457 ns</td><td>2,524.5223 ns</td><td>2,361.4397 ns</td><td>203,322.6228 ns</td><td>-</td><td>-</td>
+</tr><tr><td>Min</td><td>Min</td><td>1000000</td><td>Memory</td><td>139,896.1433 ns</td><td>831.8518 ns</td><td>778.1147 ns</td><td>139,850.1635 ns</td><td>-</td><td>-</td>
+</tr><tr><td>Min</td><td>Min</td><td>1000000</td><td>Files</td><td>135,783.5827 ns</td><td>911.4684 ns</td><td>761.1174 ns</td><td>135,768.8635 ns</td><td>-</td><td>-</td>
+</tr><tr><td>OpenAndSum</td><td>OpenAndSum</td><td>1000000</td><td>Memory</td><td>0.0249 ns</td><td>0.0186 ns</td><td>0.0174 ns</td><td>0.0176 ns</td><td>-</td><td>-</td>
+</tr><tr><td>OpenAndSum</td><td>OpenAndSum</td><td>1000000</td><td>Files</td><td>5,190,842.0532 ns</td><td>99,962.3540 ns</td><td>98,176.3978 ns</td><td>5,211,338.2031 ns</td><td>7.8125</td><td>307353 B</td>
+</tr><tr><td>Sum</td><td>Sum</td><td>1000000</td><td>Memory</td><td>145,046.1731 ns</td><td>2,151.6310 ns</td><td>1,907.3649 ns</td><td>144,983.7177 ns</td><td>-</td><td>-</td>
+</tr><tr><td>Sum</td><td>Sum</td><td>1000000</td><td>Files</td><td>144,895.3076 ns</td><td>2,589.6641 ns</td><td>2,295.6698 ns</td><td>144,101.6914 ns</td><td>-</td><td>-</td>
+</tr></tbody></table>
+</body>
+</html>

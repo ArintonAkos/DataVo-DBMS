@@ -1,0 +1,60 @@
+﻿{
+  "seed": 20260721,
+  "profile": {
+    "id": "ivm-stress",
+    "seed": 20260721,
+    "logicalNpcCount": 10000,
+    "mutationsPerBatch": 24,
+    "warmupBatches": 120,
+    "measuredBatches": 1200,
+    "simulatedCadenceHz": 60
+  },
+  "engine": "datavo-reactive",
+  "architecture": "EmbeddedReactiveIvm",
+  "schemaQueryRevision": "arena-live-views-v1",
+  "totalMilliseconds": 3197.165025,
+  "batch": {
+    "count": 1200,
+    "p50Milliseconds": 1.465202,
+    "p95Milliseconds": 7.073005,
+    "p99Milliseconds": 14.208651,
+    "maxMilliseconds": 21.963982,
+    "meanMilliseconds": 2.664304187499998
+  },
+  "leaderboard": {
+    "count": 1200,
+    "p50Milliseconds": 0.003144,
+    "p95Milliseconds": 0.009253,
+    "p99Milliseconds": 0.015193,
+    "maxMilliseconds": 0.027791,
+    "meanMilliseconds": 0.004244270000000005
+  },
+  "aliveByTeam": {
+    "count": 1200,
+    "p50Milliseconds": 0.001402,
+    "p95Milliseconds": 0.005038,
+    "p99Milliseconds": 0.008813,
+    "maxMilliseconds": 0.03364,
+    "meanMilliseconds": 0.0019725650000000008
+  },
+  "zoneInventory": {
+    "count": 1200,
+    "p50Milliseconds": 0.068321,
+    "p95Milliseconds": 0.891982,
+    "p99Milliseconds": 1.364562,
+    "maxMilliseconds": 15.850372,
+    "meanMilliseconds": 0.24353026166666675
+  },
+  "writesApplied": 28800,
+  "reactiveChanges": 14971,
+  "pollingRows": 0,
+  "hashes": {
+    "leaderboard": "1383e14479d8d778d93f9ff743aef17670faa5d7bd9fcbd557299db81e798beb",
+    "aliveByTeam": "f3a541425bb775d4d9c92ff774de0b63ceaa5581495f0f8f7cfafc5bc43a415c",
+    "zoneInventory": "740089a8153e9583e7917c4f181f627e7d72f0090de2cbf707a6d0ab060ba23d"
+  },
+  "operatingSystem": "Ubuntu 26.04.1 LTS",
+  "cpu": "X64; 4 logical processors",
+  "dotNetVersion": ".NET 10.0.15",
+  "success": true
+}
