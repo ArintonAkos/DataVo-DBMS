@@ -1,9 +1,7 @@
-using DataVo.Data;
-using DataVo.Core.StorageEngine.Config;
+using DataVo.EntityFrameworkCore.Infrastructure.Internal;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 
-using System.Data;
 using System.Linq.Expressions;
 
 namespace DataVo.EntityFrameworkCore;
@@ -39,7 +37,7 @@ public static class DataVoDatabaseFacadeExtensions
     }
 
     /// <summary>
-    /// Deletes the DataVo Lsm data directory for the configured connection string.
+    /// Deletes the DataVo storage (Lsm data directory or shared in-memory database) for the configured connection string.
     /// </summary>
     public static bool EnsureDataVoDeleted(this DatabaseFacade database)
     {
@@ -47,36 +45,18 @@ public static class DataVoDatabaseFacadeExtensions
 
         var context = database.GetDbContext();
         string connectionString = DataVoDbContextExtensions.ResolveConfiguredConnectionString(context);
-        return EnsureDeletedByConnectionString(connectionString);
+        return DataVoBridgeStorage.EnsureDeleted(connectionString);
     }
 
     /// <summary>
-    /// Deletes the DataVo Lsm data directory for an explicit connection string.
+    /// Deletes the DataVo storage (Lsm data directory or shared in-memory database) for an explicit connection string.
     /// </summary>
     public static bool EnsureDataVoDeleted(this DatabaseFacade database, string connectionString)
     {
         ArgumentNullException.ThrowIfNull(database);
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
 
-        return EnsureDeletedByConnectionString(connectionString);
-    }
-
-    private static bool EnsureDeletedByConnectionString(string connectionString)
-    {
-        var builder = new DataVoConnectionStringBuilder(connectionString);
-
-        if (builder.StorageMode != StorageMode.Lsm)
-        {
-            return true;
-        }
-
-        if (!Directory.Exists(builder.DataSource))
-        {
-            return false;
-        }
-
-        Directory.Delete(builder.DataSource, recursive: true);
-        return true;
+        return DataVoBridgeStorage.EnsureDeleted(connectionString);
     }
 
     private static DbContext GetDbContext(this DatabaseFacade database)
@@ -102,12 +82,8 @@ public static class DataVoDatabaseFacadeExtensions
 
         try
         {
-            using var connection = new DataVoConnection(connectionString);
-            connection.Open();
-
-            using var command = connection.CreateCommand();
-            command.CommandText = sql;
-            int affected = command.ExecuteNonQuery();
+            using var connection = DataVoBridgeStorage.Open(connectionString);
+            int affected = connection.ExecuteNonQuery(DataVoSqlStatement.Text(sql));
 
             if (sql.TrimStart().StartsWith("INSERT", StringComparison.OrdinalIgnoreCase) && affected == 0)
             {
@@ -151,7 +127,7 @@ public static class DataVoDatabaseFacadeExtensions
         else
         {
             string connectionString = DataVoDbContextExtensions.ResolveConfiguredConnectionString(context);
-            Infrastructure.Internal.DataVoEntityMaterializer.LoadIntoContext(context, connectionString);
+            DataVoEntityMaterializer.LoadIntoContext(context, connectionString);
         }
     }
 
@@ -325,8 +301,7 @@ public static class DataVoDatabaseFacadeExtensions
 
         try
         {
-            using var connection = new DataVoConnection(connectionString);
-            connection.Open();
+            using var connection = DataVoBridgeStorage.Open(connectionString);
             return true;
         }
         catch

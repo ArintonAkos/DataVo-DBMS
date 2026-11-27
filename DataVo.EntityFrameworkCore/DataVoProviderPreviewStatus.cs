@@ -5,6 +5,5 @@ namespace DataVo.EntityFrameworkCore;
 /// </summary>
 public sealed record DataVoProviderPreviewStatus(
     string? EffectiveConnectionString,
-    bool ProviderIdentityPreviewEnabled,
     bool NativeQueryTranslationPreviewEnabled,
     bool IsBridgeOnlyMode);

@@ -11,24 +11,20 @@ public enum DataVoProviderMode
     BridgeOnly = 0,
 
     /// <summary>
-    /// Provider identity preview mode is enabled.
-    /// </summary>
-    ProviderIdentityPreview = 1,
-
-    /// <summary>
-    /// Native query translation preview mode is enabled.
+    /// Native query translation preview mode is enabled: supported no-tracking LINQ shapes run as
+    /// DataVo SQL instead of refreshing the EF mirror.
     /// </summary>
     NativeTranslationPreview = 2
 }
 
 /// <summary>
-/// Snapshot of the active DataVo provider mode and preview flags.
+/// Snapshot of the active DataVo provider mode.
 /// </summary>
-public sealed record DataVoProviderModeStatus(
-    DataVoProviderMode Mode,
-    bool ProviderIdentityPreviewEnabled,
-    bool NativeQueryTranslationPreviewEnabled)
+public sealed record DataVoProviderModeStatus(DataVoProviderMode Mode)
 {
+    /// <summary>Whether native query translation preview is enabled.</summary>
+    public bool NativeQueryTranslationPreviewEnabled => Mode == DataVoProviderMode.NativeTranslationPreview;
+
     /// <summary>Whether the bridge is still operating in bridge-only mode.</summary>
     public bool IsBridgeOnlyMode => Mode == DataVoProviderMode.BridgeOnly;
 }

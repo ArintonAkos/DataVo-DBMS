@@ -1,5 +1,3 @@
-using DataVo.Data;
-using DataVo.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Storage;
@@ -31,30 +29,18 @@ internal sealed class DataVoDatabaseCreator : IDatabaseCreator
     /// <inheritdoc />
     /// <remarks>
     /// Generates DataVo <c>CREATE TABLE IF NOT EXISTS</c> statements from the EF model and
-    /// executes them against the configured DataVo storage.
-    ///
-    /// Returns <c>true</c> when storage appears newly created, <c>false</c> when it already
-    /// existed (Lsm mode only). In-memory mode always returns <c>true</c>.
+    /// executes them against the configured DataVo storage. Returns <c>true</c> when at least one
+    /// table was created, <c>false</c> when the whole schema already existed.
     /// </remarks>
     public bool EnsureCreated()
     {
-        string connectionString = ResolveConnectionString();
-
-        bool existedBefore = StorageExists(connectionString);
-        _currentDbContext.Context.EnsureDataVoCreated(connectionString);
-
-        var builder = new DataVoConnectionStringBuilder(connectionString);
-        if (builder.StorageMode != Core.StorageEngine.Config.StorageMode.Lsm)
-        {
-            return true;
-        }
-
-        return !existedBefore;
+        return DataVoDbContextExtensions.EnsureSchema(_currentDbContext.Context, ResolveConnectionString());
     }
 
     /// <inheritdoc />
     public Task<bool> EnsureCreatedAsync(CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         bool result = EnsureCreated();
         return Task.FromResult(result);
     }
@@ -63,18 +49,18 @@ internal sealed class DataVoDatabaseCreator : IDatabaseCreator
 
     /// <inheritdoc />
     /// <remarks>
-    /// Deletes the DataVo database directory.  Returns <c>true</c> if it existed and was deleted,
-    /// <c>false</c> if it was already absent.
+    /// Deletes the DataVo storage: the Lsm data directory or the shared in-memory database.
+    /// Returns <c>true</c> if it existed and was deleted, <c>false</c> if it was already absent.
     /// </remarks>
     public bool EnsureDeleted()
     {
-        string connectionString = ResolveConnectionString();
-        return DeleteStorage(connectionString);
+        return DataVoBridgeStorage.EnsureDeleted(ResolveConnectionString());
     }
 
     /// <inheritdoc />
     public Task<bool> EnsureDeletedAsync(CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         bool result = EnsureDeleted();
         return Task.FromResult(result);
     }
@@ -86,9 +72,7 @@ internal sealed class DataVoDatabaseCreator : IDatabaseCreator
     {
         try
         {
-            string connectionString = ResolveConnectionString();
-            using var connection = new DataVoConnection(connectionString);
-            connection.Open();
+            using var connection = DataVoBridgeStorage.Open(ResolveConnectionString());
             return true;
         }
         catch
@@ -119,52 +103,5 @@ internal sealed class DataVoDatabaseCreator : IDatabaseCreator
         }
 
         return connectionString;
-    }
-
-    private static bool DeleteStorage(string connectionString)
-    {
-        // Parse DataSource from the connection string to locate the storage directory.
-        var builder = new DataVoConnectionStringBuilder(connectionString);
-
-        if (builder.StorageMode != Core.StorageEngine.Config.StorageMode.Lsm)
-        {
-            return true;
-        }
-
-        string? dataSource = builder.DataSource;
-
-        if (string.IsNullOrWhiteSpace(dataSource))
-        {
-            return false;
-        }
-
-        // DataVo stores Lsm databases in a directory named after the DataSource relative to cwd.
-        string directoryPath = Path.IsPathRooted(dataSource)
-            ? dataSource
-            : Path.Combine(Directory.GetCurrentDirectory(), dataSource);
-
-        if (!Directory.Exists(directoryPath))
-        {
-            return false;
-        }
-
-        Directory.Delete(directoryPath, recursive: true);
-        return true;
-    }
-
-    private static bool StorageExists(string connectionString)
-    {
-        var builder = new DataVoConnectionStringBuilder(connectionString);
-        if (builder.StorageMode != Core.StorageEngine.Config.StorageMode.Lsm)
-        {
-            return false;
-        }
-
-        string dataSource = builder.DataSource;
-        string directoryPath = Path.IsPathRooted(dataSource)
-            ? dataSource
-            : Path.Combine(Directory.GetCurrentDirectory(), dataSource);
-
-        return Directory.Exists(directoryPath);
     }
 }

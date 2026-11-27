@@ -18,12 +18,12 @@ public class DataVoEfSchemaTests
 
         Assert.Contains("CREATE TABLE IF NOT EXISTS Blogs", script, StringComparison.Ordinal);
         Assert.Contains("Id INT PRIMARY KEY", script, StringComparison.Ordinal);
-        Assert.Contains("Name VARCHAR(120)", script, StringComparison.Ordinal);
-        Assert.Contains("IsPublic BIT", script, StringComparison.Ordinal);
+        Assert.Contains("Name VARCHAR(120) NOT NULL", script, StringComparison.Ordinal);
+        Assert.Contains("IsPublic BIT NOT NULL", script, StringComparison.Ordinal);
         Assert.Contains("CREATE TABLE IF NOT EXISTS Posts", script, StringComparison.Ordinal);
-        Assert.Contains("BlogId INT REFERENCES Blogs(Id)", script, StringComparison.Ordinal);
-        Assert.Contains("PublishedOn DATE", script, StringComparison.Ordinal);
-        Assert.Contains("Rating DOUBLE DEFAULT 0", script, StringComparison.Ordinal);
+        Assert.Contains("BlogId INT NOT NULL REFERENCES Blogs(Id)", script, StringComparison.Ordinal);
+        Assert.Contains("PublishedOn DATETIME NOT NULL", script, StringComparison.Ordinal);
+        Assert.Contains("Rating DOUBLE NOT NULL DEFAULT 0", script, StringComparison.Ordinal);
     }
 
     [Fact]

@@ -31,8 +31,6 @@ public static class DataVoDbContextOptionsExtensions
             extension.ConnectionString,
             extension.StorageMode,
             extension.DataSource,
-            extension.BootstrapDiagnosticsEnabled,
-            extension.ProviderIdentityPreviewEnabled,
             extension.NativeQueryTranslationPreviewEnabled);
     }
 
@@ -42,19 +40,7 @@ public static class DataVoDbContextOptionsExtensions
     public static DataVoProviderPreviewStatus? GetDataVoProviderPreviewStatus(this DbContextOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
-
-        var modeStatus = options.GetDataVoProviderModeStatus();
-        var bootstrap = options.GetDataVoBootstrapOptions();
-        if (bootstrap is null || modeStatus is null)
-        {
-            return null;
-        }
-
-        return new DataVoProviderPreviewStatus(
-            bootstrap.EffectiveConnectionString,
-            modeStatus.ProviderIdentityPreviewEnabled,
-            modeStatus.NativeQueryTranslationPreviewEnabled,
-            modeStatus.IsBridgeOnlyMode);
+        return BuildPreviewStatus(options.FindExtension<DataVoOptionsExtension>());
     }
 
     /// <summary>
@@ -63,23 +49,7 @@ public static class DataVoDbContextOptionsExtensions
     public static DataVoProviderModeStatus? GetDataVoProviderModeStatus(this DbContextOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
-
-        var extension = options.FindExtension<DataVoOptionsExtension>();
-        if (extension is null)
-        {
-            return null;
-        }
-
-        DataVoProviderMode mode = extension.NativeQueryTranslationPreviewEnabled
-            ? DataVoProviderMode.NativeTranslationPreview
-            : extension.ProviderIdentityPreviewEnabled
-                ? DataVoProviderMode.ProviderIdentityPreview
-                : DataVoProviderMode.BridgeOnly;
-
-        return new DataVoProviderModeStatus(
-            mode,
-            extension.ProviderIdentityPreviewEnabled,
-            extension.NativeQueryTranslationPreviewEnabled);
+        return options.FindExtension<DataVoOptionsExtension>()?.GetModeStatus();
     }
 
     /// <summary>
@@ -88,19 +58,7 @@ public static class DataVoDbContextOptionsExtensions
     public static DataVoProviderPreviewStatus? GetDataVoProviderPreviewStatus(this IDbContextOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
-
-        var extension = options.FindExtension<Infrastructure.Internal.DataVoOptionsExtension>();
-        var modeStatus = options.GetDataVoProviderModeStatus();
-        if (extension is null || modeStatus is null)
-        {
-            return null;
-        }
-
-        return new DataVoProviderPreviewStatus(
-            extension.BuildEffectiveConnectionString(),
-            modeStatus.ProviderIdentityPreviewEnabled,
-            modeStatus.NativeQueryTranslationPreviewEnabled,
-            modeStatus.IsBridgeOnlyMode);
+        return BuildPreviewStatus(options.FindExtension<DataVoOptionsExtension>());
     }
 
     /// <summary>
@@ -109,23 +67,21 @@ public static class DataVoDbContextOptionsExtensions
     public static DataVoProviderModeStatus? GetDataVoProviderModeStatus(this IDbContextOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
+        return options.FindExtension<DataVoOptionsExtension>()?.GetModeStatus();
+    }
 
-        var extension = options.FindExtension<Infrastructure.Internal.DataVoOptionsExtension>();
+    private static DataVoProviderPreviewStatus? BuildPreviewStatus(DataVoOptionsExtension? extension)
+    {
         if (extension is null)
         {
             return null;
         }
 
-        DataVoProviderMode mode = extension.NativeQueryTranslationPreviewEnabled
-            ? DataVoProviderMode.NativeTranslationPreview
-            : extension.ProviderIdentityPreviewEnabled
-                ? DataVoProviderMode.ProviderIdentityPreview
-                : DataVoProviderMode.BridgeOnly;
-
-        return new DataVoProviderModeStatus(
-            mode,
-            extension.ProviderIdentityPreviewEnabled,
-            extension.NativeQueryTranslationPreviewEnabled);
+        var mode = extension.GetModeStatus();
+        return new DataVoProviderPreviewStatus(
+            extension.BuildEffectiveConnectionString(),
+            mode.NativeQueryTranslationPreviewEnabled,
+            mode.IsBridgeOnlyMode);
     }
 
     // ------------------------------------------------------------------ UseDataVo – connection-string overloads
@@ -209,13 +165,11 @@ public static class DataVoDbContextOptionsExtensions
 
         if (!string.IsNullOrWhiteSpace(connectionString))
         {
-            extension.WithConnectionString(connectionString);
+            extension = extension.WithConnectionString(connectionString);
         }
 
-        var dataVoOptionsBuilder = new DataVoDbContextOptionsBuilder(extension);
-        dataVoOptionsAction?.Invoke(dataVoOptionsBuilder);
-
         ((IDbContextOptionsBuilderInfrastructure)optionsBuilder).AddOrUpdateExtension(extension);
+        dataVoOptionsAction?.Invoke(new DataVoDbContextOptionsBuilder(optionsBuilder));
 
         // Register a shared interceptor instance so repeated context construction does not
         // force EF to build excessive internal service providers.

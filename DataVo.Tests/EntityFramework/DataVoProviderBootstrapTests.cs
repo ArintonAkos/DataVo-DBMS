@@ -27,14 +27,13 @@ public class DataVoProviderBootstrapTests
 
         optionsBuilder.UseDataVo(
             "StorageMode=Lsm;DataSource=EfBootstrapDisk",
-            dataVoOptions => dataVoOptions.EnableBootstrapDiagnostics());
+            dataVoOptions => dataVoOptions.EnableNativeQueryTranslationPreview());
 
         var snapshot = optionsBuilder.Options.GetDataVoBootstrapOptions();
         Assert.NotNull(snapshot);
-        Assert.True(snapshot!.BootstrapDiagnosticsEnabled);
-        Assert.False(snapshot.ProviderIdentityPreviewEnabled);
-        Assert.False(snapshot.NativeQueryTranslationPreviewEnabled);
-        Assert.True(snapshot.IsBridgeOnlyMode);
+        Assert.Equal("StorageMode=Lsm;DataSource=EfBootstrapDisk", snapshot!.ConnectionString);
+        Assert.True(snapshot.NativeQueryTranslationPreviewEnabled);
+        Assert.False(snapshot.IsBridgeOnlyMode);
     }
 
     [Fact]
@@ -87,27 +86,6 @@ public class DataVoProviderBootstrapTests
         Assert.NotNull(mode);
         Assert.Equal(DataVoProviderMode.BridgeOnly, mode!.Mode);
         Assert.True(mode.IsBridgeOnlyMode);
-        Assert.False(mode.ProviderIdentityPreviewEnabled);
-        Assert.False(mode.NativeQueryTranslationPreviewEnabled);
-    }
-
-    [Fact]
-    public void UseDataVo_ProviderIdentityPreview_ModeStatusReflectsPreview()
-    {
-        var options = new DbContextOptionsBuilder<BootstrapContext>()
-            .UseInMemoryDatabase($"ef_mode_identity_{Guid.NewGuid():N}")
-            .UseDataVo(o => o
-                .UseInMemoryStorage()
-                .WithDataSource($"mode_identity_{Guid.NewGuid():N}")
-                .EnableProviderIdentityPreview())
-            .Options;
-
-        var mode = options.GetDataVoProviderModeStatus();
-
-        Assert.NotNull(mode);
-        Assert.Equal(DataVoProviderMode.ProviderIdentityPreview, mode!.Mode);
-        Assert.False(mode.IsBridgeOnlyMode);
-        Assert.True(mode.ProviderIdentityPreviewEnabled);
         Assert.False(mode.NativeQueryTranslationPreviewEnabled);
     }
 
@@ -127,36 +105,11 @@ public class DataVoProviderBootstrapTests
         Assert.NotNull(mode);
         Assert.Equal(DataVoProviderMode.NativeTranslationPreview, mode!.Mode);
         Assert.False(mode.IsBridgeOnlyMode);
-        Assert.True(mode.ProviderIdentityPreviewEnabled);
         Assert.True(mode.NativeQueryTranslationPreviewEnabled);
     }
 
     [Fact]
-    public void UseDataVo_EnableProviderIdentityPreview_IsCapturedInBootstrapAndPreviewStatus()
-    {
-        var options = new DbContextOptionsBuilder<BootstrapContext>()
-            .UseInMemoryDatabase($"ef_identity_{Guid.NewGuid():N}")
-            .UseDataVo(o => o
-                .UseInMemoryStorage()
-                .WithDataSource($"identity_{Guid.NewGuid():N}")
-                .EnableProviderIdentityPreview())
-            .Options;
-
-        var bootstrap = options.GetDataVoBootstrapOptions();
-        var preview = options.GetDataVoProviderPreviewStatus();
-
-        Assert.NotNull(bootstrap);
-        Assert.NotNull(preview);
-        Assert.True(bootstrap!.ProviderIdentityPreviewEnabled);
-        Assert.False(bootstrap.NativeQueryTranslationPreviewEnabled);
-        Assert.False(bootstrap.IsBridgeOnlyMode);
-        Assert.True(preview!.ProviderIdentityPreviewEnabled);
-        Assert.False(preview.NativeQueryTranslationPreviewEnabled);
-        Assert.False(preview.IsBridgeOnlyMode);
-    }
-
-    [Fact]
-    public void UseDataVo_EnableNativeQueryTranslationPreview_AlsoEnablesProviderIdentityPreview()
+    public void UseDataVo_EnableNativeQueryTranslationPreview_IsCapturedInBootstrapAndPreviewStatus()
     {
         var options = new DbContextOptionsBuilder<BootstrapContext>()
             .UseInMemoryDatabase($"ef_translation_{Guid.NewGuid():N}")
@@ -171,20 +124,23 @@ public class DataVoProviderBootstrapTests
 
         Assert.NotNull(bootstrap);
         Assert.NotNull(preview);
-        Assert.True(bootstrap!.ProviderIdentityPreviewEnabled);
-        Assert.True(bootstrap.NativeQueryTranslationPreviewEnabled);
+        Assert.True(bootstrap!.NativeQueryTranslationPreviewEnabled);
         Assert.False(bootstrap.IsBridgeOnlyMode);
-        Assert.True(preview!.ProviderIdentityPreviewEnabled);
-        Assert.True(preview.NativeQueryTranslationPreviewEnabled);
+        Assert.True(preview!.NativeQueryTranslationPreviewEnabled);
+        Assert.False(preview.IsBridgeOnlyMode);
     }
 
     [Fact]
-    public void AddEntityFrameworkDataVo_RegistersBootstrapMarker()
+    public void AddEntityFrameworkDataVo_RegistersDatabaseCreatorAndModeResolver()
     {
         var services = new ServiceCollection();
 
         services.AddEntityFrameworkDataVo();
         Assert.Contains(services, descriptor =>
+            string.Equals(descriptor.ImplementationType?.Name, "DataVoDatabaseCreator", StringComparison.Ordinal));
+        Assert.Contains(services, descriptor =>
+            string.Equals(descriptor.ServiceType.Name, "DataVoProviderModeResolver", StringComparison.Ordinal));
+        Assert.DoesNotContain(services, descriptor =>
             string.Equals(descriptor.ServiceType.Name, "DataVoProviderBootstrapMarker", StringComparison.Ordinal));
     }
 
@@ -248,7 +204,6 @@ public class DataVoProviderBootstrapTests
 
         Assert.NotNull(mode);
         Assert.Equal(DataVoProviderMode.NativeTranslationPreview, mode!.Mode);
-        Assert.True(mode.ProviderIdentityPreviewEnabled);
         Assert.True(mode.NativeQueryTranslationPreviewEnabled);
     }
 
@@ -260,7 +215,6 @@ public class DataVoProviderBootstrapTests
             .UseDataVo(o => o
                 .UseInMemoryStorage()
                 .WithDataSource($"runtime_preview_{Guid.NewGuid():N}")
-                .EnableProviderIdentityPreview()
                 .EnableNativeQueryTranslationPreview())
             .Options;
 
@@ -268,8 +222,7 @@ public class DataVoProviderBootstrapTests
         var preview = context.Database.GetDataVoProviderPreviewStatus();
 
         Assert.NotNull(preview);
-        Assert.True(preview!.ProviderIdentityPreviewEnabled);
-        Assert.True(preview.NativeQueryTranslationPreviewEnabled);
+        Assert.True(preview!.NativeQueryTranslationPreviewEnabled);
         Assert.False(preview.IsBridgeOnlyMode);
         Assert.Contains("StorageMode=InMemory", preview.EffectiveConnectionString, StringComparison.Ordinal);
     }

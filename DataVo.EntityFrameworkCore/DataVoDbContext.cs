@@ -1,4 +1,3 @@
-using DataVo.Data;
 using DataVo.EntityFrameworkCore.Infrastructure.Internal;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
@@ -59,6 +58,7 @@ public abstract class DataVoDbContext : DbContext
         "ThenBy",
         "ThenByDescending",
         "DataVoVectorDbFunctions.CosineDistance",
+        "DataVoVectorDbFunctions.L2Distance",
         "Skip",
         "Take",
         "Include",
@@ -248,7 +248,7 @@ public abstract class DataVoDbContext : DbContext
         where TEntity : class
     {
         IQueryable<TEntity> query = ComposeQuery(queryShape, asNoTracking);
-        return DataVoQueryTranslationAnalyzer.Analyze(query.Expression, GetActiveProviderModeStatus());
+        return Analyze(query.Expression, asNoTracking);
     }
 
     /// <summary>
@@ -264,7 +264,7 @@ public abstract class DataVoDbContext : DbContext
 
         IQueryable<TEntity> query = ComposeQuery(queryShape, asNoTracking);
         IQueryable<TDto> projected = query.Select(selector);
-        return DataVoQueryTranslationAnalyzer.Analyze(projected.Expression, GetActiveProviderModeStatus());
+        return Analyze(projected.Expression, asNoTracking);
     }
 
     /// <summary>
@@ -291,35 +291,16 @@ public abstract class DataVoDbContext : DbContext
         bool asNoTracking = true)
         where TEntity : class
     {
-        try
+        return RunQuery<TEntity, List<TEntity>>(() =>
         {
-            IQueryable<TEntity> query = ComposeQuery(queryShape, asNoTracking);
-            var diagnostics = DataVoQueryTranslationAnalyzer.Analyze(query.Expression, GetActiveProviderModeStatus());
-            EnsureQueryIsNotBlocked(diagnostics);
-
-            if (diagnostics.WillUseNativeTranslationPreview)
+            if (TryComposeNativeQuery(queryShape, asNoTracking, out IQueryable<TEntity> query))
             {
                 return DataVoNativeQueryExecutor.ExecuteEntityQuery<TEntity>(this, query.Expression);
             }
 
             LoadFromDataVo();
             return query.ToList();
-        }
-        catch (DataVoEfException)
-        {
-            throw;
-        }
-        catch (InvalidOperationException)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            throw new DataVoEfException(
-                DataVoEfOperation.Query,
-                $"Guarded DataVo LINQ query failed for entity '{typeof(TEntity).Name}'.",
-                ex);
-        }
+        });
     }
 
     /// <summary>
@@ -331,51 +312,39 @@ public abstract class DataVoDbContext : DbContext
         CancellationToken cancellationToken = default)
         where TEntity : class
     {
-        try
+        IQueryable<TEntity>? guardedQuery = null;
+        List<TEntity>? nativeResults = RunQuery<TEntity, List<TEntity>?>(() =>
         {
-            IQueryable<TEntity> query = ComposeQuery(queryShape, asNoTracking);
-            var diagnostics = DataVoQueryTranslationAnalyzer.Analyze(query.Expression, GetActiveProviderModeStatus());
-            EnsureQueryIsNotBlocked(diagnostics);
-
-            if (diagnostics.WillUseNativeTranslationPreview)
+            cancellationToken.ThrowIfCancellationRequested();
+            if (TryComposeNativeQuery(queryShape, asNoTracking, out IQueryable<TEntity> query))
             {
-                return await Task.FromResult(DataVoNativeQueryExecutor.ExecuteEntityQuery<TEntity>(this, query.Expression));
+                return DataVoNativeQueryExecutor.ExecuteEntityQuery<TEntity>(this, query.Expression, cancellationToken);
             }
 
             LoadFromDataVo();
-            return await query.ToListAsync(cancellationToken);
-        }
-        catch (DataVoEfException)
-        {
-            throw;
-        }
-        catch (InvalidOperationException)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            throw new DataVoEfException(
-                DataVoEfOperation.Query,
-                $"Guarded DataVo LINQ query failed for entity '{typeof(TEntity).Name}'.",
-                ex);
-        }
+            guardedQuery = query;
+            return null;
+        });
+
+        return nativeResults ?? await guardedQuery!.ToListAsync(cancellationToken);
     }
 
     /// <summary>
-    /// Returns whether any row exists after refreshing from DataVo and applying an optional predicate.
+    /// Returns whether any row matches an optional predicate. Runs as native DataVo SQL when native
+    /// translation preview supports the shape; otherwise refreshes the EF mirror from DataVo first.
     /// </summary>
     public bool AnyFromDataVo<TEntity>(
         Expression<Func<TEntity, bool>>? predicate = null,
         bool asNoTracking = true)
         where TEntity : class
     {
-        Func<IQueryable<TEntity>, IQueryable<TEntity>>? shape = predicate is null
-            ? null
-            : query => query.Where(predicate);
+        var shape = WherePredicate(predicate);
+        if (TryComposeNativeQuery(shape, asNoTracking, out IQueryable<TEntity> query))
+        {
+            return RunQuery<TEntity, bool>(() => DataVoNativeQueryExecutor.ExecuteEntityQuery<TEntity>(this, query.Take(1).Expression).Count > 0);
+        }
 
-        IQueryable<TEntity> query = CreateGuardedQuery(shape, asNoTracking);
-        return query.Any();
+        return CreateGuardedQuery(shape, asNoTracking).Any();
     }
 
     /// <summary>
@@ -387,28 +356,33 @@ public abstract class DataVoDbContext : DbContext
         CancellationToken cancellationToken = default)
         where TEntity : class
     {
-        Func<IQueryable<TEntity>, IQueryable<TEntity>>? shape = predicate is null
-            ? null
-            : query => query.Where(predicate);
+        cancellationToken.ThrowIfCancellationRequested();
+        var shape = WherePredicate(predicate);
+        if (TryComposeNativeQuery(shape, asNoTracking, out IQueryable<TEntity> query))
+        {
+            return RunQuery<TEntity, bool>(() => DataVoNativeQueryExecutor.ExecuteEntityQuery<TEntity>(this, query.Take(1).Expression, cancellationToken).Count > 0);
+        }
 
-        IQueryable<TEntity> query = CreateGuardedQuery(shape, asNoTracking);
-        return await query.AnyAsync(cancellationToken);
+        return await CreateGuardedQuery(shape, asNoTracking).AnyAsync(cancellationToken);
     }
 
     /// <summary>
-    /// Returns count after refreshing from DataVo and applying an optional predicate.
+    /// Returns the number of rows matching an optional predicate. Runs as a native DataVo
+    /// <c>COUNT(*)</c> when native translation preview supports the shape; otherwise refreshes the EF
+    /// mirror from DataVo first.
     /// </summary>
     public int CountFromDataVo<TEntity>(
         Expression<Func<TEntity, bool>>? predicate = null,
         bool asNoTracking = true)
         where TEntity : class
     {
-        Func<IQueryable<TEntity>, IQueryable<TEntity>>? shape = predicate is null
-            ? null
-            : query => query.Where(predicate);
+        var shape = WherePredicate(predicate);
+        if (TryComposeNativeQuery(shape, asNoTracking, out IQueryable<TEntity> query))
+        {
+            return RunQuery<TEntity, int>(() => DataVoNativeQueryExecutor.ExecuteCountQuery<TEntity>(this, query.Expression));
+        }
 
-        IQueryable<TEntity> query = CreateGuardedQuery(shape, asNoTracking);
-        return query.Count();
+        return CreateGuardedQuery(shape, asNoTracking).Count();
     }
 
     /// <summary>
@@ -420,28 +394,32 @@ public abstract class DataVoDbContext : DbContext
         CancellationToken cancellationToken = default)
         where TEntity : class
     {
-        Func<IQueryable<TEntity>, IQueryable<TEntity>>? shape = predicate is null
-            ? null
-            : query => query.Where(predicate);
+        cancellationToken.ThrowIfCancellationRequested();
+        var shape = WherePredicate(predicate);
+        if (TryComposeNativeQuery(shape, asNoTracking, out IQueryable<TEntity> query))
+        {
+            return RunQuery<TEntity, int>(() => DataVoNativeQueryExecutor.ExecuteCountQuery<TEntity>(this, query.Expression, cancellationToken));
+        }
 
-        IQueryable<TEntity> query = CreateGuardedQuery(shape, asNoTracking);
-        return await query.CountAsync(cancellationToken);
+        return await CreateGuardedQuery(shape, asNoTracking).CountAsync(cancellationToken);
     }
 
     /// <summary>
-    /// Returns the first matching entity or <c>null</c> after refreshing from DataVo.
+    /// Returns the first matching entity or <c>null</c>. Runs as native DataVo SQL when native
+    /// translation preview supports the shape; otherwise refreshes the EF mirror from DataVo first.
     /// </summary>
     public TEntity? FirstOrDefaultFromDataVo<TEntity>(
         Expression<Func<TEntity, bool>>? predicate = null,
         bool asNoTracking = true)
         where TEntity : class
     {
-        Func<IQueryable<TEntity>, IQueryable<TEntity>>? shape = predicate is null
-            ? null
-            : query => query.Where(predicate);
+        var shape = WherePredicate(predicate);
+        if (TryComposeNativeQuery(shape, asNoTracking, out IQueryable<TEntity> query))
+        {
+            return RunQuery<TEntity, TEntity?>(() => DataVoNativeQueryExecutor.ExecuteEntityQuery<TEntity>(this, query.Take(1).Expression).FirstOrDefault());
+        }
 
-        IQueryable<TEntity> query = CreateGuardedQuery(shape, asNoTracking);
-        return query.FirstOrDefault();
+        return CreateGuardedQuery(shape, asNoTracking).FirstOrDefault();
     }
 
     /// <summary>
@@ -453,12 +431,14 @@ public abstract class DataVoDbContext : DbContext
         CancellationToken cancellationToken = default)
         where TEntity : class
     {
-        Func<IQueryable<TEntity>, IQueryable<TEntity>>? shape = predicate is null
-            ? null
-            : query => query.Where(predicate);
+        cancellationToken.ThrowIfCancellationRequested();
+        var shape = WherePredicate(predicate);
+        if (TryComposeNativeQuery(shape, asNoTracking, out IQueryable<TEntity> query))
+        {
+            return RunQuery<TEntity, TEntity?>(() => DataVoNativeQueryExecutor.ExecuteEntityQuery<TEntity>(this, query.Take(1).Expression, cancellationToken).FirstOrDefault());
+        }
 
-        IQueryable<TEntity> query = CreateGuardedQuery(shape, asNoTracking);
-        return await query.FirstOrDefaultAsync(cancellationToken);
+        return await CreateGuardedQuery(shape, asNoTracking).FirstOrDefaultAsync(cancellationToken);
     }
 
     // ------------------------------------------------------------------ projection bridge
@@ -489,12 +469,12 @@ public abstract class DataVoDbContext : DbContext
 
         IQueryable<TEntity> query = ComposeQuery(queryShape, asNoTracking);
         IQueryable<TDto> projected = query.Select(selector);
-        var diagnostics = DataVoQueryTranslationAnalyzer.Analyze(projected.Expression, GetActiveProviderModeStatus());
+        var diagnostics = Analyze(projected.Expression, asNoTracking);
         EnsureQueryIsNotBlocked(diagnostics);
 
         if (diagnostics.WillUseNativeTranslationPreview)
         {
-            return DataVoNativeQueryExecutor.ExecuteProjectionQuery<TEntity, TDto>(this, projected.Expression);
+            return RunQuery<TEntity, List<TDto>>(() => DataVoNativeQueryExecutor.ExecuteProjectionQuery<TEntity, TDto>(this, projected.Expression));
         }
 
         query = CreateGuardedQuery(queryShape, asNoTracking);
@@ -513,14 +493,15 @@ public abstract class DataVoDbContext : DbContext
     {
         ArgumentNullException.ThrowIfNull(selector);
 
+        cancellationToken.ThrowIfCancellationRequested();
         IQueryable<TEntity> query = ComposeQuery(queryShape, asNoTracking);
         IQueryable<TDto> projected = query.Select(selector);
-        var diagnostics = DataVoQueryTranslationAnalyzer.Analyze(projected.Expression, GetActiveProviderModeStatus());
+        var diagnostics = Analyze(projected.Expression, asNoTracking);
         EnsureQueryIsNotBlocked(diagnostics);
 
         if (diagnostics.WillUseNativeTranslationPreview)
         {
-            return await Task.FromResult(DataVoNativeQueryExecutor.ExecuteProjectionQuery<TEntity, TDto>(this, projected.Expression));
+            return RunQuery<TEntity, List<TDto>>(() => DataVoNativeQueryExecutor.ExecuteProjectionQuery<TEntity, TDto>(this, projected.Expression, cancellationToken));
         }
 
         query = CreateGuardedQuery(queryShape, asNoTracking);
@@ -555,9 +536,49 @@ public abstract class DataVoDbContext : DbContext
         }
 
         query = queryShape is null ? query : queryShape(query);
-        var diagnostics = DataVoQueryTranslationAnalyzer.Analyze(query.Expression, GetActiveProviderModeStatus());
-        EnsureQueryIsNotBlocked(diagnostics);
+        EnsureQueryIsNotBlocked(Analyze(query.Expression, asNoTracking));
         return query;
+    }
+
+    /// <summary>
+    /// Composes the query shape and reports whether it runs as native DataVo SQL. Throws when the shape
+    /// is blocked; otherwise <paramref name="query"/> is the composed query either way.
+    /// </summary>
+    private bool TryComposeNativeQuery<TEntity>(
+        Func<IQueryable<TEntity>, IQueryable<TEntity>>? queryShape,
+        bool asNoTracking,
+        out IQueryable<TEntity> query)
+        where TEntity : class
+    {
+        query = ComposeQuery(queryShape, asNoTracking);
+        var diagnostics = Analyze(query.Expression, asNoTracking);
+        EnsureQueryIsNotBlocked(diagnostics);
+        return diagnostics.WillUseNativeTranslationPreview;
+    }
+
+    private DataVoQueryTranslationDiagnostics Analyze(Expression expression, bool asNoTracking)
+        => DataVoQueryTranslationAnalyzer.Analyze(expression, GetActiveProviderModeStatus(), Model, isTracking: !asNoTracking);
+
+    private static Func<IQueryable<TEntity>, IQueryable<TEntity>>? WherePredicate<TEntity>(Expression<Func<TEntity, bool>>? predicate)
+        => predicate is null ? null : query => query.Where(predicate);
+
+    /// <summary>
+    /// Runs a query step, wrapping unexpected failures in a <see cref="DataVoEfException"/> with
+    /// <see cref="DataVoEfOperation.Query"/>; configuration errors and cancellation pass through.
+    /// </summary>
+    private static TResult RunQuery<TEntity, TResult>(Func<TResult> run)
+    {
+        try
+        {
+            return run();
+        }
+        catch (Exception ex) when (ex is not (DataVoEfException or InvalidOperationException or OperationCanceledException))
+        {
+            throw new DataVoEfException(
+                DataVoEfOperation.Query,
+                $"Guarded DataVo LINQ query failed for entity '{typeof(TEntity).Name}'.",
+                ex);
+        }
     }
 
     private static void EnsureQueryIsNotBlocked(DataVoQueryTranslationDiagnostics diagnostics)
@@ -593,18 +614,10 @@ public abstract class DataVoDbContext : DbContext
 
         try
         {
-            using var connection = new DataVoConnection(connectionString);
-            connection.Open();
-
-            using var command = connection.CreateCommand();
-            command.CommandText = sql;
-
-            foreach (var (name, value) in parameters)
-            {
-                command.Parameters.Add(new DataVoParameter { ParameterName = name, Value = value ?? DBNull.Value });
-            }
-
-            int affected = command.ExecuteNonQuery();
+            using var connection = DataVoBridgeStorage.Open(connectionString);
+            int affected = connection.ExecuteNonQuery(new DataVoSqlStatement(
+                sql,
+                parameters.Select(static parameter => (parameter.Name, DataVoBridgeValues.ToDataVoValue(parameter.Value))).ToArray()));
             if (sql.TrimStart().StartsWith("INSERT", StringComparison.OrdinalIgnoreCase) && affected == 0)
             {
                 throw new DataVoEfException(

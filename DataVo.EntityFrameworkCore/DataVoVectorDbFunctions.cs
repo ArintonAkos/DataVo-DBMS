@@ -21,7 +21,7 @@ namespace DataVo.EntityFrameworkCore;
 public static class DataVoVectorDbFunctions
 {
     /// <summary>
-    /// Computes cosine distance between two vectors.
+    /// Computes cosine distance between two vectors; translated to DataVo's <c>&lt;=&gt;</c> operator.
     /// </summary>
     /// <param name="_">EF function scope (use <see cref="EF.Functions"/>).</param>
     /// <param name="left">Left vector expression.</param>
@@ -31,10 +31,10 @@ public static class DataVoVectorDbFunctions
     /// Always thrown when executed client-side. The method exists only so DataVo can translate it to SQL.
     /// </exception>
     public static double CosineDistance(this DbFunctions _, float[] left, float[] right)
-        => throw new NotSupportedException("Use inside a LINQ query. DataVo translates this method to COSINE_DISTANCE(left, right). Client-side execution is not supported.");
+        => throw new NotSupportedException("Use inside a LINQ query. DataVo translates this method to the cosine distance operator (left <=> right). Client-side execution is not supported.");
 
     /// <summary>
-    /// Computes Euclidean (L2) distance between two vectors.
+    /// Computes Euclidean (L2) distance between two vectors; translated to DataVo's <c>&lt;-&gt;</c> operator.
     /// </summary>
     /// <param name="_">EF function scope (use <see cref="EF.Functions"/>).</param>
     /// <param name="left">Left vector expression.</param>
@@ -44,5 +44,5 @@ public static class DataVoVectorDbFunctions
     /// Always thrown when executed client-side. The method exists only so DataVo can translate it to SQL.
     /// </exception>
     public static double L2Distance(this DbFunctions _, float[] left, float[] right)
-        => throw new NotSupportedException("Use inside a LINQ query. DataVo translates this method to L2_DISTANCE(left, right). Client-side execution is not supported.");
+        => throw new NotSupportedException("Use inside a LINQ query. DataVo translates this method to the L2 distance operator (left <-> right). Client-side execution is not supported.");
 }

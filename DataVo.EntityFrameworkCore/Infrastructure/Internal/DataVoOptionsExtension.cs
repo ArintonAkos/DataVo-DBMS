@@ -3,31 +3,44 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace DataVo.EntityFrameworkCore.Infrastructure.Internal;
 
+/// <summary>
+/// Immutable EF Core options extension holding the DataVo bridge configuration. Every <c>With*</c>
+/// method returns a modified copy, as EF Core's options contract requires.
+/// </summary>
 internal sealed class DataVoOptionsExtension : IDbContextOptionsExtension
 {
     private DbContextOptionsExtensionInfo? _info;
 
+    public DataVoOptionsExtension()
+    {
+    }
+
+    private DataVoOptionsExtension(DataVoOptionsExtension copyFrom)
+    {
+        ConnectionString = copyFrom.ConnectionString;
+        StorageMode = copyFrom.StorageMode;
+        DataSource = copyFrom.DataSource;
+        NativeQueryTranslationPreviewEnabled = copyFrom.NativeQueryTranslationPreviewEnabled;
+    }
+
     /// <summary>Full ADO.NET connection string as supplied to <c>UseDataVo</c>.</summary>
-    public string? ConnectionString { get; private set; }
+    public string? ConnectionString { get; private init; }
 
     /// <summary>
     /// Typed storage mode override.
     /// When set, <c>BuildEffectiveConnectionString</c> synthesises the connection string from
     /// <see cref="StorageMode"/> and <see cref="DataSource"/> instead of using the raw string.
     /// </summary>
-    public DataVoStorageMode? StorageMode { get; private set; }
+    public DataVoStorageMode? StorageMode { get; private init; }
 
     /// <summary>
     /// Typed data-source / database name override (e.g. "mydb").
     /// Used together with <see cref="StorageMode"/> to build the effective connection string.
     /// </summary>
-    public string? DataSource { get; private set; }
+    public string? DataSource { get; private init; }
 
-    public bool BootstrapDiagnosticsEnabled { get; private set; }
-
-    public bool ProviderIdentityPreviewEnabled { get; private set; }
-
-    public bool NativeQueryTranslationPreviewEnabled { get; private set; }
+    /// <summary>Whether supported LINQ shapes are translated to DataVo SQL instead of refreshing the EF mirror.</summary>
+    public bool NativeQueryTranslationPreviewEnabled { get; private init; }
 
     public DbContextOptionsExtensionInfo Info => _info ??= new ExtensionInfo(this);
 
@@ -48,7 +61,7 @@ internal sealed class DataVoOptionsExtension : IDbContextOptionsExtension
                 "Provide a DataSource name (e.g. UseDataVo(o => o.UseLsmStorage().WithDataSource(\"mydb\"))).");
         }
 
-        // DataVo is currently an EF bridge extension (not a standalone EF provider),
+        // DataVo is an EF bridge extension (not a standalone EF provider),
         // so an actual host provider (e.g. InMemory) must also be configured.
         bool hasHostProvider = options.Extensions.Any(extension =>
             extension.Info.IsDatabaseProvider &&
@@ -61,52 +74,21 @@ internal sealed class DataVoOptionsExtension : IDbContextOptionsExtension
                 "UseInMemoryDatabase(...)) before calling UseDataVo(...). " +
                 "DataVo is currently a persistence bridge, not a standalone LINQ provider.");
         }
-
-        if (NativeQueryTranslationPreviewEnabled && !ProviderIdentityPreviewEnabled)
-        {
-            throw new InvalidOperationException(
-                "DataVo configuration error: native query translation preview requires provider identity preview. " +
-                "Enable provider identity preview first.");
-        }
     }
 
-    // ------------------------------------------------------------------ fluent mutation API
+    // ------------------------------------------------------------------ immutable copies
 
     public DataVoOptionsExtension WithConnectionString(string connectionString)
-    {
-        ConnectionString = connectionString;
-        return this;
-    }
+        => new(this) { ConnectionString = connectionString };
 
     public DataVoOptionsExtension WithStorageMode(DataVoStorageMode mode)
-    {
-        StorageMode = mode;
-        return this;
-    }
+        => new(this) { StorageMode = mode };
 
     public DataVoOptionsExtension WithDataSource(string dataSource)
-    {
-        DataSource = dataSource;
-        return this;
-    }
-
-    public DataVoOptionsExtension WithBootstrapDiagnostics(bool enabled)
-    {
-        BootstrapDiagnosticsEnabled = enabled;
-        return this;
-    }
-
-    public DataVoOptionsExtension WithProviderIdentityPreview(bool enabled)
-    {
-        ProviderIdentityPreviewEnabled = enabled;
-        return this;
-    }
+        => new(this) { DataSource = dataSource };
 
     public DataVoOptionsExtension WithNativeQueryTranslationPreview(bool enabled)
-    {
-        NativeQueryTranslationPreviewEnabled = enabled;
-        return this;
-    }
+        => new(this) { NativeQueryTranslationPreviewEnabled = enabled };
 
     // ------------------------------------------------------------------ effective connection string
 
@@ -117,15 +99,23 @@ internal sealed class DataVoOptionsExtension : IDbContextOptionsExtension
     /// raw connection string).  Otherwise falls back to <see cref="ConnectionString"/>.
     /// </summary>
     public string? BuildEffectiveConnectionString()
+        => BuildEffectiveConnectionString(ConnectionString, StorageMode, DataSource);
+
+    /// <summary>Builds the effective connection string from raw and typed options.</summary>
+    internal static string? BuildEffectiveConnectionString(string? connectionString, DataVoStorageMode? storageMode, string? dataSource)
     {
-        if (StorageMode is not null && DataSource is { Length: > 0 })
+        if (storageMode is not null && dataSource is { Length: > 0 })
         {
-            string modeToken = StorageMode == DataVoStorageMode.InMemory ? "InMemory" : "Lsm";
-            return $"StorageMode={modeToken};DataSource={DataSource}";
+            string modeToken = storageMode == DataVoStorageMode.InMemory ? "InMemory" : "Lsm";
+            return $"StorageMode={modeToken};DataSource={dataSource}";
         }
 
-        return ConnectionString;
+        return connectionString;
     }
+
+    /// <summary>Returns the provider mode these options select.</summary>
+    public DataVoProviderModeStatus GetModeStatus()
+        => new(NativeQueryTranslationPreviewEnabled ? DataVoProviderMode.NativeTranslationPreview : DataVoProviderMode.BridgeOnly);
 
     // ------------------------------------------------------------------ extension info
 
@@ -139,11 +129,9 @@ internal sealed class DataVoOptionsExtension : IDbContextOptionsExtension
         {
             get
             {
-                string diagnosticsFlag = Extension.BootstrapDiagnosticsEnabled ? " diagnostics=on" : string.Empty;
-                string providerIdentityFlag = Extension.ProviderIdentityPreviewEnabled ? " providerIdentityPreview=on" : string.Empty;
                 string nativeTranslationFlag = Extension.NativeQueryTranslationPreviewEnabled ? " nativeTranslationPreview=on" : string.Empty;
                 string cs = Extension.BuildEffectiveConnectionString() ?? "(none)";
-                return $"using DataVo({cs}){diagnosticsFlag}{providerIdentityFlag}{nativeTranslationFlag}";
+                return $"using DataVo({cs}){nativeTranslationFlag}";
             }
         }
 
@@ -156,7 +144,6 @@ internal sealed class DataVoOptionsExtension : IDbContextOptionsExtension
                 Extension.StorageMode is not null,
                 string.IsNullOrWhiteSpace(Extension.DataSource),
                 string.IsNullOrWhiteSpace(Extension.ConnectionString),
-                Extension.ProviderIdentityPreviewEnabled,
                 Extension.NativeQueryTranslationPreviewEnabled);
         }
 
@@ -165,8 +152,6 @@ internal sealed class DataVoOptionsExtension : IDbContextOptionsExtension
             debugInfo["DataVo:ConnectionString"] = Extension.BuildEffectiveConnectionString() ?? string.Empty;
             debugInfo["DataVo:StorageMode"] = Extension.StorageMode?.ToString() ?? "unset";
             debugInfo["DataVo:DataSource"] = Extension.DataSource ?? string.Empty;
-            debugInfo["DataVo:Diagnostics"] = Extension.BootstrapDiagnosticsEnabled ? "1" : "0";
-            debugInfo["DataVo:ProviderIdentityPreview"] = Extension.ProviderIdentityPreviewEnabled ? "1" : "0";
             debugInfo["DataVo:NativeQueryTranslationPreview"] = Extension.NativeQueryTranslationPreviewEnabled ? "1" : "0";
         }
 
@@ -176,7 +161,6 @@ internal sealed class DataVoOptionsExtension : IDbContextOptionsExtension
                    (Extension.StorageMode is not null) == (otherInfo.Extension.StorageMode is not null) &&
                    string.IsNullOrWhiteSpace(Extension.DataSource) == string.IsNullOrWhiteSpace(otherInfo.Extension.DataSource) &&
                    string.IsNullOrWhiteSpace(Extension.ConnectionString) == string.IsNullOrWhiteSpace(otherInfo.Extension.ConnectionString) &&
-                   Extension.ProviderIdentityPreviewEnabled == otherInfo.Extension.ProviderIdentityPreviewEnabled &&
                    Extension.NativeQueryTranslationPreviewEnabled == otherInfo.Extension.NativeQueryTranslationPreviewEnabled;
         }
     }

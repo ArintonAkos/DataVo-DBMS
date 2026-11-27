@@ -1,6 +1,4 @@
 using DataVo.Core;
-using DataVo.Data;
-using DataVo.EntityFrameworkCore.Infrastructure.Internal;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
@@ -50,27 +48,25 @@ internal static class DataVoEntityMaterializer
         }
 
         // Load principals before dependents so EF's relationship fix-up can wire nav props.
-        var ordered = OrderEntityTypesForLoading(entityTypes);
+        var ordered = DataVoModelOrdering.OrderPrincipalsFirst(entityTypes);
 
         try
         {
-            // Reset the in-memory mirror first, so repeated LoadFromDataVo() calls on the
+            // Detach tracked entities first: pending changes (for example from a failed SaveChanges)
+            // must not be written into the mirror by the saves below.
+            context.ChangeTracker.Clear();
+
+            // Reset the in-memory mirror, so repeated LoadFromDataVo() calls on the
             // same DbContext instance do not hit duplicate-key errors when we SaveChanges().
             ClearInMemoryMirror(context, entityTypes);
 
-            // Detach existing tracked entities to avoid duplicate-key exceptions when
-            // re-loading (e.g. if the user calls LoadFromDataVo() twice on the same instance).
-            foreach (var entry in context.ChangeTracker.Entries().ToList())
+            // Release the connection before saving: the mirror save may itself ensure DataVo schema.
+            using (var connection = DataVoBridgeStorage.Open(connectionString))
             {
-                entry.State = EntityState.Detached;
-            }
-
-            using var connection = new DataVoConnection(connectionString);
-            connection.Open();
-
-            foreach (var entityType in ordered)
-            {
-                LoadEntityType(context, entityType, connection);
+                foreach (var entityType in ordered)
+                {
+                    LoadEntityType(context, entityType, connection);
+                }
             }
 
             if (context.ChangeTracker.HasChanges())
@@ -145,7 +141,7 @@ internal static class DataVoEntityMaterializer
     private static void LoadEntityType(
         DbContext context,
         IEntityType entityType,
-        DataVoConnection connection)
+        DataVoBridgeConnection connection)
     {
         string tableName = entityType.GetTableName()!;
         var tableIdentifier = StoreObjectIdentifier.Table(tableName, entityType.GetSchema());
@@ -160,8 +156,7 @@ internal static class DataVoEntityMaterializer
 
         try
         {
-            using var command = connection.CreateCommand();
-            command.CommandText = $"SELECT * FROM {tableName};";
+            using var command = connection.CreateCommand(DataVoSqlStatement.Text($"SELECT * FROM {tableName};"));
 
             using var reader = command.ExecuteReader();
 
@@ -230,9 +225,10 @@ internal static class DataVoEntityMaterializer
     // ------------------------------------------------------------------ CLR type conversion
 
     /// <summary>
-    /// Converts a DataVo <c>dynamic</c> value to the CLR property type expected by EF.
+    /// Converts a DataVo <see cref="object"/> value to the CLR property type expected by EF.
     /// DataVo returns: <c>int</c> for INT, <c>string</c> for VARCHAR, <c>bool</c>/<c>int</c>
-    /// for BIT, <see cref="DataVoDate"/> for DATE, <c>double</c> for FLOAT.
+    /// for BIT, <see cref="DataVoDate"/> for DATE, UTC <see cref="DateTime"/> for DATETIME,
+    /// <c>float</c> for FLOAT and <c>float[]</c> for VECTOR.
     /// </summary>
     internal static object ConvertToClrType(object value, Type targetType)
     {
@@ -289,12 +285,30 @@ internal static class DataVoEntityMaterializer
             return value switch
             {
                 DateTimeOffset dto => dto,
-                DateTime dt => new DateTimeOffset(dt),
+                DateTime dt => new DateTimeOffset(dt.Kind == DateTimeKind.Unspecified ? DateTime.SpecifyKind(dt, DateTimeKind.Utc) : dt),
                 DataVoDate d => new DateTimeOffset(d.ToDateTime()),
                 DateOnly d => new DateTimeOffset(d.ToDateTime(TimeOnly.MinValue)),
                 string s => DateTimeOffset.Parse(s, CultureInfo.InvariantCulture),
                 _ => new DateTimeOffset(Convert.ToDateTime(value, CultureInfo.InvariantCulture))
             };
+        }
+
+        // TimeOnly — stored as a DATETIME instant on 0001-01-01.
+        if (underlying == typeof(TimeOnly))
+        {
+            return value switch
+            {
+                DateTime dt => TimeOnly.FromDateTime(dt),
+                TimeSpan ts => TimeOnly.FromTimeSpan(ts),
+                string s => TimeOnly.Parse(s, CultureInfo.InvariantCulture),
+                _ => TimeOnly.FromDateTime(Convert.ToDateTime(value, CultureInfo.InvariantCulture))
+            };
+        }
+
+        // Vectors — DataVo returns float[] for VECTOR columns.
+        if (underlying == typeof(ReadOnlyMemory<float>) && value is float[] vector)
+        {
+            return new ReadOnlyMemory<float>(vector);
         }
 
         // Guid.
@@ -308,10 +322,10 @@ internal static class DataVoEntityMaterializer
             };
         }
 
-        // Enum — stored as INT in DataVo.
+        // Enum — stored as INT, or BIGINT for 64-bit and unsigned 32-bit enums.
         if (underlying.IsEnum)
         {
-            return Enum.ToObject(underlying, Convert.ToInt32(value, CultureInfo.InvariantCulture));
+            return Enum.ToObject(underlying, Convert.ToInt64(value, CultureInfo.InvariantCulture));
         }
 
         // String.
@@ -323,53 +337,5 @@ internal static class DataVoEntityMaterializer
         // Numeric primitives — DataVo always returns int for INT columns;
         // we must widen/narrow for short, byte, long, float, decimal, etc.
         return Convert.ChangeType(value, underlying, CultureInfo.InvariantCulture);
-    }
-
-    // ------------------------------------------------------------------ topological sort
-
-    /// <summary>
-    /// Returns entity types ordered so that principal tables come before dependent tables.
-    /// This maximises the chance of EF relationship fix-up wiring navigation properties
-    /// when we attach entities in sequence.
-    /// </summary>
-    private static IReadOnlyList<IEntityType> OrderEntityTypesForLoading(IReadOnlyList<IEntityType> entityTypes)
-    {
-        var tableLookup = entityTypes.ToDictionary(static et => et.GetTableName()!);
-        var dependencies = entityTypes.ToDictionary(
-            static et => et,
-            static et => et
-                .GetForeignKeys()
-                .Select(static fk => fk.PrincipalEntityType)
-                .Where(principal => principal.GetTableName() is not null)
-                .Distinct()
-                .ToHashSet());
-
-        var ordered = new List<IEntityType>(entityTypes.Count);
-        var remaining = new HashSet<IEntityType>(entityTypes);
-
-        while (remaining.Count > 0)
-        {
-            var ready = remaining
-                .Where(et => dependencies[et].All(dep =>
-                    !remaining.Contains(dep) ||
-                    !tableLookup.ContainsKey(dep.GetTableName()!)))
-                .OrderBy(static et => et.GetTableName(), StringComparer.Ordinal)
-                .ToList();
-
-            if (ready.Count == 0)
-            {
-                // Cycle detected — append remaining and let EF fix-up sort it out.
-                ordered.AddRange(remaining.OrderBy(static et => et.GetTableName(), StringComparer.Ordinal));
-                break;
-            }
-
-            foreach (var et in ready)
-            {
-                ordered.Add(et);
-                remaining.Remove(et);
-            }
-        }
-
-        return ordered;
     }
 }

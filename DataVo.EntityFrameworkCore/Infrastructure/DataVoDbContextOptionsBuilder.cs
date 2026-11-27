@@ -1,4 +1,6 @@
 using DataVo.EntityFrameworkCore.Infrastructure.Internal;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 
 namespace DataVo.EntityFrameworkCore.Infrastructure;
 
@@ -7,11 +9,11 @@ namespace DataVo.EntityFrameworkCore.Infrastructure;
 /// </summary>
 public sealed class DataVoDbContextOptionsBuilder
 {
-    private readonly DataVoOptionsExtension _extension;
+    private readonly DbContextOptionsBuilder _optionsBuilder;
 
-    internal DataVoDbContextOptionsBuilder(DataVoOptionsExtension extension)
+    internal DataVoDbContextOptionsBuilder(DbContextOptionsBuilder optionsBuilder)
     {
-        _extension = extension;
+        _optionsBuilder = optionsBuilder;
     }
 
     // ------------------------------------------------------------------ storage mode
@@ -21,29 +23,22 @@ public sealed class DataVoDbContextOptionsBuilder
     /// Equivalent to <c>StorageMode=Lsm</c> in the connection string.
     /// </summary>
     public DataVoDbContextOptionsBuilder UseLsmStorage()
-    {
-        _extension.WithStorageMode(DataVoStorageMode.Lsm);
-        return this;
-    }
+        => UseStorageMode(DataVoStorageMode.Lsm);
 
     /// <summary>
     /// Configures DataVo to use in-memory (non-persistent) storage.
-    /// Equivalent to <c>StorageMode=InMemory</c> in the connection string.
+    /// Equivalent to <c>StorageMode=InMemory</c> in the connection string. Every context configured
+    /// with the same data source shares one in-memory database for the life of the process, until
+    /// <c>Database.EnsureDeleted()</c> drops it.
     /// </summary>
     public DataVoDbContextOptionsBuilder UseInMemoryStorage()
-    {
-        _extension.WithStorageMode(DataVoStorageMode.InMemory);
-        return this;
-    }
+        => UseStorageMode(DataVoStorageMode.InMemory);
 
     /// <summary>
     /// Configures which storage mode DataVo should use.
     /// </summary>
     public DataVoDbContextOptionsBuilder UseStorageMode(DataVoStorageMode mode)
-    {
-        _extension.WithStorageMode(mode);
-        return this;
-    }
+        => WithOption(extension => extension.WithStorageMode(mode));
 
     // ------------------------------------------------------------------ data source
 
@@ -55,44 +50,23 @@ public sealed class DataVoDbContextOptionsBuilder
     public DataVoDbContextOptionsBuilder WithDataSource(string dataSource)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(dataSource);
-        _extension.WithDataSource(dataSource);
-        return this;
+        return WithOption(extension => extension.WithDataSource(dataSource));
     }
 
-    // ------------------------------------------------------------------ diagnostics
+    // ------------------------------------------------------------------ query translation
 
     /// <summary>
-    /// Enables generation of detailed provider bootstrap diagnostics.
-    /// </summary>
-    public DataVoDbContextOptionsBuilder EnableBootstrapDiagnostics(bool enabled = true)
-    {
-        _extension.WithBootstrapDiagnostics(enabled);
-        return this;
-    }
-
-    /// <summary>
-    /// Enables the provider-identity preview surface. This does not yet replace the host
-    /// provider, but exposes incremental preview behavior and status APIs for future work.
-    /// </summary>
-    public DataVoDbContextOptionsBuilder EnableProviderIdentityPreview(bool enabled = true)
-    {
-        _extension.WithProviderIdentityPreview(enabled);
-        return this;
-    }
-
-    /// <summary>
-    /// Enables the native query translation preview flag. This currently acts as a preview
-    /// capability toggle and implies provider identity preview.
+    /// Enables native query translation preview: supported no-tracking LINQ shapes passed to
+    /// <c>QueryFromDataVo</c> and its siblings run as DataVo SQL instead of refreshing the EF mirror.
     /// </summary>
     public DataVoDbContextOptionsBuilder EnableNativeQueryTranslationPreview(bool enabled = true)
+        => WithOption(extension => extension.WithNativeQueryTranslationPreview(enabled));
+
+    // Options extensions are immutable: each change registers a modified copy.
+    private DataVoDbContextOptionsBuilder WithOption(Func<DataVoOptionsExtension, DataVoOptionsExtension> change)
     {
-        _extension.WithNativeQueryTranslationPreview(enabled);
-
-        if (enabled)
-        {
-            _extension.WithProviderIdentityPreview(true);
-        }
-
+        var current = _optionsBuilder.Options.FindExtension<DataVoOptionsExtension>() ?? new DataVoOptionsExtension();
+        ((IDbContextOptionsBuilderInfrastructure)_optionsBuilder).AddOrUpdateExtension(change(current));
         return this;
     }
 }
@@ -104,17 +78,12 @@ public sealed record DataVoBootstrapOptions(
     string? ConnectionString,
     DataVoStorageMode? StorageMode,
     string? DataSource,
-    bool BootstrapDiagnosticsEnabled,
-    bool ProviderIdentityPreviewEnabled,
     bool NativeQueryTranslationPreviewEnabled)
 {
     /// <summary>Returns the effective connection string used at runtime.</summary>
     public string? EffectiveConnectionString =>
-        StorageMode is not null && DataSource is { Length: > 0 }
-            ? $"StorageMode={(StorageMode == DataVoStorageMode.InMemory ? "InMemory" : "Lsm")};DataSource={DataSource}"
-            : ConnectionString;
+        DataVoOptionsExtension.BuildEffectiveConnectionString(ConnectionString, StorageMode, DataSource);
 
     /// <summary>Whether the bridge is still operating in bridge-only mode.</summary>
-    public bool IsBridgeOnlyMode => !ProviderIdentityPreviewEnabled && !NativeQueryTranslationPreviewEnabled;
+    public bool IsBridgeOnlyMode => !NativeQueryTranslationPreviewEnabled;
 }
-

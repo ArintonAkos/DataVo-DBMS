@@ -1,94 +1,88 @@
-using DataVo.Data;
-using DataVo.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Metadata;
 using System.Data.Common;
 using System.Globalization;
 using System.Linq.Expressions;
-using System.Reflection;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Metadata;
 
 namespace DataVo.EntityFrameworkCore.Infrastructure.Internal;
 
+/// <summary>
+/// Runs LINQ shapes accepted by <see cref="DataVoQueryTranslationAnalyzer"/> as parameterized DataVo SQL.
+/// </summary>
 internal static class DataVoNativeQueryExecutor
 {
-    public static List<TEntity> ExecuteEntityQuery<TEntity>(DataVoDbContext context, Expression queryExpression)
+    /// <summary>Runs an entity query and returns untracked entities.</summary>
+    public static List<TEntity> ExecuteEntityQuery<TEntity>(
+        DataVoDbContext context,
+        Expression queryExpression,
+        CancellationToken cancellationToken = default)
         where TEntity : class
     {
         ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(queryExpression);
 
         var entityType = ResolveEntityType<TEntity>(context);
-        var queryPlan = DataVoNativeQueryTranslator.TranslateEntityQuery(queryExpression, entityType);
-        string connectionString = DataVoDbContextExtensions.ResolveConfiguredConnectionString(context);
+        var plan = DataVoNativeQueryTranslator.TranslateEntityQuery(queryExpression, entityType);
+        var rowReader = new EntityRowReader(entityType, plan.ColumnBindings);
 
-        using var connection = new DataVoConnection(connectionString);
-        connection.Open();
-
-        using var command = connection.CreateCommand();
-        command.CommandText = queryPlan.Sql;
-
-        using var reader = command.ExecuteReader();
-
-        var results = new List<TEntity>();
-        while (reader.Read())
-        {
-            object entity = Activator.CreateInstance(entityType.ClrType)
-                ?? throw new DataVoEfException(
-                    DataVoEfOperation.Query,
-                    $"Could not create an instance of '{entityType.ClrType.FullName}' during native DataVo query materialization.");
-
-            foreach (var binding in queryPlan.ColumnBindings)
-            {
-                int ordinal;
-                try
-                {
-                    ordinal = reader.GetOrdinal(binding.ColumnName);
-                }
-                catch (IndexOutOfRangeException)
-                {
-                    continue;
-                }
-
-                object? raw = reader.GetValue(ordinal);
-                if (raw is null or DBNull)
-                {
-                    continue;
-                }
-
-                object converted = DataVoEntityMaterializer.ConvertToClrType(raw, binding.Property.ClrType);
-                binding.Property.PropertyInfo!.SetValue(entity, converted);
-            }
-
-            results.Add((TEntity)entity);
-        }
-
-        return results;
+        return ExecuteReader(context, plan.Statement, reader => (TEntity)rowReader.Read(reader), cancellationToken);
     }
 
+    /// <summary>Runs a projection query, reading only the columns the selector uses.</summary>
     public static List<TDto> ExecuteProjectionQuery<TEntity, TDto>(
         DataVoDbContext context,
-        Expression projectedExpression)
+        Expression projectedExpression,
+        CancellationToken cancellationToken = default)
         where TEntity : class
     {
         ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(projectedExpression);
 
         var entityType = ResolveEntityType<TEntity>(context);
-        var queryPlan = DataVoNativeQueryTranslator.TranslateProjectionQuery<TEntity, TDto>(projectedExpression, entityType);
+        var plan = DataVoNativeQueryTranslator.TranslateProjectionQuery<TEntity, TDto>(projectedExpression, entityType);
+
+        return ExecuteReader(context, plan.Statement, plan.Materialize, cancellationToken);
+    }
+
+    /// <summary>Counts the rows a filter-only query matches with <c>COUNT(*)</c>.</summary>
+    public static int ExecuteCountQuery<TEntity>(
+        DataVoDbContext context,
+        Expression queryExpression,
+        CancellationToken cancellationToken = default)
+        where TEntity : class
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        ArgumentNullException.ThrowIfNull(queryExpression);
+
+        var entityType = ResolveEntityType<TEntity>(context);
+        var statement = DataVoNativeQueryTranslator.TranslateCountQuery(queryExpression, entityType);
+
+        var counts = ExecuteReader(
+            context,
+            statement,
+            static reader => Convert.ToInt32(reader.GetValue(0), CultureInfo.InvariantCulture),
+            cancellationToken);
+        return counts.Count == 0 ? 0 : counts[0];
+    }
+
+    private static List<T> ExecuteReader<T>(
+        DataVoDbContext context,
+        DataVoSqlStatement statement,
+        Func<DbDataReader, T> materialize,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
         string connectionString = DataVoDbContextExtensions.ResolveConfiguredConnectionString(context);
 
-        using var connection = new DataVoConnection(connectionString);
-        connection.Open();
-
-        using var command = connection.CreateCommand();
-        command.CommandText = queryPlan.Sql;
-
+        using var connection = DataVoBridgeStorage.Open(connectionString);
+        using var command = connection.CreateCommand(statement);
         using var reader = command.ExecuteReader();
 
-        var results = new List<TDto>();
+        var results = new List<T>();
         while (reader.Read())
         {
-            results.Add(queryPlan.Materialize(reader));
+            cancellationToken.ThrowIfCancellationRequested();
+            results.Add(materialize(reader));
         }
 
         return results;
@@ -97,467 +91,316 @@ internal static class DataVoNativeQueryExecutor
     private static IEntityType ResolveEntityType<TEntity>(DataVoDbContext context)
         where TEntity : class
     {
-        var entityType = context.Model.FindEntityType(typeof(TEntity));
-        if (entityType is null)
-        {
-            throw new DataVoEfException(
+        return context.Model.FindEntityType(typeof(TEntity))
+            ?? throw new DataVoEfException(
                 DataVoEfOperation.Query,
                 $"Entity '{typeof(TEntity).Name}' is not mapped in the current DbContext model.");
-        }
-
-        return entityType;
     }
 }
 
-internal static class DataVoNativeQueryTranslator
+/// <summary>
+/// A mapped property and the result column it is read from.
+/// </summary>
+internal sealed record EntityColumnBinding(IProperty Property, string ColumnName);
+
+/// <summary>
+/// Creates entity instances from result rows, resolving column ordinals once per result set.
+/// </summary>
+internal sealed class EntityRowReader(IEntityType entityType, IReadOnlyList<EntityColumnBinding> bindings)
 {
-    internal sealed record EntityColumnBinding(IProperty Property, string ColumnName);
+    private int[]? _ordinals;
 
-    internal sealed record EntityQueryPlan(
-        string Sql,
-        IReadOnlyList<EntityColumnBinding> ColumnBindings);
+    public object Read(DbDataReader reader)
+    {
+        _ordinals ??= ResolveOrdinals(reader);
 
-    internal sealed record ProjectionQueryPlan<TDto>(
-        string Sql,
-        Func<DbDataReader, TDto> Materialize);
+        object entity = Activator.CreateInstance(entityType.ClrType)
+            ?? throw new DataVoEfException(
+                DataVoEfOperation.Query,
+                $"Could not create an instance of '{entityType.ClrType.FullName}' during native DataVo query materialization.");
+
+        for (int i = 0; i < bindings.Count; i++)
+        {
+            int ordinal = _ordinals[i];
+            if (ordinal < 0)
+            {
+                continue;
+            }
+
+            object? raw = reader.GetValue(ordinal);
+            if (raw is null or DBNull)
+            {
+                continue;
+            }
+
+            IProperty property = bindings[i].Property;
+            property.PropertyInfo!.SetValue(entity, DataVoEntityMaterializer.ConvertToClrType(raw, property.ClrType));
+        }
+
+        return entity;
+    }
+
+    private int[] ResolveOrdinals(DbDataReader reader)
+    {
+        var ordinals = new int[bindings.Count];
+        for (int i = 0; i < bindings.Count; i++)
+        {
+            try
+            {
+                ordinals[i] = reader.GetOrdinal(bindings[i].ColumnName);
+            }
+            catch (IndexOutOfRangeException)
+            {
+                // Column in the model but not in the DataVo table (schema drift): keep the CLR default.
+                ordinals[i] = -1;
+            }
+        }
+
+        return ordinals;
+    }
+}
+
+/// <summary>
+/// Translates a LINQ query shape over one entity type into parameterized DataVo SQL. Every value taken
+/// from the query (constants and captured variables) is bound as a parameter.
+/// </summary>
+internal sealed class DataVoNativeQueryTranslator
+{
+    private readonly IEntityType _entityType;
+    private readonly string _tableName;
+    private readonly StoreObjectIdentifier _table;
+    private readonly DataVoSqlParameterList _parameters = new();
+
+    private DataVoNativeQueryTranslator(IEntityType entityType)
+    {
+        _entityType = entityType;
+        _tableName = entityType.GetTableName()
+            ?? throw new NotSupportedException($"Entity '{entityType.DisplayName()}' is not mapped to a table.");
+        _table = StoreObjectIdentifier.Table(_tableName, entityType.GetSchema());
+    }
+
+    internal sealed record EntityQueryPlan(DataVoSqlStatement Statement, IReadOnlyList<EntityColumnBinding> ColumnBindings);
+
+    internal sealed record ProjectionQueryPlan<TDto>(DataVoSqlStatement Statement, Func<DbDataReader, TDto> Materialize);
 
     public static EntityQueryPlan TranslateEntityQuery(Expression expression, IEntityType entityType)
     {
-        var shape = ParseShape(expression);
+        var shape = DataVoQueryShape.Parse(expression);
         if (shape.SelectSelector is not null)
         {
             throw new NotSupportedException("Entity-native translation does not support projection in QueryFromDataVo. Use ProjectFromDataVo for projection queries.");
         }
 
-        string tableName = entityType.GetTableName()
-            ?? throw new NotSupportedException($"Entity '{entityType.DisplayName()}' is not mapped to a table.");
-
-        var tableIdentifier = StoreObjectIdentifier.Table(tableName, entityType.GetSchema());
-
-        var propertyBindings = entityType
+        var translator = new DataVoNativeQueryTranslator(entityType);
+        var bindings = entityType
             .GetProperties()
             .Where(static property => property.PropertyInfo is not null)
-            .Select(property => new EntityColumnBinding(
-                property,
-                property.GetColumnName(tableIdentifier) ?? property.Name))
+            .Select(translator.Bind)
             .ToArray();
 
-        string selectClause = string.Join(", ", propertyBindings.Select(static binding => binding.ColumnName));
-        string sql = BuildSqlCore(
-            tableName,
-            selectClause,
-            shape,
-            entityType,
-            tableIdentifier,
-            requireSelect: false);
-
-        return new EntityQueryPlan(sql, propertyBindings);
+        string sql = translator.BuildSelectSql(string.Join(", ", bindings.Select(static binding => binding.ColumnName)), shape);
+        return new EntityQueryPlan(translator.Statement(sql), bindings);
     }
 
     public static ProjectionQueryPlan<TDto> TranslateProjectionQuery<TEntity, TDto>(Expression expression, IEntityType entityType)
         where TEntity : class
     {
-        var shape = ParseShape(expression);
-        if (shape.SelectSelector is null)
-        {
-            throw new NotSupportedException("Projection-native translation requires a Select operator.");
-        }
+        var shape = DataVoQueryShape.Parse(expression);
+        LambdaExpression selector = shape.SelectSelector
+            ?? throw new NotSupportedException("Projection-native translation requires a Select operator.");
 
-        string tableName = entityType.GetTableName()
-            ?? throw new NotSupportedException($"Entity '{entityType.DisplayName()}' is not mapped to a table.");
+        var translator = new DataVoNativeQueryTranslator(entityType);
+        var bindings = translator.BindReferencedProperties(selector);
+        string selectClause = bindings.Count > 0
+            ? string.Join(", ", bindings.Select(static binding => binding.ColumnName))
+            : "*";
 
-        var tableIdentifier = StoreObjectIdentifier.Table(tableName, entityType.GetSchema());
-        var selectProjection = BuildProjection<TEntity, TDto>(shape.SelectSelector, entityType, tableIdentifier);
+        string sql = translator.BuildSelectSql(selectClause, shape);
+        var rowReader = new EntityRowReader(entityType, bindings);
+        var compiledSelector = (Func<TEntity, TDto>)selector.Compile();
 
-        string sql = BuildSqlCore(
-            tableName,
-            selectProjection.SelectClause,
-            shape,
-            entityType,
-            tableIdentifier,
-            requireSelect: true);
-
-        return new ProjectionQueryPlan<TDto>(sql, selectProjection.Materialize);
+        return new ProjectionQueryPlan<TDto>(
+            translator.Statement(sql),
+            reader => compiledSelector((TEntity)rowReader.Read(reader)));
     }
 
-    internal static bool IsSimpleSelectExpression(LambdaExpression selector)
+    public static DataVoSqlStatement TranslateCountQuery(Expression expression, IEntityType entityType)
     {
-        ArgumentNullException.ThrowIfNull(selector);
-        Expression body = UnwrapConvert(selector.Body);
-
-        return body switch
+        var shape = DataVoQueryShape.Parse(expression);
+        if (shape.SelectSelector is not null || shape.Skip is not null || shape.Take is not null)
         {
-            MemberExpression member => IsEntityMemberAccess(member, selector.Parameters[0]),
-            NewExpression constructor => constructor.Arguments.All(argument => IsEntityMemberAccess(UnwrapConvert(argument) as MemberExpression, selector.Parameters[0])),
-            MemberInitExpression memberInit =>
-                memberInit.Bindings.OfType<MemberAssignment>().All(static assignment => assignment.Expression is MemberExpression or UnaryExpression) &&
-                memberInit.Bindings.OfType<MemberAssignment>().All(assignment =>
-                    IsEntityMemberAccess(UnwrapConvert(assignment.Expression) as MemberExpression, selector.Parameters[0])),
-            _ => false
-        };
+            throw new NotSupportedException("Native COUNT translation supports filter-only query shapes.");
+        }
+
+        var translator = new DataVoNativeQueryTranslator(entityType);
+        return translator.Statement($"SELECT COUNT(*) AS __count FROM {translator._tableName}{translator.BuildWhereSql(shape)};");
     }
 
-    private static string BuildSqlCore(
-        string tableName,
-        string selectClause,
-        QueryShape shape,
-        IEntityType entityType,
-        StoreObjectIdentifier tableIdentifier,
-        bool requireSelect)
+    private DataVoSqlStatement Statement(string sql) => new(sql, _parameters.Parameters);
+
+    private EntityColumnBinding Bind(IProperty property) => new(property, ColumnOf(property));
+
+    private string ColumnOf(IProperty property) => property.GetColumnName(_table) ?? property.Name;
+
+    // ------------------------------------------------------------------ SELECT assembly
+
+    private string BuildSelectSql(string selectClause, DataVoQueryShape shape)
     {
-        if (requireSelect && shape.SelectSelector is null)
+        string whereSql = BuildWhereSql(shape);
+
+        var orderBy = BuildOrderBy(shape.Orderings);
+        if (orderBy.AdditionalSelectExpressions.Count > 0)
         {
-            throw new NotSupportedException("A Select expression is required for native projection translation.");
+            selectClause = $"{selectClause}, {string.Join(", ", orderBy.AdditionalSelectExpressions)}";
         }
-
-        var whereClauses = shape.WherePredicates
-            .Select(predicate => TranslatePredicate(predicate.Body, predicate.Parameters[0], entityType, tableIdentifier))
-            .Where(static clause => !string.IsNullOrWhiteSpace(clause))
-            .ToArray();
-
-        string whereSql = whereClauses.Length == 0
-            ? string.Empty
-            : $" WHERE {string.Join(" AND ", whereClauses)}";
-
-        var orderBuild = BuildOrderBySql(shape.Orderings, entityType, tableIdentifier);
-        if (orderBuild.AdditionalSelectExpressions.Count > 0)
-        {
-            selectClause = $"{selectClause}, {string.Join(", ", orderBuild.AdditionalSelectExpressions)}";
-        }
-
-        string orderSql = orderBuild.OrderBySql;
 
         string pagingSql = string.Empty;
         if (shape.Skip is int skip)
         {
-            pagingSql += $" OFFSET {skip}";
+            pagingSql += $" OFFSET {skip.ToString(CultureInfo.InvariantCulture)}";
         }
 
         if (shape.Take is int take)
         {
-            pagingSql += $" LIMIT {take}";
+            pagingSql += $" LIMIT {take.ToString(CultureInfo.InvariantCulture)}";
         }
 
-        return $"SELECT {selectClause} FROM {tableName}{whereSql}{orderSql}{pagingSql};";
+        return $"SELECT {selectClause} FROM {_tableName}{whereSql}{orderBy.Sql}{pagingSql};";
     }
 
-    private static OrderByBuildResult BuildOrderBySql(
-        IReadOnlyList<OrderingClause> orderings,
-        IEntityType entityType,
-        StoreObjectIdentifier tableIdentifier)
+    private string BuildWhereSql(DataVoQueryShape shape)
+    {
+        var clauses = shape.WherePredicates
+            .Select(predicate => TranslatePredicate(predicate.Body, predicate.Parameters[0]))
+            .ToArray();
+
+        return clauses.Length == 0 ? string.Empty : $" WHERE {string.Join(" AND ", clauses)}";
+    }
+
+    private (string Sql, IReadOnlyList<string> AdditionalSelectExpressions) BuildOrderBy(IReadOnlyList<DataVoQueryShape.Ordering> orderings)
     {
         if (orderings.Count == 0)
         {
-            return new OrderByBuildResult(string.Empty, []);
+            return (string.Empty, []);
         }
 
         var additionalSelects = new List<string>();
+        var clauses = new List<string>(orderings.Count);
 
-        string[] clauses = orderings
-            .Select((ordering, index) =>
+        foreach (var ordering in orderings)
+        {
+            ParameterExpression parameter = ordering.KeySelector.Parameters[0];
+            Expression keyBody = DataVoExpressionHelpers.UnwrapConvert(ordering.KeySelector.Body);
+
+            string keySql;
+            if (keyBody is MemberExpression member && TryResolveProperty(member, parameter, out IProperty? property))
             {
-                Expression keyBody = UnwrapConvert(ordering.KeySelector.Body);
+                keySql = ColumnOf(property);
+            }
+            else if (keyBody is MethodCallExpression)
+            {
+                string alias = $"__ord_{clauses.Count}";
+                additionalSelects.Add($"{TranslateOperand(keyBody, parameter).Sql} AS {alias}");
+                keySql = alias;
+            }
+            else
+            {
+                throw new NotSupportedException("Native ORDER BY translation supports mapped entity properties and translated scalar method expressions.");
+            }
 
-                string keySql;
-                if (keyBody is MemberExpression memberExpression &&
-                    TryResolveProperty(memberExpression, ordering.KeySelector.Parameters[0], entityType, out IProperty? property))
-                {
-                    IProperty resolvedProperty = property
-                        ?? throw new NotSupportedException("Native ORDER BY translation resolved to an unmapped property.");
+            clauses.Add($"{keySql} {(ordering.Descending ? "DESC" : "ASC")}");
+        }
 
-                    keySql = resolvedProperty.GetColumnName(tableIdentifier) ?? resolvedProperty.Name;
-                }
-                else if (keyBody is MethodCallExpression)
-                {
-                    string expressionSql = TranslateOperand(keyBody, ordering.KeySelector.Parameters[0], entityType, tableIdentifier).Sql;
-                    string alias = $"__ord_{index}";
-                    additionalSelects.Add($"{expressionSql} AS {alias}");
-                    keySql = alias;
-                }
-                else
-                {
-                    throw new NotSupportedException("Native ORDER BY translation supports mapped entity properties and translated scalar method expressions.");
-                }
-
-                string direction = ordering.Descending ? "DESC" : "ASC";
-                return $"{keySql} {direction}";
-            })
-            .ToArray();
-
-        return new OrderByBuildResult($" ORDER BY {string.Join(", ", clauses)}", additionalSelects);
+        return ($" ORDER BY {string.Join(", ", clauses)}", additionalSelects);
     }
 
-    private static string TranslatePredicate(
-        Expression expression,
-        ParameterExpression parameter,
-        IEntityType entityType,
-        StoreObjectIdentifier tableIdentifier)
+    // ------------------------------------------------------------------ predicates
+
+    private string TranslatePredicate(Expression expression, ParameterExpression parameter)
     {
-        expression = UnwrapConvert(expression);
+        expression = DataVoExpressionHelpers.UnwrapConvert(expression);
 
-        if (expression is BinaryExpression binaryExpression)
+        // Constant or captured booleans, e.g. Where(x => true) or Where(x => includeAll).
+        if (!DataVoExpressionHelpers.ReferencesParameter(expression, parameter))
         {
-            return TranslateBinaryPredicate(binaryExpression, parameter, entityType, tableIdentifier);
+            return Equals(DataVoExpressionHelpers.Evaluate(expression), true) ? "1 = 1" : "1 = 0";
         }
 
-        if (expression is MethodCallExpression methodCallExpression)
+        switch (expression)
         {
-            return TranslateStringMethodPredicate(methodCallExpression, parameter, entityType, tableIdentifier);
-        }
+            case BinaryExpression binary when binary.NodeType is ExpressionType.AndAlso or ExpressionType.OrElse:
+                string logical = binary.NodeType == ExpressionType.AndAlso ? "AND" : "OR";
+                return $"({TranslatePredicate(binary.Left, parameter)} {logical} {TranslatePredicate(binary.Right, parameter)})";
 
-        if (expression is MemberExpression memberExpression &&
-            TryResolveProperty(memberExpression, parameter, entityType, out IProperty? boolProperty) &&
-            boolProperty is not null &&
-            boolProperty.ClrType == typeof(bool))
-        {
-            string columnName = boolProperty.GetColumnName(tableIdentifier) ?? boolProperty.Name;
-            return $"{columnName} = 1";
-        }
+            case BinaryExpression binary when binary.NodeType == ExpressionType.Coalesce:
+                // x.Flag ?? fallback: true when the flag is set, otherwise the fallback decides.
+                string flag = TranslateOperand(binary.Left, parameter).Sql;
+                return $"({flag} = 1 OR ({flag} IS NULL AND {TranslatePredicate(binary.Right, parameter)}))";
 
-        if (expression is UnaryExpression unaryExpression && unaryExpression.NodeType == ExpressionType.Not)
-        {
-            Expression operand = UnwrapConvert(unaryExpression.Operand);
-            if (operand is MemberExpression negatedMember &&
-                TryResolveProperty(negatedMember, parameter, entityType, out IProperty? negatedBoolProperty) &&
-                negatedBoolProperty is not null &&
-                negatedBoolProperty.ClrType == typeof(bool))
-            {
-                string columnName = negatedBoolProperty.GetColumnName(tableIdentifier) ?? negatedBoolProperty.Name;
-                return $"{columnName} = 0";
-            }
+            case BinaryExpression binary:
+                return TranslateComparison(binary, parameter);
+
+            case MethodCallExpression methodCall:
+                return TranslateStringPredicate(methodCall, parameter);
+
+            case MemberExpression member when TryResolveProperty(member, parameter, out IProperty? property) && property.ClrType == typeof(bool):
+                return $"{ColumnOf(property)} = 1";
+
+            case UnaryExpression { NodeType: ExpressionType.Not } not:
+                Expression operand = DataVoExpressionHelpers.UnwrapConvert(not.Operand);
+                if (operand is MemberExpression negatedMember &&
+                    TryResolveProperty(negatedMember, parameter, out IProperty? negatedProperty) &&
+                    negatedProperty.ClrType == typeof(bool))
+                {
+                    return $"{ColumnOf(negatedProperty)} = 0";
+                }
+
+                return $"NOT ({TranslatePredicate(operand, parameter)})";
         }
 
         throw new NotSupportedException("Native WHERE translation supports boolean and binary predicate expressions only.");
     }
 
-    private static string TranslateBinaryPredicate(
-        BinaryExpression expression,
-        ParameterExpression parameter,
-        IEntityType entityType,
-        StoreObjectIdentifier tableIdentifier)
+    private string TranslateComparison(BinaryExpression expression, ParameterExpression parameter)
     {
-        if (expression.NodeType is ExpressionType.AndAlso or ExpressionType.OrElse)
+        if (!DataVoExpressionHelpers.IsComparison(expression.NodeType))
         {
-            string left = TranslatePredicate(expression.Left, parameter, entityType, tableIdentifier);
-            string right = TranslatePredicate(expression.Right, parameter, entityType, tableIdentifier);
-            string logical = expression.NodeType == ExpressionType.AndAlso ? "AND" : "OR";
-            return $"({left} {logical} {right})";
+            throw new NotSupportedException($"Native WHERE translation does not support '{expression.NodeType}'.");
         }
 
-        if (TryTranslateCoalesceComparison(expression, parameter, entityType, tableIdentifier, out string? expandedCoalesceSql))
+        // A predicate compared with a boolean value, e.g. x.Name.Contains(s) == false.
+        if (DataVoExpressionHelpers.TrySplitBooleanComparison(expression, parameter, out Expression? predicate, out bool expected))
         {
-            return expandedCoalesceSql!;
+            string predicateSql = TranslatePredicate(predicate, parameter);
+            return expected ? predicateSql : $"NOT ({predicateSql})";
         }
 
-        var leftOperand = TranslateOperand(expression.Left, parameter, entityType, tableIdentifier);
-        var rightOperand = TranslateOperand(expression.Right, parameter, entityType, tableIdentifier);
+        if (expression.Left is BinaryExpression { NodeType: ExpressionType.Coalesce } leftCoalesce)
+        {
+            return BuildCoalesceComparison(leftCoalesce, expression.Right, expression.NodeType, parameter, coalesceOnLeft: true);
+        }
 
-        return BuildComparisonSql(expression.NodeType, leftOperand, rightOperand);
+        if (expression.Right is BinaryExpression { NodeType: ExpressionType.Coalesce } rightCoalesce)
+        {
+            return BuildCoalesceComparison(rightCoalesce, expression.Left, expression.NodeType, parameter, coalesceOnLeft: false);
+        }
+
+        return BuildComparisonSql(
+            expression.NodeType,
+            TranslateOperand(expression.Left, parameter),
+            TranslateOperand(expression.Right, parameter));
     }
 
-    private static string BuildComparisonSql(
-        ExpressionType comparisonType,
-        SqlOperand leftOperand,
-        SqlOperand rightOperand)
-    {
-        if (comparisonType == ExpressionType.Equal)
-        {
-            if (leftOperand.IsNullLiteral)
-            {
-                return $"{rightOperand.Sql} IS NULL";
-            }
-
-            if (rightOperand.IsNullLiteral)
-            {
-                return $"{leftOperand.Sql} IS NULL";
-            }
-
-            return $"{leftOperand.Sql} = {rightOperand.Sql}";
-        }
-
-        if (comparisonType == ExpressionType.NotEqual)
-        {
-            if (leftOperand.IsNullLiteral)
-            {
-                return $"{rightOperand.Sql} IS NOT NULL";
-            }
-
-            if (rightOperand.IsNullLiteral)
-            {
-                return $"{leftOperand.Sql} IS NOT NULL";
-            }
-
-            return $"{leftOperand.Sql} != {rightOperand.Sql}";
-        }
-
-        string op = comparisonType switch
-        {
-            ExpressionType.GreaterThan => ">",
-            ExpressionType.GreaterThanOrEqual => ">=",
-            ExpressionType.LessThan => "<",
-            ExpressionType.LessThanOrEqual => "<=",
-            _ => throw new NotSupportedException($"Native WHERE translation does not support '{comparisonType}'.")
-        };
-
-        return $"{leftOperand.Sql} {op} {rightOperand.Sql}";
-    }
-
-    private static SqlOperand TranslateOperand(
-        Expression expression,
-        ParameterExpression parameter,
-        IEntityType entityType,
-        StoreObjectIdentifier tableIdentifier)
-    {
-        expression = UnwrapConvert(expression);
-
-        if (expression is MemberExpression memberExpression &&
-            TryResolveProperty(memberExpression, parameter, entityType, out IProperty? property))
-        {
-            IProperty resolvedProperty = property
-                ?? throw new NotSupportedException("Native operand translation resolved to an unmapped property.");
-
-            string columnName = resolvedProperty.GetColumnName(tableIdentifier) ?? resolvedProperty.Name;
-            return new SqlOperand(columnName, IsNullLiteral: false);
-        }
-
-        if (expression is BinaryExpression binaryExpression && binaryExpression.NodeType == ExpressionType.Coalesce)
-        {
-            var left = TranslateOperand(binaryExpression.Left, parameter, entityType, tableIdentifier);
-            var right = TranslateOperand(binaryExpression.Right, parameter, entityType, tableIdentifier);
-            if (left.IsNullLiteral)
-            {
-                return right;
-            }
-
-            if (right.IsNullLiteral)
-            {
-                return left;
-            }
-
-            throw new NotSupportedException("Native coalesce translation requires comparison-context expansion and cannot be used as a standalone SQL operand.");
-        }
-
-        if (expression is MethodCallExpression methodCallExpression)
-        {
-            if (TryTranslateVectorDistanceExpression(methodCallExpression, parameter, entityType, tableIdentifier, out string? vectorDistanceSql))
-            {
-                return new SqlOperand(vectorDistanceSql!, IsNullLiteral: false);
-            }
-
-            if (methodCallExpression.Method.DeclaringType == typeof(string) && methodCallExpression.Type == typeof(string))
-            {
-                return new SqlOperand(
-                    TranslateStringScalarExpression(methodCallExpression, parameter, entityType, tableIdentifier),
-                    IsNullLiteral: false);
-            }
-
-            return new SqlOperand(
-                TranslateStringMethodExpression(methodCallExpression, parameter, entityType, tableIdentifier),
-                IsNullLiteral: false);
-        }
-
-        object? value = EvaluateExpression(expression);
-        return new SqlOperand(DataVoSqlLiteralFormatter.Format(value), value is null);
-    }
-
-    private static bool TryTranslateVectorDistanceExpression(
-        MethodCallExpression expression,
-        ParameterExpression parameter,
-        IEntityType entityType,
-        StoreObjectIdentifier tableIdentifier,
-        out string? sql)
-    {
-        sql = null;
-
-        if (expression.Method.DeclaringType != typeof(DataVoVectorDbFunctions))
-        {
-            return false;
-        }
-
-        bool isCosine = expression.Method.Name == nameof(DataVoVectorDbFunctions.CosineDistance);
-        bool isL2 = expression.Method.Name == nameof(DataVoVectorDbFunctions.L2Distance);
-        if (!isCosine && !isL2)
-        {
-            return false;
-        }
-
-        // Extension-method form includes EF.Functions as the first argument.
-        int vectorArgsStart = expression.Arguments.Count == 3 ? 1 : 0;
-        int vectorArgsCount = expression.Arguments.Count - vectorArgsStart;
-        if (vectorArgsCount != 2)
-        {
-            throw new NotSupportedException($"Native vector translation for '{expression.Method.Name}' requires exactly two vector operands.");
-        }
-
-        var left = TranslateOperand(expression.Arguments[vectorArgsStart], parameter, entityType, tableIdentifier);
-        var right = TranslateOperand(expression.Arguments[vectorArgsStart + 1], parameter, entityType, tableIdentifier);
-
-        string operatorToken = isL2 ? "<->" : "<=>";
-        sql = $"({left.Sql} {operatorToken} {right.Sql})";
-        return true;
-    }
-
-    private static bool TryTranslateCoalesceComparison(
-        BinaryExpression expression,
-        ParameterExpression parameter,
-        IEntityType entityType,
-        StoreObjectIdentifier tableIdentifier,
-        out string? sql)
-    {
-        sql = null;
-
-        if (expression.NodeType is not (
-            ExpressionType.Equal or
-            ExpressionType.NotEqual or
-            ExpressionType.GreaterThan or
-            ExpressionType.GreaterThanOrEqual or
-            ExpressionType.LessThan or
-            ExpressionType.LessThanOrEqual))
-        {
-            return false;
-        }
-
-        if (expression.Left is BinaryExpression leftCoalesce && leftCoalesce.NodeType == ExpressionType.Coalesce)
-        {
-            sql = BuildExpandedCoalesceComparison(
-                leftCoalesce,
-                expression.Right,
-                expression.NodeType,
-                parameter,
-                entityType,
-                tableIdentifier,
-                coalesceOnLeft: true);
-            return true;
-        }
-
-        if (expression.Right is BinaryExpression rightCoalesce && rightCoalesce.NodeType == ExpressionType.Coalesce)
-        {
-            sql = BuildExpandedCoalesceComparison(
-                rightCoalesce,
-                expression.Left,
-                expression.NodeType,
-                parameter,
-                entityType,
-                tableIdentifier,
-                coalesceOnLeft: false);
-            return true;
-        }
-
-        return false;
-    }
-
-    private static string BuildExpandedCoalesceComparison(
+    private string BuildCoalesceComparison(
         BinaryExpression coalesce,
         Expression otherExpression,
         ExpressionType comparisonType,
         ParameterExpression parameter,
-        IEntityType entityType,
-        StoreObjectIdentifier tableIdentifier,
         bool coalesceOnLeft)
     {
-        var primary = TranslateOperand(coalesce.Left, parameter, entityType, tableIdentifier);
-        var fallback = TranslateOperand(coalesce.Right, parameter, entityType, tableIdentifier);
-        var other = TranslateOperand(otherExpression, parameter, entityType, tableIdentifier);
+        var primary = TranslateOperand(coalesce.Left, parameter);
+        var fallback = TranslateOperand(coalesce.Right, parameter);
+        var other = TranslateOperand(otherExpression, parameter);
 
         string whenNull = coalesceOnLeft
             ? BuildComparisonSql(comparisonType, fallback, other)
@@ -570,400 +413,264 @@ internal static class DataVoNativeQueryTranslator
         return $"(({primary.Sql} IS NULL AND {whenNull}) OR ({primary.Sql} IS NOT NULL AND {whenNotNull}))";
     }
 
-    private static string TranslateStringMethodPredicate(
-        MethodCallExpression expression,
-        ParameterExpression parameter,
-        IEntityType entityType,
-        StoreObjectIdentifier tableIdentifier)
+    private static string BuildComparisonSql(ExpressionType comparisonType, SqlOperand left, SqlOperand right)
     {
-        string sql = TranslateStringMethodExpression(expression, parameter, entityType, tableIdentifier);
-        return sql;
+        if (comparisonType is ExpressionType.Equal or ExpressionType.NotEqual)
+        {
+            string nullTest = comparisonType == ExpressionType.Equal ? "IS NULL" : "IS NOT NULL";
+            if (left.IsNullLiteral)
+            {
+                return $"{right.Sql} {nullTest}";
+            }
+
+            if (right.IsNullLiteral)
+            {
+                return $"{left.Sql} {nullTest}";
+            }
+        }
+
+        if (left.IsNullLiteral || right.IsNullLiteral)
+        {
+            // An ordering comparison with null is never true in LINQ or SQL.
+            return "1 = 0";
+        }
+
+        string op = comparisonType switch
+        {
+            ExpressionType.Equal => "=",
+            ExpressionType.NotEqual => "!=",
+            ExpressionType.GreaterThan => ">",
+            ExpressionType.GreaterThanOrEqual => ">=",
+            ExpressionType.LessThan => "<",
+            ExpressionType.LessThanOrEqual => "<=",
+            _ => throw new NotSupportedException($"Native WHERE translation does not support '{comparisonType}'.")
+        };
+
+        return $"{left.Sql} {op} {right.Sql}";
     }
 
-    private static string TranslateStringMethodExpression(
-        MethodCallExpression expression,
-        ParameterExpression parameter,
-        IEntityType entityType,
-        StoreObjectIdentifier tableIdentifier)
+    // ------------------------------------------------------------------ operands
+
+    private SqlOperand TranslateOperand(Expression expression, ParameterExpression parameter)
     {
-        if (expression.Method.DeclaringType != typeof(string))
+        expression = DataVoExpressionHelpers.UnwrapConvert(expression);
+
+        if (!DataVoExpressionHelpers.ReferencesParameter(expression, parameter))
+        {
+            object? value = DataVoExpressionHelpers.Evaluate(expression);
+            return value is null
+                ? new SqlOperand("NULL", IsNullLiteral: true)
+                : new SqlOperand(_parameters.Add(value), IsNullLiteral: false);
+        }
+
+        if (expression is MemberExpression member && TryResolveProperty(member, parameter, out IProperty? property))
+        {
+            return new SqlOperand(ColumnOf(property), IsNullLiteral: false);
+        }
+
+        if (expression is MethodCallExpression methodCall)
+        {
+            if (TryTranslateVectorDistance(methodCall, parameter, out string? vectorDistanceSql))
+            {
+                return new SqlOperand(vectorDistanceSql, IsNullLiteral: false);
+            }
+
+            if (methodCall.Method.DeclaringType == typeof(string) && methodCall.Type == typeof(string))
+            {
+                return new SqlOperand(TranslateStringScalar(methodCall, parameter), IsNullLiteral: false);
+            }
+        }
+
+        throw new NotSupportedException($"Native translation does not support the operand '{expression}'.");
+    }
+
+    private bool TryTranslateVectorDistance(MethodCallExpression expression, ParameterExpression parameter, out string sql)
+    {
+        sql = string.Empty;
+        if (!DataVoExpressionHelpers.TryGetVectorDistanceOperands(expression, out Expression? left, out Expression? right, out string? operatorToken))
+        {
+            return false;
+        }
+
+        sql = $"({TranslateOperand(left, parameter).Sql} {operatorToken} {TranslateOperand(right, parameter).Sql})";
+        return true;
+    }
+
+    private string TranslateStringPredicate(MethodCallExpression expression, ParameterExpression parameter)
+    {
+        if (expression.Method.DeclaringType != typeof(string) || expression.Arguments.Count != 1)
         {
             throw new NotSupportedException($"Native translation does not support method '{expression.Method.Name}'.");
         }
 
-        string sourceColumn = ResolveStringSourceSql(expression.Object, parameter, entityType, tableIdentifier);
+        string source = ResolveStringSourceSql(expression.Object, parameter);
+        string argument = DataVoExpressionHelpers.Evaluate(expression.Arguments[0])?.ToString() ?? string.Empty;
+        string escaped = EscapeLikePattern(argument);
 
-        if (expression.Arguments.Count != 1)
+        string pattern = expression.Method.Name switch
         {
-            throw new NotSupportedException($"Native string method '{expression.Method.Name}' requires exactly one argument.");
-        }
-
-        object? argumentValue = EvaluateExpression(expression.Arguments[0]);
-        string argument = argumentValue?.ToString() ?? string.Empty;
-
-        return expression.Method.Name switch
-        {
-            nameof(string.Contains) => BuildLikePredicate(sourceColumn, $"%{argument}%"),
-            nameof(string.StartsWith) => BuildLikePredicate(sourceColumn, $"{argument}%"),
-            nameof(string.EndsWith) => BuildLikePredicate(sourceColumn, $"%{argument}"),
+            nameof(string.Contains) => $"%{escaped}%",
+            nameof(string.StartsWith) => $"{escaped}%",
+            nameof(string.EndsWith) => $"%{escaped}",
             _ => throw new NotSupportedException($"Native string method '{expression.Method.Name}' is not supported.")
         };
+
+        return $"({source} LIKE {_parameters.Add(pattern)})";
     }
 
-    private static string TranslateStringScalarExpression(
-        MethodCallExpression expression,
-        ParameterExpression parameter,
-        IEntityType entityType,
-        StoreObjectIdentifier tableIdentifier)
+    private string TranslateStringScalar(MethodCallExpression expression, ParameterExpression parameter)
     {
-        if (expression.Method.DeclaringType != typeof(string))
-        {
-            throw new NotSupportedException($"Native translation does not support method '{expression.Method.Name}'.");
-        }
-
         if (expression.Arguments.Count != 0)
         {
             throw new NotSupportedException($"Native string scalar method '{expression.Method.Name}' requires zero arguments.");
         }
 
-        string sourceSql = ResolveStringSourceSql(expression.Object, parameter, entityType, tableIdentifier);
-
+        string source = ResolveStringSourceSql(expression.Object, parameter);
         return expression.Method.Name switch
         {
-            nameof(string.ToLower) => $"LOWER({sourceSql})",
-            nameof(string.ToUpper) => $"UPPER({sourceSql})",
+            nameof(string.ToLower) => $"LOWER({source})",
+            nameof(string.ToUpper) => $"UPPER({source})",
             _ => throw new NotSupportedException($"Native string scalar method '{expression.Method.Name}' is not supported.")
         };
     }
 
-    private static string ResolveStringSourceSql(
-        Expression? source,
-        ParameterExpression parameter,
-        IEntityType entityType,
-        StoreObjectIdentifier tableIdentifier)
+    private string ResolveStringSourceSql(Expression? source, ParameterExpression parameter)
     {
-        if (source is null)
+        source = source is null ? null : DataVoExpressionHelpers.UnwrapConvert(source);
+
+        if (source is MemberExpression member &&
+            TryResolveProperty(member, parameter, out IProperty? property) &&
+            property.ClrType == typeof(string))
         {
-            throw new NotSupportedException("Native string translation requires an instance source.");
+            return ColumnOf(property);
         }
 
-        source = UnwrapConvert(source);
-
-        if (source is MemberExpression sourceMember &&
-            TryResolveProperty(sourceMember, parameter, entityType, out IProperty? sourceProperty) &&
-            sourceProperty is not null &&
-            sourceProperty.ClrType == typeof(string))
+        if (source is MethodCallExpression methodCall &&
+            methodCall.Method.DeclaringType == typeof(string) &&
+            methodCall.Type == typeof(string))
         {
-            return sourceProperty.GetColumnName(tableIdentifier) ?? sourceProperty.Name;
-        }
-
-        if (source is MethodCallExpression methodCallExpression &&
-            methodCallExpression.Method.DeclaringType == typeof(string) &&
-            methodCallExpression.Type == typeof(string))
-        {
-            return TranslateStringScalarExpression(methodCallExpression, parameter, entityType, tableIdentifier);
+            return TranslateStringScalar(methodCall, parameter);
         }
 
         throw new NotSupportedException("Native string method translation requires a mapped string property source.");
     }
 
-    private static string BuildLikePredicate(string sourceColumn, string pattern)
+    /// <summary>Escapes LIKE wildcards (and the backslash escape itself) so the argument matches literally.</summary>
+    internal static string EscapeLikePattern(string value)
+        => value.Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_");
+
+    // ------------------------------------------------------------------ projection
+
+    private IReadOnlyList<EntityColumnBinding> BindReferencedProperties(LambdaExpression selector)
     {
-        string escapedPattern = pattern.Replace("'", "''");
-        return $"({sourceColumn} LIKE '{escapedPattern}')";
-    }
+        var bindings = new List<EntityColumnBinding>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
 
-    private static ProjectionBuildResult<TDto> BuildProjection<TEntity, TDto>(
-        LambdaExpression selector,
-        IEntityType entityType,
-        StoreObjectIdentifier tableIdentifier)
-        where TEntity : class
-    {
-        var mappedProperties = entityType
-            .GetProperties()
-            .Where(static property => property.PropertyInfo is not null)
-            .ToDictionary(
-                property => property.Name,
-                property => property,
-                StringComparer.Ordinal);
-
-        ParameterExpression parameter = selector.Parameters[0];
-        var referencedPropertyNames = CollectReferencedEntityPropertyNames(selector.Body, parameter);
-
-        if (referencedPropertyNames.Any(name => !mappedProperties.ContainsKey(name)))
+        foreach (MemberExpression member in DataVoExpressionHelpers.FindParameterMembers(selector.Body, selector.Parameters[0]))
         {
-            throw new NotSupportedException("Native projection selector references unmapped members.");
-        }
-
-        var projectionBindings = referencedPropertyNames
-            .Distinct(StringComparer.Ordinal)
-            .Select(propertyName =>
+            if (!TryResolveProperty(member, selector.Parameters[0], out IProperty? property) || property.PropertyInfo is null)
             {
-                IProperty property = mappedProperties[propertyName];
-                string columnName = property.GetColumnName(tableIdentifier) ?? property.Name;
-                return new EntityColumnBinding(property, columnName);
-            })
-            .ToArray();
-
-        string selectClause = projectionBindings.Length > 0
-            ? string.Join(", ", projectionBindings.Select(static binding => binding.ColumnName))
-            : "*";
-
-        var compiledSelector = (Func<TEntity, TDto>)selector.Compile();
-
-        return new ProjectionBuildResult<TDto>(
-            SelectClause: selectClause,
-            Materialize: reader =>
-            {
-                object entity = Activator.CreateInstance(entityType.ClrType)
-                    ?? throw new DataVoEfException(
-                        DataVoEfOperation.Query,
-                        $"Could not create an instance of '{entityType.ClrType.FullName}' during native projection materialization.");
-
-                foreach (var binding in projectionBindings)
-                {
-                    int ordinal;
-                    try
-                    {
-                        ordinal = reader.GetOrdinal(binding.ColumnName);
-                    }
-                    catch (IndexOutOfRangeException)
-                    {
-                        continue;
-                    }
-
-                    object? raw = reader.GetValue(ordinal);
-                    if (raw is null or DBNull)
-                    {
-                        continue;
-                    }
-
-                    object converted = DataVoEntityMaterializer.ConvertToClrType(raw, binding.Property.ClrType);
-                    binding.Property.PropertyInfo!.SetValue(entity, converted);
-                }
-
-                return compiledSelector((TEntity)entity);
-            });
-    }
-
-    private static IReadOnlyList<string> CollectReferencedEntityPropertyNames(Expression expression, ParameterExpression parameter)
-    {
-        var collector = new List<string>();
-
-        void Visit(Expression node)
-        {
-            if (node is null)
-            {
-                return;
+                throw new NotSupportedException("Native projection selector references unmapped members.");
             }
 
-            node = UnwrapConvert(node);
-
-            switch (node)
+            if (seen.Add(property.Name))
             {
-                case MemberExpression memberExpression:
-                    {
-                        if (IsEntityMemberAccess(memberExpression, parameter))
-                        {
-                            collector.Add(memberExpression.Member.Name);
-                        }
-
-                        if (memberExpression.Expression is not null)
-                        {
-                            Visit(memberExpression.Expression);
-                        }
-
-                        break;
-                    }
-
-                case BinaryExpression binaryExpression:
-                    Visit(binaryExpression.Left);
-                    Visit(binaryExpression.Right);
-                    break;
-
-                case UnaryExpression unaryExpression:
-                    Visit(unaryExpression.Operand);
-                    break;
-
-                case MethodCallExpression methodCallExpression:
-                    if (methodCallExpression.Object is not null)
-                    {
-                        Visit(methodCallExpression.Object);
-                    }
-
-                    foreach (Expression argument in methodCallExpression.Arguments)
-                    {
-                        Visit(argument);
-                    }
-
-                    break;
-
-                case ConditionalExpression conditionalExpression:
-                    Visit(conditionalExpression.Test);
-                    Visit(conditionalExpression.IfTrue);
-                    Visit(conditionalExpression.IfFalse);
-                    break;
-
-                case NewExpression newExpression:
-                    foreach (Expression argument in newExpression.Arguments)
-                    {
-                        Visit(argument);
-                    }
-
-                    break;
-
-                case MemberInitExpression memberInitExpression:
-                    Visit(memberInitExpression.NewExpression);
-                    foreach (MemberBinding binding in memberInitExpression.Bindings)
-                    {
-                        if (binding is MemberAssignment assignment)
-                        {
-                            Visit(assignment.Expression);
-                        }
-                    }
-
-                    break;
+                bindings.Add(Bind(property));
             }
         }
 
-        Visit(expression);
-        return collector;
+        return bindings;
     }
 
-    private static IProperty ResolveProperty(
-        MemberExpression memberExpression,
-        ParameterExpression parameter,
-        IEntityType entityType)
+    private bool TryResolveProperty(MemberExpression member, ParameterExpression parameter, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out IProperty? property)
     {
-        if (!TryResolveProperty(memberExpression, parameter, entityType, out IProperty? property) || property is null)
-        {
-            throw new NotSupportedException(
-                $"Member '{memberExpression.Member.Name}' is not mapped as a scalar property on '{entityType.DisplayName()}'.");
-        }
-
-        return property;
-    }
-
-    private static bool TryResolveProperty(
-        MemberExpression memberExpression,
-        ParameterExpression parameter,
-        IEntityType entityType,
-        out IProperty? property)
-    {
-        property = null;
-
-        Expression? current = memberExpression.Expression;
-        while (current is UnaryExpression unary && unary.NodeType == ExpressionType.Convert)
-        {
-            current = unary.Operand;
-        }
-
-        if (current != parameter)
-        {
-            return false;
-        }
-
-        property = entityType.FindProperty(memberExpression.Member.Name);
+        property = DataVoExpressionHelpers.IsParameterMember(member, parameter)
+            ? _entityType.FindProperty(member.Member.Name)
+            : null;
         return property is not null;
     }
 
-    private static QueryShape ParseShape(Expression expression)
+    private readonly record struct SqlOperand(string Sql, bool IsNullLiteral);
+}
+
+/// <summary>
+/// The operators of a LINQ query shape that native translation understands.
+/// </summary>
+internal sealed class DataVoQueryShape
+{
+    public List<LambdaExpression> WherePredicates { get; } = [];
+    public List<Ordering> Orderings { get; } = [];
+    public int? Skip { get; private set; }
+    public int? Take { get; private set; }
+    public LambdaExpression? SelectSelector { get; private set; }
+
+    internal sealed record Ordering(LambdaExpression KeySelector, bool Descending);
+
+    public static DataVoQueryShape Parse(Expression expression)
     {
-        var shape = new QueryShape();
-        ParseRecursive(expression, shape);
+        var shape = new DataVoQueryShape();
+        shape.ParseRecursive(expression);
         return shape;
     }
 
-    private static void ParseRecursive(Expression expression, QueryShape shape)
+    private void ParseRecursive(Expression expression)
     {
-        if (expression is MethodCallExpression methodCall)
+        if (expression is not MethodCallExpression methodCall)
         {
-            if (methodCall.Method.DeclaringType == typeof(Queryable))
-            {
-                ParseRecursive(methodCall.Arguments[0], shape);
+            return;
+        }
 
-                switch (methodCall.Method.Name)
-                {
-                    case nameof(Queryable.Where):
-                        shape.WherePredicates.Add(Unquote(methodCall.Arguments[1]));
-                        return;
+        if (methodCall.Method.DeclaringType == typeof(EntityFrameworkQueryableExtensions) &&
+            methodCall.Method.Name == nameof(EntityFrameworkQueryableExtensions.AsNoTracking))
+        {
+            ParseRecursive(methodCall.Arguments[0]);
+            return;
+        }
 
-                    case nameof(Queryable.OrderBy):
-                        shape.Orderings.Add(new OrderingClause(Unquote(methodCall.Arguments[1]), Descending: false));
-                        return;
+        if (methodCall.Method.DeclaringType != typeof(Queryable))
+        {
+            return;
+        }
 
-                    case nameof(Queryable.OrderByDescending):
-                        shape.Orderings.Add(new OrderingClause(Unquote(methodCall.Arguments[1]), Descending: true));
-                        return;
+        ParseRecursive(methodCall.Arguments[0]);
 
-                    case nameof(Queryable.ThenBy):
-                        shape.Orderings.Add(new OrderingClause(Unquote(methodCall.Arguments[1]), Descending: false));
-                        return;
-
-                    case nameof(Queryable.ThenByDescending):
-                        shape.Orderings.Add(new OrderingClause(Unquote(methodCall.Arguments[1]), Descending: true));
-                        return;
-
-                    case nameof(Queryable.Skip):
-                        shape.Skip = Convert.ToInt32(EvaluateExpression(methodCall.Arguments[1]), CultureInfo.InvariantCulture);
-                        return;
-
-                    case nameof(Queryable.Take):
-                        shape.Take = Convert.ToInt32(EvaluateExpression(methodCall.Arguments[1]), CultureInfo.InvariantCulture);
-                        return;
-
-                    case nameof(Queryable.Select):
-                        shape.SelectSelector = Unquote(methodCall.Arguments[1]);
-                        return;
-
-                    default:
-                        throw new NotSupportedException($"Native query translation does not support '{methodCall.Method.Name}'.");
-                }
-            }
-
-            if (methodCall.Method.DeclaringType == typeof(EntityFrameworkQueryableExtensions) &&
-                methodCall.Method.Name == nameof(EntityFrameworkQueryableExtensions.AsNoTracking))
-            {
-                ParseRecursive(methodCall.Arguments[0], shape);
+        switch (methodCall.Method.Name)
+        {
+            case nameof(Queryable.Where):
+                WherePredicates.Add(DataVoExpressionHelpers.Unquote(methodCall.Arguments[1]));
                 return;
-            }
+            case nameof(Queryable.OrderBy):
+            case nameof(Queryable.ThenBy):
+                Orderings.Add(new Ordering(DataVoExpressionHelpers.Unquote(methodCall.Arguments[1]), Descending: false));
+                return;
+            case nameof(Queryable.OrderByDescending):
+            case nameof(Queryable.ThenByDescending):
+                Orderings.Add(new Ordering(DataVoExpressionHelpers.Unquote(methodCall.Arguments[1]), Descending: true));
+                return;
+            case nameof(Queryable.Skip):
+                Skip = Convert.ToInt32(DataVoExpressionHelpers.Evaluate(methodCall.Arguments[1]), CultureInfo.InvariantCulture);
+                return;
+            case nameof(Queryable.Take):
+                Take = Convert.ToInt32(DataVoExpressionHelpers.Evaluate(methodCall.Arguments[1]), CultureInfo.InvariantCulture);
+                return;
+            case nameof(Queryable.Select):
+                SelectSelector = DataVoExpressionHelpers.Unquote(methodCall.Arguments[1]);
+                return;
+            default:
+                throw new NotSupportedException($"Native query translation does not support '{methodCall.Method.Name}'.");
         }
-
-        if (expression is ConstantExpression)
-        {
-            return;
-        }
-
-        if (expression is ParameterExpression)
-        {
-            return;
-        }
-
-        return;
     }
+}
 
-    private static object? EvaluateExpression(Expression expression)
+/// <summary>
+/// Expression-tree helpers shared by the query analyzer and the native translator, so both classify
+/// the same shapes the same way.
+/// </summary>
+internal static class DataVoExpressionHelpers
+{
+    public static Expression UnwrapConvert(Expression expression)
     {
-        if (expression is ConstantExpression constant)
-        {
-            return constant.Value;
-        }
-
-        var lambda = Expression.Lambda<Func<object?>>(
-            Expression.Convert(expression, typeof(object)));
-        return lambda.Compile().Invoke();
-    }
-
-    private static LambdaExpression Unquote(Expression expression)
-    {
-        return expression is UnaryExpression unary && unary.NodeType == ExpressionType.Quote
-            ? (LambdaExpression)unary.Operand
-            : (LambdaExpression)expression;
-    }
-
-    private static Expression UnwrapConvert(Expression expression)
-    {
-        while (expression is UnaryExpression unary && unary.NodeType == ExpressionType.Convert)
+        while (expression is UnaryExpression { NodeType: ExpressionType.Convert or ExpressionType.ConvertChecked } unary)
         {
             expression = unary.Operand;
         }
@@ -971,70 +678,159 @@ internal static class DataVoNativeQueryTranslator
         return expression;
     }
 
-    private static bool IsEntityMemberAccess(MemberExpression? memberExpression, ParameterExpression parameter)
+    public static LambdaExpression Unquote(Expression expression)
     {
-        if (memberExpression is null)
+        return expression is UnaryExpression { NodeType: ExpressionType.Quote } unary
+            ? (LambdaExpression)unary.Operand
+            : (LambdaExpression)expression;
+    }
+
+    /// <summary>Whether <paramref name="member"/> reads a member directly off the lambda parameter.</summary>
+    public static bool IsParameterMember(MemberExpression member, ParameterExpression parameter)
+        => member.Expression is { } source && UnwrapConvert(source) == parameter;
+
+    /// <summary>Whether <paramref name="expression"/> reads the lambda parameter anywhere.</summary>
+    public static bool ReferencesParameter(Expression expression, ParameterExpression parameter)
+    {
+        var finder = new ParameterFinder(parameter);
+        finder.Visit(expression);
+        return finder.Found;
+    }
+
+    /// <summary>Returns every member read directly off the lambda parameter, in visit order.</summary>
+    public static IReadOnlyList<MemberExpression> FindParameterMembers(Expression expression, ParameterExpression parameter)
+    {
+        var collector = new ParameterMemberCollector(parameter);
+        collector.Visit(expression);
+        return collector.Members;
+    }
+
+    public static bool IsComparison(ExpressionType nodeType) => nodeType is
+        ExpressionType.Equal or ExpressionType.NotEqual or
+        ExpressionType.GreaterThan or ExpressionType.GreaterThanOrEqual or
+        ExpressionType.LessThan or ExpressionType.LessThanOrEqual;
+
+    /// <summary>
+    /// Splits <c>predicate == true/false</c> (or <c>!=</c>) where one side is a parameter-free boolean,
+    /// returning the predicate side and whether it must hold.
+    /// </summary>
+    public static bool TrySplitBooleanComparison(
+        BinaryExpression expression,
+        ParameterExpression parameter,
+        [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out Expression? predicate,
+        out bool expected)
+    {
+        predicate = null;
+        expected = false;
+
+        if (expression.NodeType is not (ExpressionType.Equal or ExpressionType.NotEqual) ||
+            expression.Left.Type != typeof(bool) || expression.Right.Type != typeof(bool))
         {
             return false;
         }
 
-        Expression? current = memberExpression.Expression;
-        while (current is UnaryExpression unary && unary.NodeType == ExpressionType.Convert)
+        Expression constantSide;
+        if (!ReferencesParameter(expression.Right, parameter))
         {
-            current = unary.Operand;
+            predicate = expression.Left;
+            constantSide = expression.Right;
+        }
+        else if (!ReferencesParameter(expression.Left, parameter))
+        {
+            predicate = expression.Right;
+            constantSide = expression.Left;
+        }
+        else
+        {
+            return false;
         }
 
-        return current == parameter;
+        bool value = Equals(Evaluate(constantSide), true);
+        expected = value == (expression.NodeType == ExpressionType.Equal);
+        return true;
     }
 
-    private readonly record struct SqlOperand(string Sql, bool IsNullLiteral);
-
-    private sealed class QueryShape
+    /// <summary>
+    /// Matches a <see cref="DataVoVectorDbFunctions"/> distance call and returns its vector operands and
+    /// DataVo operator (<c>&lt;=&gt;</c> for cosine, <c>&lt;-&gt;</c> for L2).
+    /// </summary>
+    public static bool TryGetVectorDistanceOperands(
+        MethodCallExpression expression,
+        [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out Expression? left,
+        [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out Expression? right,
+        [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out string? operatorToken)
     {
-        public List<LambdaExpression> WherePredicates { get; } = [];
-        public List<OrderingClause> Orderings { get; } = [];
-        public int? Skip { get; set; }
-        public int? Take { get; set; }
-        public LambdaExpression? SelectSelector { get; set; }
-    }
+        left = right = null;
+        operatorToken = expression.Method.DeclaringType != typeof(DataVoVectorDbFunctions)
+            ? null
+            : expression.Method.Name switch
+            {
+                nameof(DataVoVectorDbFunctions.CosineDistance) => "<=>",
+                nameof(DataVoVectorDbFunctions.L2Distance) => "<->",
+                _ => null
+            };
 
-    private sealed record OrderingClause(LambdaExpression KeySelector, bool Descending);
-
-    private sealed record ProjectionBuildResult<TDto>(
-        string SelectClause,
-        Func<DbDataReader, TDto> Materialize);
-
-    private sealed record OrderByBuildResult(
-        string OrderBySql,
-        IReadOnlyList<string> AdditionalSelectExpressions);
-
-}
-
-internal static class DataVoSqlLiteralFormatter
-{
-    public static string Format(object? value)
-    {
-        return value switch
+        // Extension-method form includes EF.Functions as the first argument.
+        int start = expression.Arguments.Count == 3 ? 1 : 0;
+        if (operatorToken is null || expression.Arguments.Count - start != 2)
         {
-            null or DBNull => "NULL",
-            bool booleanValue => booleanValue ? "1" : "0",
-            string stringValue => $"'{stringValue.Replace("'", "''")}'",
-            float[] floatVector => FormatVector(floatVector),
-            double[] doubleVector => FormatVector(doubleVector),
-            DateOnly dateOnlyValue => $"'{dateOnlyValue:yyyy-MM-dd}'",
-            DateTime dateTimeValue => $"'{dateTimeValue:yyyy-MM-dd}'",
-            DateTimeOffset dateTimeOffsetValue => $"'{dateTimeOffsetValue:yyyy-MM-dd}'",
-            Guid guidValue => $"'{guidValue}'",
-            Enum enumValue => Convert.ToInt32(enumValue, CultureInfo.InvariantCulture).ToString(CultureInfo.InvariantCulture),
-            IFormattable formattable => formattable.ToString(null, CultureInfo.InvariantCulture),
-            _ => $"'{value.ToString()?.Replace("'", "''")}'"
-        };
+            operatorToken = null;
+            return false;
+        }
+
+        left = expression.Arguments[start];
+        right = expression.Arguments[start + 1];
+        return true;
     }
 
-    private static string FormatVector<T>(IEnumerable<T> vector)
-        where T : IFormattable
+    /// <summary>Evaluates a parameter-free expression (a constant or captured variable).</summary>
+    public static object? Evaluate(Expression expression)
     {
-        string joined = string.Join(",", vector.Select(component => component.ToString(null, CultureInfo.InvariantCulture)));
-        return $"'[{joined}]'";
+        if (expression is ConstantExpression constant)
+        {
+            return constant.Value;
+        }
+
+        return Expression.Lambda<Func<object?>>(Expression.Convert(expression, typeof(object))).Compile().Invoke();
+    }
+
+    /// <summary>Whether a parameter-free expression can be evaluated client-side.</summary>
+    public static bool TryEvaluate(Expression expression)
+    {
+        try
+        {
+            _ = Evaluate(expression);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private sealed class ParameterFinder(ParameterExpression parameter) : ExpressionVisitor
+    {
+        public bool Found { get; private set; }
+
+        protected override Expression VisitParameter(ParameterExpression node)
+        {
+            Found |= node == parameter;
+            return node;
+        }
+    }
+
+    private sealed class ParameterMemberCollector(ParameterExpression parameter) : ExpressionVisitor
+    {
+        public List<MemberExpression> Members { get; } = [];
+
+        protected override Expression VisitMember(MemberExpression node)
+        {
+            if (IsParameterMember(node, parameter))
+            {
+                Members.Add(node);
+            }
+
+            return base.VisitMember(node);
+        }
     }
 }

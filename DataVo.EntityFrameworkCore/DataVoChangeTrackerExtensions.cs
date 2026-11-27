@@ -1,13 +1,12 @@
-using DataVo.Data;
+using DataVo.EntityFrameworkCore.Infrastructure.Internal;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.ChangeTracking;
 using Microsoft.EntityFrameworkCore.Metadata;
-using System.Globalization;
 
 namespace DataVo.EntityFrameworkCore;
 
 /// <summary>
-/// Experimental EF Core change-tracker bridge for applying tracked CRUD operations to DataVo.
+/// EF Core change-tracker bridge for applying tracked CRUD operations to DataVo.
 /// </summary>
 public static class DataVoChangeTrackerExtensions
 {
@@ -24,8 +23,8 @@ public static class DataVoChangeTrackerExtensions
     }
 
     /// <summary>
-    /// Applies tracked Added/Modified/Deleted entities to DataVo using generated SQL commands.
-    /// Schema is created first (idempotent <c>IF NOT EXISTS</c>).
+    /// Applies tracked Added/Modified/Deleted entities to DataVo in one transaction using parameterized
+    /// SQL commands. Schema is created first (idempotent <c>IF NOT EXISTS</c>).
     /// </summary>
     /// <remarks>
     /// When <c>UseDataVo</c> is configured and <c>SaveChanges()</c> is called on the context the
@@ -50,14 +49,15 @@ public static class DataVoChangeTrackerExtensions
     }
 
     /// <summary>
-    /// Executes INSERT / UPDATE / DELETE SQL against DataVo for all pending change-tracker
-    /// entries without touching schema or calling <c>AcceptAllChanges</c>.
+    /// Executes INSERT / UPDATE / DELETE commands against DataVo for all pending change-tracker
+    /// entries in a single DataVo transaction, without touching schema or calling
+    /// <c>AcceptAllChanges</c>. If any statement fails, the whole batch is rolled back.
     /// Called by both <see cref="SaveChangesToDataVo(DbContext, string, bool)"/> and the
     /// automatic <see cref="Infrastructure.Internal.DataVoSaveChangesInterceptor"/>.
     /// </summary>
     /// <exception cref="DataVoEfException">
-    /// Thrown with a specific <see cref="DataVoEfOperation"/> for each DML type when DataVo
-    /// rejects the statement (e.g. duplicate key, FK violation, type mismatch).
+    /// Thrown with the <see cref="DataVoEfOperation"/> that failed when DataVo rejects a statement
+    /// (e.g. duplicate key, FK violation, type mismatch) or the connection or commit fails.
     /// </exception>
     internal static int ExecuteDataVoCrud(DbContext context, string connectionString)
     {
@@ -67,56 +67,24 @@ public static class DataVoChangeTrackerExtensions
             return 0;
         }
 
+        DataVoEfOperation operation = DataVoEfOperation.Connection;
         try
         {
-            using var connection = new DataVoConnection(connectionString);
-            connection.Open();
+            using var connection = DataVoBridgeStorage.Open(connectionString);
+            using var transaction = connection.Connection.BeginTransaction();
 
             int affectedRows = 0;
-
             foreach (EntityEntry entry in entries)
             {
-                string? sql = BuildSql(entry);
-                if (string.IsNullOrWhiteSpace(sql))
+                operation = GetOperation(entry.State);
+                DataVoSqlStatement? statement = BuildStatement(entry);
+                if (statement is not null)
                 {
-                    continue;
-                }
-
-                try
-                {
-                    using var command = connection.CreateCommand();
-                    command.CommandText = sql;
-                    int statementAffected = command.ExecuteNonQuery();
-
-                    if (entry.State == EntityState.Added && statementAffected == 0)
-                    {
-                        throw new DataVoEfException(
-                            DataVoEfOperation.Insert,
-                            $"DataVo insert appears to have failed (rows affected = 0). SQL: {sql}");
-                    }
-
-                    affectedRows += statementAffected;
-                }
-                catch (Exception ex) when (ex is not DataVoEfException)
-                {
-                    var operation = entry.State switch
-                    {
-                        EntityState.Added => DataVoEfOperation.Insert,
-                        EntityState.Modified => DataVoEfOperation.Update,
-                        EntityState.Deleted => DataVoEfOperation.Delete,
-                        _ => DataVoEfOperation.RawSql
-                    };
-
-                    string tableName = entry.Metadata.GetTableName() ?? entry.Metadata.DisplayName();
-
-                    throw new DataVoEfException(
-                        operation,
-                        $"DataVo {operation} failed on table '{tableName}' for entity '{entry.Metadata.DisplayName()}'. " +
-                        $"SQL: {sql} — See inner exception for details.",
-                        ex);
+                    affectedRows += ExecuteEntryStatement(entry, operation, statement, connection);
                 }
             }
 
+            transaction.Commit();
             return affectedRows;
         }
         catch (DataVoEfException)
@@ -126,11 +94,50 @@ public static class DataVoChangeTrackerExtensions
         catch (Exception ex)
         {
             throw new DataVoEfException(
-                DataVoEfOperation.Insert,
-                $"DataVo CRUD execution failed. Connection: {connectionString}. See inner exception.",
+                operation,
+                $"DataVo {operation} failed while saving changes; no changes were committed. Connection: {connectionString}. See inner exception.",
                 ex);
         }
     }
+
+    private static int ExecuteEntryStatement(
+        EntityEntry entry,
+        DataVoEfOperation operation,
+        DataVoSqlStatement statement,
+        DataVoBridgeConnection connection)
+    {
+        int affected;
+        try
+        {
+            affected = connection.ExecuteNonQuery(statement);
+        }
+        catch (Exception ex)
+        {
+            string tableName = entry.Metadata.GetTableName() ?? entry.Metadata.DisplayName();
+            throw new DataVoEfException(
+                operation,
+                $"DataVo {operation} failed on table '{tableName}' for entity '{entry.Metadata.DisplayName()}'; no changes were committed. " +
+                $"SQL: {statement.Sql} — See inner exception for details.",
+                ex);
+        }
+
+        if (operation == DataVoEfOperation.Insert && affected == 0)
+        {
+            throw new DataVoEfException(
+                DataVoEfOperation.Insert,
+                $"DataVo insert appears to have failed (rows affected = 0); no changes were committed. SQL: {statement.Sql}");
+        }
+
+        return affected;
+    }
+
+    private static DataVoEfOperation GetOperation(EntityState state) => state switch
+    {
+        EntityState.Added => DataVoEfOperation.Insert,
+        EntityState.Modified => DataVoEfOperation.Update,
+        EntityState.Deleted => DataVoEfOperation.Delete,
+        _ => DataVoEfOperation.RawSql,
+    };
 
     private static List<EntityEntry> GetOrderedEntries(DbContext context)
     {
@@ -141,167 +148,108 @@ public static class DataVoChangeTrackerExtensions
                 entry.Metadata.GetTableName() is not null)
             .ToList();
 
-        var mappedEntityTypes = context.Model
-            .GetEntityTypes()
-            .Where(static entityType => entityType.GetTableName() is not null)
-            .ToList();
+        var tableOrder = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        foreach (IEntityType entityType in DataVoModelOrdering.OrderPrincipalsFirst(context.Model.GetEntityTypes()))
+        {
+            tableOrder.TryAdd(DataVoModelOrdering.GetTableKey(entityType), tableOrder.Count);
+        }
 
-        var orderedEntityTypes = OrderEntityTypesForCreation(mappedEntityTypes);
-        var tableOrderLookup = orderedEntityTypes
-            .Select((entityType, index) => new { TableName = entityType.GetTableName()!, index })
-            .ToDictionary(static x => x.TableName, static x => x.index, StringComparer.Ordinal);
+        int GetTableOrder(EntityEntry entry) => tableOrder[DataVoModelOrdering.GetTableKey(entry.Metadata)];
 
         var added = trackableEntries
             .Where(static entry => entry.State == EntityState.Added)
-            .OrderBy(entry => tableOrderLookup.GetValueOrDefault(entry.Metadata.GetTableName() ?? string.Empty, int.MaxValue))
-            .ToList();
+            .OrderBy(GetTableOrder);
 
         var modified = trackableEntries
-            .Where(static entry => entry.State == EntityState.Modified)
-            .ToList();
+            .Where(static entry => entry.State == EntityState.Modified);
 
         var deleted = trackableEntries
             .Where(static entry => entry.State == EntityState.Deleted)
-            .OrderByDescending(entry => tableOrderLookup.GetValueOrDefault(entry.Metadata.GetTableName() ?? string.Empty, int.MinValue))
-            .ToList();
+            .OrderByDescending(GetTableOrder);
 
         return [.. added, .. modified, .. deleted];
     }
 
-    private static string? BuildSql(EntityEntry entry)
+    private static DataVoSqlStatement? BuildStatement(EntityEntry entry)
     {
-        string tableName = entry.Metadata.GetTableName()
-            ?? throw new InvalidOperationException($"Entity '{entry.Metadata.DisplayName()}' is not mapped to a table.");
+        string tableName = entry.Metadata.GetTableName()!;
+        var table = StoreObjectIdentifier.Table(tableName, entry.Metadata.GetSchema());
+        var parameters = new DataVoSqlParameterList();
 
-        var tableIdentifier = StoreObjectIdentifier.Table(tableName, entry.Metadata.GetSchema());
-        return entry.State switch
+        string? sql = entry.State switch
         {
-            EntityState.Added => BuildInsertSql(entry, tableName, tableIdentifier),
-            EntityState.Modified => BuildUpdateSql(entry, tableName, tableIdentifier),
-            EntityState.Deleted => BuildDeleteSql(entry, tableName, tableIdentifier),
+            EntityState.Added => BuildInsertSql(entry, tableName, table, parameters),
+            EntityState.Modified => BuildUpdateSql(entry, tableName, table, parameters),
+            EntityState.Deleted => BuildDeleteSql(entry, tableName, table, parameters),
             _ => null
         };
+
+        return sql is null ? null : new DataVoSqlStatement(sql, parameters.Parameters);
     }
 
-    private static string BuildInsertSql(EntityEntry entry, string tableName, StoreObjectIdentifier tableIdentifier)
+    private static string BuildInsertSql(EntityEntry entry, string tableName, StoreObjectIdentifier table, DataVoSqlParameterList parameters)
     {
-        var mappedProperties = entry.Metadata
-            .GetProperties()
-            .Where(property => property.GetColumnName(tableIdentifier) is not null)
-            .ToList();
+        var columns = new List<string>();
+        var values = new List<string>();
 
-        string[] columns = mappedProperties
-            .Select(property => property.GetColumnName(tableIdentifier)!)
-            .ToArray();
+        foreach (PropertyEntry propertyEntry in entry.Properties)
+        {
+            if (propertyEntry.Metadata.GetColumnName(table) is not { } columnName)
+            {
+                continue;
+            }
 
-        string[] values = mappedProperties
-            .Select(property => FormatSqlLiteral(entry.Property(property.Name).CurrentValue))
-            .ToArray();
+            columns.Add(columnName);
+            values.Add(parameters.Add(propertyEntry.CurrentValue));
+        }
 
         return $"INSERT INTO {tableName} ({string.Join(", ", columns)}) VALUES ({string.Join(", ", values)});";
     }
 
-    private static string? BuildUpdateSql(EntityEntry entry, string tableName, StoreObjectIdentifier tableIdentifier)
+    private static string? BuildUpdateSql(EntityEntry entry, string tableName, StoreObjectIdentifier table, DataVoSqlParameterList parameters)
     {
-        var setAssignments = entry.Properties
-            .Where(propertyEntry =>
-                propertyEntry.IsModified &&
-                !propertyEntry.Metadata.IsPrimaryKey() &&
-                propertyEntry.Metadata.GetColumnName(tableIdentifier) is not null)
-            .Select(propertyEntry =>
-            {
-                string columnName = propertyEntry.Metadata.GetColumnName(tableIdentifier)!;
-                return $"{columnName} = {FormatSqlLiteral(propertyEntry.CurrentValue)}";
-            })
-            .ToArray();
+        var assignments = new List<string>();
 
-        if (setAssignments.Length == 0)
+        foreach (PropertyEntry propertyEntry in entry.Properties)
+        {
+            if (propertyEntry.IsModified &&
+                !propertyEntry.Metadata.IsPrimaryKey() &&
+                propertyEntry.Metadata.GetColumnName(table) is { } columnName)
+            {
+                assignments.Add($"{columnName} = {parameters.Add(propertyEntry.CurrentValue)}");
+            }
+        }
+
+        if (assignments.Count == 0)
         {
             return null;
         }
 
-        string whereClause = BuildPrimaryKeyWhereClause(entry, tableIdentifier, useOriginalValues: true);
-        return $"UPDATE {tableName} SET {string.Join(", ", setAssignments)} WHERE {whereClause};";
+        string whereClause = BuildPrimaryKeyWhereClause(entry, table, parameters);
+        return $"UPDATE {tableName} SET {string.Join(", ", assignments)} WHERE {whereClause};";
     }
 
-    private static string BuildDeleteSql(EntityEntry entry, string tableName, StoreObjectIdentifier tableIdentifier)
+    private static string BuildDeleteSql(EntityEntry entry, string tableName, StoreObjectIdentifier table, DataVoSqlParameterList parameters)
     {
-        string whereClause = BuildPrimaryKeyWhereClause(entry, tableIdentifier, useOriginalValues: true);
+        string whereClause = BuildPrimaryKeyWhereClause(entry, table, parameters);
         return $"DELETE FROM {tableName} WHERE {whereClause};";
     }
 
-    private static string BuildPrimaryKeyWhereClause(EntityEntry entry, StoreObjectIdentifier tableIdentifier, bool useOriginalValues)
+    private static string BuildPrimaryKeyWhereClause(EntityEntry entry, StoreObjectIdentifier table, DataVoSqlParameterList parameters)
     {
         IKey primaryKey = entry.Metadata.FindPrimaryKey()
             ?? throw new NotSupportedException($"Entity '{entry.Metadata.DisplayName()}' must declare a primary key for DataVo CRUD bridge operations.");
 
-        string[] predicates = primaryKey.Properties
-            .Select(property =>
-            {
-                string columnName = property.GetColumnName(tableIdentifier) ?? property.Name;
-                object? value = useOriginalValues ? entry.Property(property.Name).OriginalValue : entry.Property(property.Name).CurrentValue;
+        var predicates = primaryKey.Properties.Select(property =>
+        {
+            string columnName = property.GetColumnName(table) ?? property.Name;
+            object? value = entry.Property(property.Name).OriginalValue;
 
-                return value is null
-                    ? $"{columnName} IS NULL"
-                    : $"{columnName} = {FormatSqlLiteral(value)}";
-            })
-            .ToArray();
+            return value is null
+                ? $"{columnName} IS NULL"
+                : $"{columnName} = {parameters.Add(value)}";
+        });
 
         return string.Join(" AND ", predicates);
-    }
-
-    private static string FormatSqlLiteral(object? value)
-    {
-        return value switch
-        {
-            null or DBNull => "NULL",
-            bool booleanValue => booleanValue ? "true" : "false",
-            string stringValue => $"'{stringValue.Replace("'", "''")}'",
-            DateOnly dateOnlyValue => $"'{dateOnlyValue:yyyy-MM-dd}'",
-            DateTime dateTimeValue => $"'{dateTimeValue:yyyy-MM-dd}'",
-            DateTimeOffset dateTimeOffsetValue => $"'{dateTimeOffsetValue:yyyy-MM-dd}'",
-            Guid guidValue => $"'{guidValue}'",
-            Enum enumValue => Convert.ToInt32(enumValue).ToString(CultureInfo.InvariantCulture),
-            IFormattable formattable => formattable.ToString(null, CultureInfo.InvariantCulture),
-            _ => $"'{value.ToString()?.Replace("'", "''")}'"
-        };
-    }
-
-    private static IReadOnlyList<IEntityType> OrderEntityTypesForCreation(IReadOnlyList<IEntityType> entityTypes)
-    {
-        var tableLookup = entityTypes.ToDictionary(static entityType => entityType.GetTableName()!);
-        var dependencies = entityTypes.ToDictionary(
-            static entityType => entityType,
-            static entityType => entityType
-                .GetForeignKeys()
-                .Select(static foreignKey => foreignKey.PrincipalEntityType)
-                .Where(principalEntityType => principalEntityType.GetTableName() is not null)
-                .Distinct()
-                .ToHashSet());
-
-        var ordered = new List<IEntityType>(entityTypes.Count);
-        var remaining = new HashSet<IEntityType>(entityTypes);
-
-        while (remaining.Count > 0)
-        {
-            var ready = remaining
-                .Where(entityType => dependencies[entityType].All(dependency => !remaining.Contains(dependency) || !tableLookup.ContainsKey(dependency.GetTableName()!)))
-                .OrderBy(static entityType => entityType.GetTableName(), StringComparer.Ordinal)
-                .ToList();
-
-            if (ready.Count == 0)
-            {
-                string cycleTables = string.Join(", ", remaining.Select(static entityType => entityType.GetTableName()));
-                throw new NotSupportedException($"DataVo EF change bridge does not yet support cyclic table dependencies: {cycleTables}.");
-            }
-
-            foreach (IEntityType entityType in ready)
-            {
-                ordered.Add(entityType);
-                remaining.Remove(entityType);
-            }
-        }
-
-        return ordered;
     }
 }

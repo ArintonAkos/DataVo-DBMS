@@ -21,7 +21,6 @@ public static class DataVoServiceCollectionExtensions
     {
         ArgumentNullException.ThrowIfNull(services);
 
-        services.TryAddSingleton<DataVoProviderBootstrapMarker>();
         services.TryAddScoped<DataVoProviderModeResolver>();
 
         // Replace whatever IDatabaseCreator the base provider registered (e.g. InMemory's no-op

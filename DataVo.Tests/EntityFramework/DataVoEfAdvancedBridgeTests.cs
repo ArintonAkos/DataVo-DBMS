@@ -298,7 +298,7 @@ public class DataVoEfAdvancedBridgeTests
     }
 
     [Fact]
-    public void EnsureDeleted_InMemoryStorage_ReturnsTrue()
+    public void EnsureDeleted_InMemoryStorage_DropsSharedDatabase()
     {
         var options = new DbContextOptionsBuilder<AdvancedContext>()
             .UseInMemoryDatabase($"ef_mem_delete_{Guid.NewGuid():N}")
@@ -306,9 +306,15 @@ public class DataVoEfAdvancedBridgeTests
             .Options;
 
         using var context = new AdvancedContext(options);
+        Assert.True(context.Database.EnsureCreated());
+        context.ExecuteSqlOnDataVo("INSERT INTO Boards (Id, Name) VALUES (1, 'Doomed');");
 
-        bool deleted = context.Database.EnsureDeleted();
-        Assert.True(deleted);
+        Assert.True(context.Database.EnsureDeleted());
+        Assert.False(context.Database.EnsureDeleted());
+
+        // A fresh in-memory database: the schema is recreated and the old row is gone.
+        Assert.True(context.Database.EnsureCreated());
+        Assert.Empty(context.QueryFromDataVo<Board>());
     }
 
     [Fact]
@@ -1096,21 +1102,20 @@ public class DataVoEfAdvancedBridgeTests
 
         Assert.Equal(DataVoProviderMode.BridgeOnly, mode.Mode);
         Assert.True(mode.IsBridgeOnlyMode);
-        Assert.False(mode.ProviderIdentityPreviewEnabled);
         Assert.False(mode.NativeQueryTranslationPreviewEnabled);
     }
 
     [Fact]
-    public void GetActiveProviderModeStatus_ProviderIdentityPreview_IsReported()
+    public void GetActiveProviderModeStatus_NativeTranslationPreview_IsReported()
     {
-        string cs = $"StorageMode=InMemory;DataSource=mode_identity_{Guid.NewGuid():N}";
-        using var ctx = CreateContext(cs, o => o.EnableProviderIdentityPreview());
+        string cs = $"StorageMode=InMemory;DataSource=mode_translation_{Guid.NewGuid():N}";
+        using var ctx = CreateContext(cs, o => o.EnableNativeQueryTranslationPreview());
 
         var mode = ctx.GetActiveProviderModeStatus();
 
-        Assert.Equal(DataVoProviderMode.ProviderIdentityPreview, mode.Mode);
-        Assert.True(mode.ProviderIdentityPreviewEnabled);
-        Assert.False(mode.NativeQueryTranslationPreviewEnabled);
+        Assert.Equal(DataVoProviderMode.NativeTranslationPreview, mode.Mode);
+        Assert.False(mode.IsBridgeOnlyMode);
+        Assert.True(mode.NativeQueryTranslationPreviewEnabled);
     }
 
     [Fact]

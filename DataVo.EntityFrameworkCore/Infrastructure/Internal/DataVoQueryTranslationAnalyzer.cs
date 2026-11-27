@@ -1,11 +1,19 @@
-using DataVo.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore;
 using System.Linq.Expressions;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Metadata;
 
 namespace DataVo.EntityFrameworkCore.Infrastructure.Internal;
 
+/// <summary>
+/// Classifies a LINQ query shape as native-translatable, guarded fallback or blocked. A shape it
+/// classifies as native must translate in <see cref="DataVoNativeQueryTranslator"/>: both classify
+/// expressions with <see cref="DataVoExpressionHelpers"/>.
+/// </summary>
 internal static class DataVoQueryTranslationAnalyzer
 {
+    private const string TrackingFallbackReason =
+        "Tracking queries (asNoTracking: false) refresh the EF mirror so the returned entities are tracked; native translation runs only for no-tracking queries.";
+
     private static readonly string[] NativePreviewOperators =
     [
         nameof(Queryable.Where),
@@ -39,9 +47,18 @@ internal static class DataVoQueryTranslationAnalyzer
 
     public static IReadOnlyList<string> GetBlockedOperators() => BlockedOperators;
 
-    public static DataVoQueryTranslationDiagnostics Analyze(Expression expression, DataVoProviderModeStatus mode)
+    /// <summary>Classifies <paramref name="expression"/> for the given mode.</summary>
+    /// <param name="expression">The composed query expression.</param>
+    /// <param name="mode">The active provider mode.</param>
+    /// <param name="model">The EF model, used to require that entity members are mapped properties.</param>
+    /// <param name="isTracking">Whether the caller wants tracked entities back.</param>
+    public static DataVoQueryTranslationDiagnostics Analyze(
+        Expression expression,
+        DataVoProviderModeStatus mode,
+        IModel? model = null,
+        bool isTracking = false)
     {
-        var visitor = new OperatorCollector();
+        var visitor = new OperatorCollector(model);
         visitor.Visit(expression);
 
         var operators = visitor.Operators.Distinct(StringComparer.Ordinal).ToArray();
@@ -63,27 +80,18 @@ internal static class DataVoQueryTranslationAnalyzer
 
         if (!mode.NativeQueryTranslationPreviewEnabled)
         {
-            return new DataVoQueryTranslationDiagnostics(
-                mode.Mode,
-                DataVoQueryTranslationOutcome.GuardedFallback,
-                operators,
-                FallbackReasons: ["Native query translation preview is disabled."],
-                BlockedReasons: [],
-                Summary: "Guarded fallback: native query translation preview is disabled.");
+            return Fallback(mode, operators, ["Native query translation preview is disabled."], "Guarded fallback: native query translation preview is disabled.");
         }
 
-        var fallbackReasons = visitor.FallbackReasons
-            .ToArray();
-
-        if (fallbackReasons.Length > 0)
+        var fallbackReasons = visitor.FallbackReasons.ToList();
+        if (isTracking)
         {
-            return new DataVoQueryTranslationDiagnostics(
-                mode.Mode,
-                DataVoQueryTranslationOutcome.GuardedFallback,
-                operators,
-                FallbackReasons: fallbackReasons,
-                BlockedReasons: [],
-                Summary: string.Join(" ", fallbackReasons));
+            fallbackReasons.Add(TrackingFallbackReason);
+        }
+
+        if (fallbackReasons.Count > 0)
+        {
+            return Fallback(mode, operators, fallbackReasons, string.Join(" ", fallbackReasons));
         }
 
         return new DataVoQueryTranslationDiagnostics(
@@ -95,10 +103,24 @@ internal static class DataVoQueryTranslationAnalyzer
             Summary: "Query shape is within the current native translation preview subset.");
     }
 
-    private sealed class OperatorCollector : ExpressionVisitor
+    private static DataVoQueryTranslationDiagnostics Fallback(
+        DataVoProviderModeStatus mode,
+        IReadOnlyList<string> operators,
+        IReadOnlyList<string> reasons,
+        string summary)
+    {
+        return new DataVoQueryTranslationDiagnostics(
+            mode.Mode,
+            DataVoQueryTranslationOutcome.GuardedFallback,
+            operators,
+            FallbackReasons: reasons,
+            BlockedReasons: [],
+            Summary: summary);
+    }
+
+    private sealed class OperatorCollector(IModel? model) : ExpressionVisitor
     {
         public List<string> Operators { get; } = [];
-        public List<string> FallbackOperators { get; } = [];
         public List<string> FallbackReasons { get; } = [];
         public List<string> BlockedOperators { get; } = [];
 
@@ -118,404 +140,241 @@ internal static class DataVoQueryTranslationAnalyzer
 
                 if (!NativePreviewQueryableOperators.Contains(methodName))
                 {
-                    FallbackOperators.Add(methodName);
                     FallbackReasons.Add($"Operator '{methodName}' is not yet in the native translation preview subset.");
                     return base.VisitMethodCall(node);
                 }
 
-                switch (methodName)
-                {
-                    case nameof(Queryable.Where):
-                        if (!TryGetLambda(node.Arguments[1], out LambdaExpression? whereLambda) ||
-                            !IsSupportedWherePredicate(whereLambda!))
-                        {
-                            FallbackReasons.Add("Operator 'Where' uses an expression shape that is not yet translatable in native preview.");
-                        }
-                        break;
-
-                    case nameof(Queryable.OrderBy):
-                    case nameof(Queryable.OrderByDescending):
-                    case nameof(Queryable.ThenBy):
-                    case nameof(Queryable.ThenByDescending):
-                        if (!TryGetLambda(node.Arguments[1], out LambdaExpression? orderingLambda) ||
-                            !IsSupportedOrderingSelector(orderingLambda!))
-                        {
-                            FallbackReasons.Add($"Operator '{methodName}' requires either a simple entity property selector or DataVo vector distance function selector for native preview.");
-                        }
-                        break;
-
-                    case nameof(Queryable.Take):
-                    case nameof(Queryable.Skip):
-                        if (!IsConstantOrClosureValue(node.Arguments[1]))
-                        {
-                            FallbackReasons.Add($"Operator '{methodName}' requires a constant or captured integer value for native preview.");
-                        }
-                        break;
-
-                    case nameof(Queryable.Select):
-                        if (!TryGetLambda(node.Arguments[1], out LambdaExpression? selectLambda) ||
-                            !IsSupportedSelectProjection(selectLambda!))
-                        {
-                            FallbackReasons.Add("Operator 'Select' uses members or expression forms outside the native preview projection subset.");
-                        }
-                        break;
-                }
+                ClassifyNativeOperator(node, methodName);
             }
-            else if (node.Method.DeclaringType == typeof(EntityFrameworkQueryableExtensions))
+            else if (node.Method.DeclaringType == typeof(EntityFrameworkQueryableExtensions) &&
+                     methodName is nameof(EntityFrameworkQueryableExtensions.Include) or nameof(EntityFrameworkQueryableExtensions.ThenInclude))
             {
-                if (methodName is nameof(EntityFrameworkQueryableExtensions.Include) or nameof(EntityFrameworkQueryableExtensions.ThenInclude))
-                {
-                    Operators.Add(methodName);
-                    FallbackOperators.Add(methodName);
-                    FallbackReasons.Add($"Operator '{methodName}' is not yet in the native translation preview subset.");
-                }
+                Operators.Add(methodName);
+                FallbackReasons.Add($"Operator '{methodName}' is not yet in the native translation preview subset.");
             }
 
             return base.VisitMethodCall(node);
         }
 
-        private static bool TryGetLambda(Expression expression, out LambdaExpression? lambda)
+        private void ClassifyNativeOperator(MethodCallExpression node, string methodName)
         {
-            if (expression is UnaryExpression unary && unary.NodeType == ExpressionType.Quote)
+            switch (methodName)
             {
-                lambda = unary.Operand as LambdaExpression;
-                return lambda is not null;
-            }
+                case nameof(Queryable.Where):
+                    if (!TryGetLambda(node.Arguments[1], out LambdaExpression? whereLambda) ||
+                        !IsSupportedPredicate(whereLambda.Body, whereLambda.Parameters[0]))
+                    {
+                        FallbackReasons.Add("Operator 'Where' uses an expression shape that is not yet translatable in native preview.");
+                    }
+                    break;
 
-            lambda = expression as LambdaExpression;
+                case nameof(Queryable.OrderBy):
+                case nameof(Queryable.OrderByDescending):
+                case nameof(Queryable.ThenBy):
+                case nameof(Queryable.ThenByDescending):
+                    if (!TryGetLambda(node.Arguments[1], out LambdaExpression? orderingLambda) ||
+                        !IsSupportedOrderingSelector(orderingLambda))
+                    {
+                        FallbackReasons.Add($"Operator '{methodName}' requires either a simple entity property selector or DataVo vector distance function selector for native preview.");
+                    }
+                    break;
+
+                case nameof(Queryable.Take):
+                case nameof(Queryable.Skip):
+                    if (!DataVoExpressionHelpers.TryEvaluate(node.Arguments[1]))
+                    {
+                        FallbackReasons.Add($"Operator '{methodName}' requires a constant or captured integer value for native preview.");
+                    }
+                    break;
+
+                case nameof(Queryable.Select):
+                    if (!TryGetLambda(node.Arguments[1], out LambdaExpression? selectLambda) ||
+                        !IsSupportedSelectProjection(selectLambda))
+                    {
+                        FallbackReasons.Add("Operator 'Select' uses members or expression forms outside the native preview projection subset.");
+                    }
+                    break;
+            }
+        }
+
+        private static bool TryGetLambda(Expression expression, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out LambdaExpression? lambda)
+        {
+            lambda = expression is UnaryExpression { NodeType: ExpressionType.Quote } unary
+                ? unary.Operand as LambdaExpression
+                : expression as LambdaExpression;
             return lambda is not null;
         }
 
-        private static bool IsConstantOrClosureValue(Expression expression)
+        // ------------------------------------------------------------------ predicates (mirror TranslatePredicate)
+
+        private bool IsSupportedPredicate(Expression expression, ParameterExpression parameter)
         {
-            if (expression is ConstantExpression constant && constant.Value is int)
+            expression = DataVoExpressionHelpers.UnwrapConvert(expression);
+
+            if (!DataVoExpressionHelpers.ReferencesParameter(expression, parameter))
             {
-                return true;
+                return expression.Type == typeof(bool) && DataVoExpressionHelpers.TryEvaluate(expression);
             }
 
-            try
+            return expression switch
             {
-                var eval = Expression.Lambda<Func<int>>(Expression.Convert(expression, typeof(int))).Compile();
-                _ = eval();
-                return true;
-            }
-            catch
-            {
-                return false;
-            }
+                BinaryExpression { NodeType: ExpressionType.AndAlso or ExpressionType.OrElse } logical =>
+                    IsSupportedPredicate(logical.Left, parameter) && IsSupportedPredicate(logical.Right, parameter),
+                BinaryExpression { NodeType: ExpressionType.Coalesce } coalesce =>
+                    IsSupportedOperand(coalesce.Left, parameter) && IsSupportedPredicate(coalesce.Right, parameter),
+                BinaryExpression comparison => IsSupportedComparison(comparison, parameter),
+                MethodCallExpression methodCall => IsSupportedStringPredicate(methodCall, parameter),
+                MemberExpression member => IsMappedMember(member, parameter, requiredType: typeof(bool)),
+                UnaryExpression { NodeType: ExpressionType.Not } not => IsSupportedPredicate(not.Operand, parameter),
+                _ => false
+            };
         }
 
-        private static bool IsSupportedOrderingSelector(LambdaExpression lambda)
+        private bool IsSupportedComparison(BinaryExpression expression, ParameterExpression parameter)
         {
-            Expression body = UnwrapConvert(lambda.Body);
-
-            if (body is MemberExpression memberExpression)
+            if (!DataVoExpressionHelpers.IsComparison(expression.NodeType))
             {
-                Expression? current = memberExpression.Expression;
-                while (current is UnaryExpression unary && unary.NodeType == ExpressionType.Convert)
-                {
-                    current = unary.Operand;
-                }
-
-                return current == lambda.Parameters[0];
+                return false;
             }
 
-            if (body is MethodCallExpression methodCall)
+            if (DataVoExpressionHelpers.TrySplitBooleanComparison(expression, parameter, out Expression? predicate, out _))
             {
-                return IsSupportedVectorDistanceMethodCall(methodCall, lambda.Parameters[0]);
+                return IsSupportedPredicate(predicate, parameter);
             }
 
-            return false;
+            if (expression.Left is BinaryExpression { NodeType: ExpressionType.Coalesce } leftCoalesce)
+            {
+                return IsSupportedCoalesceOperand(leftCoalesce, parameter) && IsSupportedOperand(expression.Right, parameter);
+            }
+
+            if (expression.Right is BinaryExpression { NodeType: ExpressionType.Coalesce } rightCoalesce)
+            {
+                return IsSupportedCoalesceOperand(rightCoalesce, parameter) && IsSupportedOperand(expression.Left, parameter);
+            }
+
+            return IsSupportedOperand(expression.Left, parameter) && IsSupportedOperand(expression.Right, parameter);
         }
 
-        private static bool IsSupportedWherePredicate(LambdaExpression lambda)
+        private bool IsSupportedCoalesceOperand(BinaryExpression coalesce, ParameterExpression parameter)
+            => IsSupportedOperand(coalesce.Left, parameter) && IsSupportedOperand(coalesce.Right, parameter);
+
+        // Mirrors TranslateOperand: parameter-free values, mapped members, vector distances, string scalars.
+        private bool IsSupportedOperand(Expression expression, ParameterExpression parameter)
         {
-            return IsSupportedPredicateNode(UnwrapConvert(lambda.Body), lambda.Parameters[0]);
+            expression = DataVoExpressionHelpers.UnwrapConvert(expression);
+
+            if (!DataVoExpressionHelpers.ReferencesParameter(expression, parameter))
+            {
+                return DataVoExpressionHelpers.TryEvaluate(expression);
+            }
+
+            return expression switch
+            {
+                MemberExpression member => IsMappedMember(member, parameter),
+                MethodCallExpression methodCall =>
+                    IsSupportedVectorDistance(methodCall, parameter) || IsSupportedStringScalar(methodCall, parameter),
+                _ => false
+            };
         }
 
-        private static bool IsSupportedPredicateNode(Expression expression, ParameterExpression parameter)
+        private bool IsSupportedStringPredicate(MethodCallExpression methodCall, ParameterExpression parameter)
         {
-            expression = UnwrapConvert(expression);
-
-            if (expression is BinaryExpression binary)
-            {
-                if (binary.NodeType is ExpressionType.AndAlso or ExpressionType.OrElse)
-                {
-                    return IsSupportedPredicateNode(binary.Left, parameter) &&
-                           IsSupportedPredicateNode(binary.Right, parameter);
-                }
-
-                if (binary.NodeType is ExpressionType.Equal or ExpressionType.NotEqual or ExpressionType.GreaterThan or ExpressionType.GreaterThanOrEqual or ExpressionType.LessThan or ExpressionType.LessThanOrEqual)
-                {
-                    return IsSimpleOperand(binary.Left, parameter) && IsSimpleOperand(binary.Right, parameter);
-                }
-
-                if (binary.NodeType == ExpressionType.Coalesce)
-                {
-                    return IsSimpleOperand(binary.Left, parameter) && IsSimpleOperand(binary.Right, parameter);
-                }
-
-                return false;
-            }
-
-            if (expression is MethodCallExpression methodCallExpression)
-            {
-                return IsSupportedStringPredicate(methodCallExpression, parameter);
-            }
-
-            if (expression is MemberExpression memberExpression)
-            {
-                return IsEntityMember(memberExpression, parameter);
-            }
-
-            if (expression is UnaryExpression unary && unary.NodeType == ExpressionType.Not)
-            {
-                return IsSupportedPredicateNode(unary.Operand, parameter);
-            }
-
-            return expression is ConstantExpression;
+            return methodCall.Method.DeclaringType == typeof(string) &&
+                   methodCall.Method.Name is nameof(string.Contains) or nameof(string.StartsWith) or nameof(string.EndsWith) &&
+                   methodCall.Arguments.Count == 1 &&
+                   IsSupportedStringSource(methodCall.Object, parameter) &&
+                   !DataVoExpressionHelpers.ReferencesParameter(methodCall.Arguments[0], parameter) &&
+                   DataVoExpressionHelpers.TryEvaluate(methodCall.Arguments[0]);
         }
 
-        private static bool IsSupportedStringPredicate(MethodCallExpression methodCallExpression, ParameterExpression parameter)
+        private bool IsSupportedStringScalar(MethodCallExpression methodCall, ParameterExpression parameter)
         {
-            if (methodCallExpression.Method.DeclaringType != typeof(string))
-            {
-                return false;
-            }
-
-            if (methodCallExpression.Method.Name is not (nameof(string.Contains) or nameof(string.StartsWith) or nameof(string.EndsWith)))
-            {
-                return false;
-            }
-
-            if (!IsSupportedStringSource(methodCallExpression.Object, parameter))
-            {
-                return false;
-            }
-
-            if (methodCallExpression.Arguments.Count != 1)
-            {
-                return false;
-            }
-
-            return IsClosureEvaluatable(methodCallExpression.Arguments[0]);
+            return methodCall.Method.DeclaringType == typeof(string) &&
+                   methodCall.Method.Name is nameof(string.ToLower) or nameof(string.ToUpper) &&
+                   methodCall.Arguments.Count == 0 &&
+                   IsSupportedStringSource(methodCall.Object, parameter);
         }
 
-        private static bool IsSupportedStringScalarMethod(MethodCallExpression methodCallExpression, ParameterExpression parameter)
+        private bool IsSupportedStringSource(Expression? expression, ParameterExpression parameter)
         {
-            if (methodCallExpression.Method.DeclaringType != typeof(string))
+            return expression is not null && DataVoExpressionHelpers.UnwrapConvert(expression) switch
             {
-                return false;
-            }
-
-            if (methodCallExpression.Method.Name is not (nameof(string.ToLower) or nameof(string.ToUpper)))
-            {
-                return false;
-            }
-
-            if (methodCallExpression.Arguments.Count != 0)
-            {
-                return false;
-            }
-
-            return IsSupportedStringSource(methodCallExpression.Object, parameter);
+                MemberExpression member => IsMappedMember(member, parameter, requiredType: typeof(string)),
+                MethodCallExpression methodCall => IsSupportedStringScalar(methodCall, parameter),
+                _ => false
+            };
         }
 
-        private static bool IsSupportedStringSource(Expression? expression, ParameterExpression parameter)
+        private bool IsSupportedVectorDistance(MethodCallExpression methodCall, ParameterExpression parameter)
         {
-            if (expression is null)
+            return DataVoExpressionHelpers.TryGetVectorDistanceOperands(methodCall, out Expression? left, out Expression? right, out _) &&
+                   IsSupportedOperand(left, parameter) &&
+                   IsSupportedOperand(right, parameter);
+        }
+
+        // ------------------------------------------------------------------ ordering & projection
+
+        private bool IsSupportedOrderingSelector(LambdaExpression lambda)
+        {
+            ParameterExpression parameter = lambda.Parameters[0];
+            return DataVoExpressionHelpers.UnwrapConvert(lambda.Body) switch
+            {
+                MemberExpression member => IsMappedMember(member, parameter),
+                MethodCallExpression methodCall =>
+                    IsSupportedVectorDistance(methodCall, parameter) || IsSupportedStringScalar(methodCall, parameter),
+                _ => false
+            };
+        }
+
+        // Projections run client-side over the referenced columns, so every parameter member must be mapped.
+        private bool IsSupportedSelectProjection(LambdaExpression lambda)
+        {
+            ParameterExpression parameter = lambda.Parameters[0];
+            return DataVoExpressionHelpers.FindParameterMembers(lambda.Body, parameter).All(member => IsMappedMember(member, parameter)) &&
+                   !UsesParameterOutsideMembers(lambda.Body, parameter);
+        }
+
+        private static bool UsesParameterOutsideMembers(Expression body, ParameterExpression parameter)
+        {
+            var finder = new BareParameterFinder(parameter);
+            finder.Visit(body);
+            return finder.Found;
+        }
+
+        private bool IsMappedMember(MemberExpression member, ParameterExpression parameter, Type? requiredType = null)
+        {
+            if (!DataVoExpressionHelpers.IsParameterMember(member, parameter))
             {
                 return false;
             }
 
-            expression = UnwrapConvert(expression);
-
-            if (expression is MemberExpression memberExpression)
+            if (model is not null)
             {
-                return IsEntityMember(memberExpression, parameter);
-            }
-
-            if (expression is MethodCallExpression methodCallExpression)
-            {
-                return IsSupportedStringScalarMethod(methodCallExpression, parameter);
-            }
-
-            return false;
-        }
-
-        private static bool IsSimpleOperand(Expression expression, ParameterExpression parameter)
-        {
-            expression = UnwrapConvert(expression);
-
-            if (expression is MemberExpression memberExpression)
-            {
-                return IsEntityMember(memberExpression, parameter) || IsClosureMember(memberExpression);
-            }
-
-            if (expression is ConstantExpression)
-            {
-                return true;
-            }
-
-            if (expression is BinaryExpression binaryExpression && binaryExpression.NodeType == ExpressionType.Coalesce)
-            {
-                return IsSimpleOperand(binaryExpression.Left, parameter) &&
-                       IsSimpleOperand(binaryExpression.Right, parameter);
-            }
-
-            if (expression is MethodCallExpression methodCallExpression)
-            {
-                return IsSupportedStringPredicate(methodCallExpression, parameter) ||
-                       IsSupportedStringScalarMethod(methodCallExpression, parameter) ||
-                       IsSupportedVectorDistanceMethodCall(methodCallExpression, parameter);
-            }
-
-            return IsClosureEvaluatable(expression);
-        }
-
-        private static bool IsSupportedSelectProjection(LambdaExpression lambda)
-        {
-            return IsSupportedSelectNode(UnwrapConvert(lambda.Body), lambda.Parameters[0]);
-        }
-
-        private static bool IsSupportedVectorDistanceMethodCall(MethodCallExpression methodCallExpression, ParameterExpression parameter)
-        {
-            if (methodCallExpression.Method.DeclaringType != typeof(DataVoVectorDbFunctions))
-            {
-                return false;
-            }
-
-            string methodName = methodCallExpression.Method.Name;
-            if (methodName != nameof(DataVoVectorDbFunctions.CosineDistance) &&
-                methodName != nameof(DataVoVectorDbFunctions.L2Distance))
-            {
-                return false;
-            }
-
-            int vectorArgStart = methodCallExpression.Arguments.Count == 3 ? 1 : 0;
-            if (methodCallExpression.Arguments.Count - vectorArgStart != 2)
-            {
-                return false;
-            }
-
-            return IsSupportedVectorOperand(methodCallExpression.Arguments[vectorArgStart], parameter) &&
-                   IsSupportedVectorOperand(methodCallExpression.Arguments[vectorArgStart + 1], parameter);
-        }
-
-        private static bool IsSupportedVectorOperand(Expression expression, ParameterExpression parameter)
-        {
-            expression = UnwrapConvert(expression);
-
-            if (expression is MemberExpression memberExpression)
-            {
-                return IsEntityMember(memberExpression, parameter) || IsClosureMember(memberExpression);
-            }
-
-            if (expression is ConstantExpression)
-            {
-                return true;
-            }
-
-            return IsClosureEvaluatable(expression);
-        }
-
-        private static bool IsSupportedSelectNode(Expression expression, ParameterExpression parameter)
-        {
-            expression = UnwrapConvert(expression);
-
-            if (expression is ConstantExpression)
-            {
-                return true;
-            }
-
-            if (expression is MemberExpression memberExpression)
-            {
-                return IsEntityMember(memberExpression, parameter) || IsClosureMember(memberExpression);
-            }
-
-            if (expression is BinaryExpression binaryExpression)
-            {
-                return IsSupportedSelectNode(binaryExpression.Left, parameter) &&
-                       IsSupportedSelectNode(binaryExpression.Right, parameter);
-            }
-
-            if (expression is UnaryExpression unaryExpression)
-            {
-                return IsSupportedSelectNode(unaryExpression.Operand, parameter);
-            }
-
-            if (expression is MethodCallExpression methodCallExpression)
-            {
-                bool objectSupported = methodCallExpression.Object is null || IsSupportedSelectNode(methodCallExpression.Object, parameter);
-                bool argumentsSupported = methodCallExpression.Arguments.All(argument => IsSupportedSelectNode(argument, parameter));
-                return objectSupported && argumentsSupported;
-            }
-
-            if (expression is ConditionalExpression conditionalExpression)
-            {
-                return IsSupportedSelectNode(conditionalExpression.Test, parameter) &&
-                       IsSupportedSelectNode(conditionalExpression.IfTrue, parameter) &&
-                       IsSupportedSelectNode(conditionalExpression.IfFalse, parameter);
-            }
-
-            if (expression is NewExpression newExpression)
-            {
-                return newExpression.Arguments.All(argument => IsSupportedSelectNode(argument, parameter));
-            }
-
-            if (expression is MemberInitExpression memberInitExpression)
-            {
-                if (!IsSupportedSelectNode(memberInitExpression.NewExpression, parameter))
+                IProperty? property = model.FindEntityType(parameter.Type)?.FindProperty(member.Member.Name);
+                if (property is null || property.PropertyInfo is null)
                 {
                     return false;
                 }
-
-                return memberInitExpression.Bindings
-                    .OfType<MemberAssignment>()
-                    .All(assignment => IsSupportedSelectNode(assignment.Expression, parameter));
             }
 
-            return IsClosureEvaluatable(expression);
+            return requiredType is null || member.Type == requiredType;
         }
 
-        private static bool IsEntityMember(MemberExpression memberExpression, ParameterExpression parameter)
+        /// <summary>Finds uses of the parameter that are not the source of a member access (e.g. <c>x =&gt; x</c>).</summary>
+        private sealed class BareParameterFinder(ParameterExpression parameter) : ExpressionVisitor
         {
-            Expression? current = memberExpression.Expression;
-            while (current is UnaryExpression unary && unary.NodeType == ExpressionType.Convert)
+            public bool Found { get; private set; }
+
+            protected override Expression VisitMember(MemberExpression node)
             {
-                current = unary.Operand;
+                return DataVoExpressionHelpers.IsParameterMember(node, parameter) ? node : base.VisitMember(node);
             }
 
-            return current == parameter;
-        }
-
-        private static bool IsClosureMember(MemberExpression memberExpression)
-        {
-            return memberExpression.Expression is ConstantExpression;
-        }
-
-        private static bool IsClosureEvaluatable(Expression expression)
-        {
-            try
+            protected override Expression VisitParameter(ParameterExpression node)
             {
-                var eval = Expression.Lambda<Func<object?>>(Expression.Convert(expression, typeof(object))).Compile();
-                _ = eval();
-                return true;
+                Found |= node == parameter;
+                return node;
             }
-            catch
-            {
-                return false;
-            }
-        }
-
-        private static Expression UnwrapConvert(Expression expression)
-        {
-            while (expression is UnaryExpression unary && unary.NodeType == ExpressionType.Convert)
-            {
-                expression = unary.Operand;
-            }
-
-            return expression;
         }
     }
 }
