@@ -23,6 +23,7 @@ const publicManualPages = [
   { title: "ADO.NET Provider", source: "manual/client-interfaces/ado-net.md" },
   { title: "Dapper", source: "manual/client-interfaces/dapper.md" },
   { title: "Entity Framework Core", source: "manual/client-interfaces/entity-framework.md" },
+  { title: "Microsoft.Extensions.VectorData", source: "manual/client-interfaces/vector-data.md" },
 
   // SQL Reference
   { title: "SQL Compatibility", source: "manual/sql/compatibility.md" },
@@ -43,6 +44,7 @@ const publicManualPages = [
   { title: "Query Planner & Fast Paths", source: "manual/internals/query-planner.md" },
   { title: "Zero-Allocation Rows", source: "manual/internals/zero-allocation-rows.md" },
   { title: "Compiled Scan Kernels", source: "manual/internals/compiled-scan-kernels.md" },
+  { title: "INSERT Intent & Key Locking", source: "manual/internals/insert-intent-row-locking.md" },
   { title: "DataVo vs SQLite", source: "manual/performance/datavo-vs-sqlite.md" },
   { title: "Benchmarks", source: "manual/performance/benchmarks.md" },
   { title: "Reproducing Benchmarks", source: "manual/performance/reproducing-benchmarks.md" },

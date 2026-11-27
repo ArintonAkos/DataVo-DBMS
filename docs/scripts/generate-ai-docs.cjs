@@ -9,6 +9,17 @@ const publicRoot = path.join(docsRoot, "public");
 const aiRoot = path.join(publicRoot, "ai");
 const pagesRoot = path.join(aiRoot, "pages");
 const SITE_BASE_URL = "https://arintonakos.github.io/DataVo-DBMS";
+const RELEASE_LABEL = `v${readDataVoVersion()}`;
+
+/** Reads the single release version (`DataVoVersion`) from the repository's Directory.Build.props. */
+function readDataVoVersion() {
+  const propsPath = path.resolve(docsRoot, "..", "Directory.Build.props");
+  const match = fs.readFileSync(propsPath, "utf8").match(/<DataVoVersion>([^<]+)<\/DataVoVersion>/u);
+  if (!match) {
+    throw new Error(`DataVoVersion is missing from ${propsPath}`);
+  }
+  return match[1].trim();
+}
 
 function pageOutputPath(route) {
   return `${route.replace(/^\//u, "")}.md`;
@@ -16,10 +27,6 @@ function pageOutputPath(route) {
 
 function stripFrontmatter(markdown) {
   return markdown.replace(/^---\n[\s\S]*?\n---\n*/u, "");
-}
-
-function stripVueBenchmarkCharts(markdown) {
-  return markdown.replace(/\n?<BenchmarkChart\n[\s\S]*?\/>\n?/gu, "\n");
 }
 
 function simplifyHtml(markdown) {
@@ -47,7 +54,7 @@ function extractTitle(markdown, route) {
 }
 
 function normalizeMarkdown(markdown, route, sourcePath) {
-  const body = simplifyHtml(stripVueBenchmarkCharts(stripFrontmatter(markdown))).trim();
+  const body = simplifyHtml(stripFrontmatter(markdown)).trim();
   const title = extractTitle(body, route);
   const source = path.relative(docsRoot, sourcePath).replaceAll(path.sep, "/");
 
@@ -118,7 +125,7 @@ function main() {
     [
       "# DataVo Documentation",
       "",
-      "DataVo is a C#-native embedded database engine. This file exposes the curated public v0.4.0-rc.1 Release Candidate manual and engineering blog.",
+      `DataVo is a C#-native embedded database engine. This file exposes the curated public ${RELEASE_LABEL} manual and engineering blog.`,
       "",
       "## Public Pages",
       ...pages.map((page) => `- [${page.title}](${SITE_BASE_URL}${page.aiPath})`),
@@ -147,7 +154,7 @@ function main() {
     `${JSON.stringify(
       {
         name: "datavo-docs",
-        description: "Local MCP server configuration for the curated DataVo v0.4.0-rc.1 manual and engineering blog.",
+        description: `Local MCP server configuration for the curated DataVo ${RELEASE_LABEL} manual and engineering blog.`,
         docsBaseUrl: `${SITE_BASE_URL}/`,
         aiIndex: `${SITE_BASE_URL}/ai/index.json`,
         llms: `${SITE_BASE_URL}/llms.txt`,
@@ -171,7 +178,7 @@ function main() {
     `${JSON.stringify(
       {
         name: "DataVo public documentation",
-        description: "HTTP-retrievable AI documentation surface for the curated DataVo v0.4.0-rc.1 manual and engineering blog.",
+        description: `HTTP-retrievable AI documentation surface for the curated DataVo ${RELEASE_LABEL} manual and engineering blog.`,
         publicScope: "Curated manual pages and engineering blog only.",
         baseUrl: `${SITE_BASE_URL}/`,
         entrypoints: {

@@ -1,6 +1,6 @@
 ---
 title: Transactions
-description: Control multi-statement atomic transactions, nested savepoints, MVCC snapshot isolation, and conflict handling in DataVo v0.4.
+description: Control multi-statement atomic transactions, nested savepoints, MVCC snapshot isolation, and conflict handling in DataVo v0.5.
 ---
 
 # Transactions

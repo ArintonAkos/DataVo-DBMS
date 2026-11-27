@@ -26,7 +26,8 @@ The current release on NuGet is **0.5.1 (26 November 2026)**, targeting `.NET 8`
 | Columnar indexes & SSTable segments | Released (0.5.1) | In-memory buffers + persisted 4,096-row zone-mapped segments |
 | Live Reactive Views (Z-set IVM) | Released (0.5.1) | Pull-drain subscriptions via `Subscribe` / `SubscribeZeroAlloc` |
 | `DataVo.Generators` & Native AOT | Released (0.5.1) | Trim/AOT analyzers (`IL2026`, `IL3050`) enforced as errors |
-| `DataVo.Data` (ADO.NET & Dapper) | Released (0.5.1) | Standard `System.Data.Common` types; no `DbProviderFactory` |
+| `DataVo.Data` (ADO.NET & Dapper) | Released (0.5.1) | Standard `System.Data.Common` types plus `DataVoFactory` (`DbProviderFactory`) |
+| `DataVo.VectorData` | Released (0.5.1) | `Microsoft.Extensions.VectorData` vector store; HNSW/FLAT, LINQ filters, AOT clean |
 | `DataVo.EntityFrameworkCore` | Preview bridge | Query/DML bridge only; no migrations, excluded from AOT |
 | `DataVo.Browser` (WebAssembly) | Experimental | Powers the docs playground; not published on npm |
 | `DataVo-Sync` (PostgreSQL sync) | Commercial add-on | Separate proprietary product; see [DataVo-Sync](/manual/fundamentals/datavo-sync) |
@@ -57,14 +58,21 @@ The current release on NuGet is **0.5.1 (26 November 2026)**, targeting `.NET 8`
 - **Typed execution:** `OR`/`LIKE` fast paths, integer-key hash joins, index-driven joins, dense bit-set anti-joins, unboxed `GROUP BY`, UTF-8 byte matching, and in-place top-k.
 - **Vector search:** HNSW diversity heuristic on by default (100% recall@10 on clustered data), cost-based exact scan fallback, SQL `WITH (...)` HNSW parameters, and pre-optimized SIMD kernels.
 
-### v0.5: AI Integration, Client Ergonomics & Native Interop *(released as `0.5.0`; current release `0.5.1`)*
-- **Track A (Native Interop):** Native AOT C ABI (`dv_open`, `dv_exec`, `dv_prepare`) for C/Python/Rust/Go, zero-copy Apache Arrow C Data Interface export from columnar buffers/SSTables, and a reference Python binding.
-- **Track B (Client Applications):**
+### v0.5: AI Integration & Client Ergonomics *(released as `0.5.0`; current release `0.5.1`)*
+- **Client applications:**
   - *Done:* Build-time compiled `OrderBy`/`ThenBy`, `Skip`/`Take`, `Select` projections, and single-table `ExecuteUpdate`/`ExecuteDelete` in `DataVo.Generators`.
   - *Done:* Multi-target NuGet packages (`net8.0`, `net9.0`, `net10.0`, `netstandard2.1`), native `DATETIME`, `EXPLAIN` with the executed operator, a sharded LSM block cache, and typed reactive top-K/join views.
   - *Done:* [`DataVo.VectorData`](/manual/client-interfaces/vector-data): a `Microsoft.Extensions.VectorData` vector store with HNSW/FLAT indexes, LINQ filters translated to SQL, embedding generation and dependency injection; native `ReadOnlyMemory<float>` vectors in `[DataVoTable]` models (`[VectorDimensions(n)]`), parameters and `SearchNearest`.
   - *Done:* The paged `Disk` storage mode and pre-release format upgrades (v1 SSTables, per-table WAL migration) were removed: `InMemory` and `Lsm` are the two storage modes.
-  - *Planned:* 2D geographic WGS84 points with haversine distance and spatial indexing.
+
+### Future (post-0.5, unscheduled)
+
+Nothing in this section ships in 0.5.1.
+
+- *Planned:* **Native interop:** a Native AOT C ABI (`dv_open`, `dv_exec`, `dv_prepare`) for C/Python/Rust/Go, zero-copy Apache Arrow C Data Interface export from columnar buffers/SSTables, and a reference Python binding.
+- *Planned:* 2D geographic WGS84 points with haversine distance and spatial indexing.
+- *Planned:* `DataVo.Server`, a PostgreSQL wire-protocol bridge for GUI clients.
+- *Planned:* A full EF Core provider with migrations (today's package is a query/DML bridge), a published browser npm package, and a verified Windows x64 IL2CPP Unity Player.
 
 ## Unity Evaluation Status {#unity-evaluation-status}
 
@@ -82,5 +90,5 @@ Unity is an **evaluation target**, not a supported runtime. The public `DataVo.C
 ## See Also
 
 - [Limits & Unsupported Features](/manual/reference/limits): Exact engine limits and unsupported SQL/API features.
-- [DataVo vs SQLite](/manual/performance/datavo-vs-sqlite): v0.4 benchmark findings and correctness notes.
+- [DataVo vs SQLite](/manual/performance/datavo-vs-sqlite): The 28-shape SQL matrix (v0.4 runs plus the v0.5.0 re-run) and correctness notes.
 - [LSM & Durability](/manual/fundamentals/lsm-and-durability): WAL fsync modes and crash recovery guarantees.

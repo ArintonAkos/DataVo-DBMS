@@ -1,11 +1,11 @@
 ---
 title: Native AOT Deployment
-description: Publishing trim-safe, zero-reflection .NET 10 Native AOT binaries with DataVo.Core, DataVo.Data, and DataVo.Generators.
+description: Publishing trim-safe, zero-reflection Native AOT binaries on .NET 8, 9 and 10 with DataVo.Core, DataVo.Data, DataVo.VectorData, and DataVo.Generators.
 ---
 
 # Native AOT Deployment
 
-`DataVo.Core`, `DataVo.Data`, and `DataVo.Generators` are built and tested for `.NET 10` Native AOT. Trim and AOT analyzers are enabled across the core and ADO.NET assemblies with `IL2026` and `IL3050` treated as build errors and verified on every change.
+`DataVo.Core`, `DataVo.Data`, `DataVo.VectorData`, and `DataVo.Generators` are built and tested for Native AOT on `net8.0`, `net9.0` and `net10.0`. Trim and AOT analyzers are enabled across the core, ADO.NET and VectorData assemblies with `IL2026` and `IL3050` treated as build errors and verified on every change; the `DataVo.AotSmoke` native executable exercises all three in CI.
 
 ```xml
 <PropertyGroup>
@@ -25,6 +25,7 @@ dotnet publish -c Release -r osx-arm64
 | --- | --- | --- |
 | `DataVo.Core` | **Verified** | Runtime SQL parser/executor, LSM/InMemory storage, `StreamQuery`, `StreamRef`, `Subscribe`, and `SubscribeZeroAlloc` use zero reflection. |
 | `DataVo.Data` | **Verified** | `DataVoConnection`, `DataVoCommand`, `DataVoDataReader`, and `DataVoTransaction` are trim- and AOT-clean. |
+| `DataVo.VectorData` | **Verified** | `DataVoVectorStore`, collections, and LINQ filter translation are trim- and AOT-clean; construct collections directly in AOT apps, because `VectorStore.GetCollection` carries the abstraction's own `[RequiresDynamicCode]` annotation. See [VectorData](/manual/client-interfaces/vector-data). |
 | `DataVo.Generators` | **Verified** | `[DataVoTable]`, `[DataVoQuery]`, compiled LINQ interceptors, and `.SubscribeInto()` emit static C# at build time. |
 | `DataVo.EntityFrameworkCore` | **Excluded** | Depends on EF Core's runtime infrastructure and is not covered by the Native AOT guarantee. |
 

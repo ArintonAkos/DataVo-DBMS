@@ -10,7 +10,7 @@ description: Use DataVo as a Microsoft.Extensions.VectorData vector store with M
 Each collection is an ordinary DataVo table. The key is its primary key, each data property a column, and each vector property a `VECTOR(n)` column with an `HNSW` or `FLAT` index. The same rows stay queryable from SQL, `EXPLAIN` and reactive views.
 
 ```bash
-dotnet add package DataVo.VectorData --prerelease
+dotnet add package DataVo.VectorData
 ```
 
 The package targets `net8.0`, `net9.0` and `net10.0`, and builds with every trim and Native AOT diagnostic treated as an error.

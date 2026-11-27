@@ -22,7 +22,7 @@ int totalScore = db.Table<Player>()
 
 1. **Analyze:** The incremental Roslyn generator locates `DataVoTable<T>` query chains and validates static lambdas containing comparisons, boolean checks, null tests, `&&`, `||`, and parentheses.
 2. **Emit interceptor:** For each qualifying call site, the generator emits an interceptor in the `DataVo.Generated` namespace marked with `[InterceptsLocation]`, routing that exact call to generated C# with zero runtime reflection.
-3. **Specialize the condition struct:** When the predicate references only unindexed fixed-width columns (`int`, `long`, `float`, `double`, `bool`, `Guid`, `DataVoDate`, `DateOnly`), the generator emits a `struct` implementing the engine's predicate interface.
+3. **Specialize the condition struct:** When the predicate references only unindexed fixed-width columns (`int`, `long`, `float`, `double`, `bool`, `Guid`, `DataVoDate`, `DateOnly`, `DateTime`, `DateTimeOffset`), the generator emits a `struct` implementing the engine's predicate interface.
 4. **Inline into the storage loop:** Because the storage scan is generic over the condition struct across `InMemory` and `Lsm`, the JIT / Native AOT compiler inlines the predicate directly into the row loop, with no virtual dispatch or delegate call per row.
 
 ## Fixed-Offset Byte Evaluation
@@ -31,7 +31,7 @@ When every column up to the last column referenced by the predicate has a fixed 
 
 - **Single offset pass:** Byte offsets are computed once per scan; the loop tests leading null flags and reads cells straight from raw row spans without constructing a row view.
 - **Automatic safe fallback:** Any row with a NULL in a leading column falls back to the general cell reader so results remain 100% identical.
-- **Model layout tip:** Place fixed-width columns (`int`, `long`, `float`, `double`, `bool`, `Guid`) **before** variable-width `string` or `VECTOR` columns in your `[DataVoTable]` class to maximize fixed-offset kernel hits.
+- **Model layout tip:** Place fixed-width columns (`int`, `long`, `float`, `double`, `bool`, `Guid`, date and time types) **before** variable-width `string` or `VECTOR` columns in your `[DataVoTable]` class to maximize fixed-offset kernel hits.
 
 ## Supported Compiled Aggregates
 
@@ -39,9 +39,9 @@ When every column up to the last column referenced by the predicate has a fixed 
 | --- | --- | --- |
 | `Count()`, `Any()` | Yes (unindexed fixed-width predicates) | Zero model allocations. |
 | `Sum(selector)` | Yes (single non-nullable `int`, `long`, `float`, `double` column) | Accumulates in registers; integer overflow throws `OverflowException`. |
-| `Min(selector)`, `Max(selector)` | Yes (single `int`, `long`, `float`, `double`, `DataVoDate`, `DateOnly` column) | Skips `NULL`; `NaN` orders below all numbers. |
+| `Min(selector)`, `Max(selector)` | Yes (single `int`, `long`, `float`, `double`, `DataVoDate`, `DateOnly`, `DateTime`, `DateTimeOffset` column) | Skips `NULL`; `NaN` orders below all numbers. |
 
-When target columns are also marked `[Columnar]`, the kernel upgrades automatically to SIMD columnar chunk evaluation, running in **27.1–89.6 µs** over 200,000 rows with **0 B allocated** on Apple M4 Pro (see [Benchmark Results](/manual/performance/benchmarks)).
+When target columns are also marked `[Columnar]`, the kernel upgrades automatically to SIMD columnar chunk evaluation, running in **27.3–91.1 µs** over 200,000 rows with **0 B allocated** on Apple M4 Pro (see [Benchmark Results](/manual/performance/benchmarks)).
 
 Inside an explicit transaction, queries stream through the MVCC snapshot path instead of reading raw storage in place, so transactional scans allocate.
 

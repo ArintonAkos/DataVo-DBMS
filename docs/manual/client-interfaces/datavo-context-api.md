@@ -74,7 +74,7 @@ DataVoBatchResult stats = db.ApplyBatch(batch);
 
 ## Snapshots, Auth & Change Capture
 
-- **Snapshots:** Capture and restore point-in-time engine state for the current session with `DataVoSnapshot snap = db.CreateSnapshot()` and `db.RestoreSnapshot(snap)`, useful for deterministic test resets or branching simulation state.
+- **Snapshots:** Capture and restore point-in-time engine state for the current session with `DataVoSnapshot snap = db.CreateSnapshot()` and `db.RestoreSnapshot(snap)`, useful for deterministic test resets or branching simulation state. Both `InMemory` and `Lsm` support snapshots. A snapshot holds the catalog and every table's rows in memory; a restore requires the schema to be unchanged since the snapshot, rebuilds scalar and vector indexes, and on `Lsm` rewrites all tables in one durable write batch.
 - **Session Auth:** When `EnableAuthorization = true`, switch the active principal per session with `db.Login(username, password)` and `db.Logout()`. See [Databases & Security SQL](/manual/sql/statements/databases-and-security).
 - **Change Capture:** `db.Changes` exposes the engine's `ChangeCapture` stream, which feeds reactive subscriptions and custom CDC consumers.
 

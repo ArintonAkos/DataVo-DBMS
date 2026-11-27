@@ -1,6 +1,6 @@
 ---
 title: ALTER TABLE & DROP
-description: Evolve table schemas with ALTER TABLE ADD, DROP, and MODIFY COLUMN, and remove tables or indexes with DROP TABLE and DROP INDEX in DataVo v0.4.
+description: Evolve table schemas with ALTER TABLE ADD, DROP, and MODIFY COLUMN, and remove tables or indexes with DROP TABLE and DROP INDEX in DataVo v0.5.
 ---
 
 # ALTER TABLE & DROP
@@ -39,7 +39,7 @@ DROP INDEX <index_name> ON <table_name>;
 | `ON <table_name>` | `DROP INDEX` | Required target table qualifier identifying which table owns `<index_name>`. |
 
 ::: warning Unsupported ALTER TABLE Operations
-`RENAME COLUMN` and `RENAME TO` are **not yet supported** in DataVo `v0.4` and throw a `ParserException` (`Unknown ALTER TABLE operation`). To rename a table or column, create the new table or column, copy data over, and drop the old one.
+`RENAME COLUMN` and `RENAME TO` are **not yet supported** in DataVo `v0.5` and throw a `ParserException` (`Unknown ALTER TABLE operation`). To rename a table or column, create the new table or column, copy data over, and drop the old one.
 :::
 
 ## `ALTER TABLE ... ADD COLUMN`
@@ -127,7 +127,7 @@ DROP INDEX cx_players_stats ON players;
 ```
 
 ::: warning `ON <table>` Required & No `IF EXISTS`
-In DataVo `v0.4`, `DROP INDEX` **requires** the `ON <table_name>` clause and does **not** support `IF EXISTS`. Running `DROP INDEX ix_foo;` or `DROP INDEX IF EXISTS ix_foo ON bar;` throws a `ParserException`.
+In DataVo `v0.5`, `DROP INDEX` **requires** the `ON <table_name>` clause and does **not** support `IF EXISTS`. Running `DROP INDEX ix_foo;` or `DROP INDEX IF EXISTS ix_foo ON bar;` throws a `ParserException`.
 :::
 
 ## See Also

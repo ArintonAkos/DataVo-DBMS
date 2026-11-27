@@ -33,12 +33,20 @@ dotnet add package DataVo.VectorData
 | Zero-allocation compiled LINQ & AOT | `DataVo.Core` + `DataVo.Generators` |
 | ADO.NET or Dapper | `DataVo.Data` *(transitively brings `DataVo.Core`)* |
 | Existing EF Core models | `DataVo.EntityFrameworkCore` *(transitively brings `DataVo.Core`)* |
+| Microsoft.Extensions.VectorData / RAG pipelines | `DataVo.VectorData` *(transitively brings `DataVo.Core`)* |
 
 ## Requirements
 
-- **Target frameworks:** Packages ship `net8.0`, `net9.0`, `net10.0` and `netstandard2.1` assets; see [Status & Roadmap](/manual/getting-started/roadmap#unity-evaluation-status) for Unity evaluation details.
-- **Native AOT:** `DataVo.Core`, `DataVo.Data`, and `DataVo.Generators` build with trim and AOT analyzers (`IL2026`, `IL3050`) as errors. `DataVo.EntityFrameworkCore` is excluded from Native AOT.
-- **C# Interceptors:** `DataVo.Generators` ships MSBuild `.props` that automatically register `DataVo.Generated` in `InterceptorsNamespaces`.
+| Package | Target Frameworks | Native AOT |
+| --- | --- | --- |
+| `DataVo.Core` | `net8.0`, `net9.0`, `net10.0`, `netstandard2.1` | Yes: trim/AOT analyzers (`IL2026`, `IL3050`) are build errors |
+| `DataVo.Data` | `net8.0`, `net9.0`, `net10.0`, `netstandard2.1` | Yes: same analyzer gate |
+| `DataVo.VectorData` | `net8.0`, `net9.0`, `net10.0` | Yes: same analyzer gate |
+| `DataVo.Generators` | `netstandard2.0` (Roslyn analyzer, build-time only) | Generated code is AOT-safe |
+| `DataVo.EntityFrameworkCore` | `net10.0` | No: excluded from Native AOT |
+
+- **Unity:** evaluation builds use the `netstandard2.1` asset of `DataVo.Core`; see [Status & Roadmap](/manual/getting-started/roadmap#unity-evaluation-status).
+- **C# Interceptors:** `DataVo.Generators` ships MSBuild `.targets` (under `build/` and `buildTransitive/`) that automatically register `DataVo.Generated` in `InterceptorsNamespaces`.
 - **Building from source:** Run `dotnet pack DataVo.sln -c Release` to produce local `.nupkg` files in `artifacts/packages`.
 
 ## Verify Your Installation

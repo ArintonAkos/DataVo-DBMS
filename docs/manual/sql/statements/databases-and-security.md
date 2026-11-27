@@ -1,6 +1,6 @@
 ---
 title: Databases & Security
-description: Manage databases, inspect schemas, and configure built-in RBAC users, roles, grants, and sessions in DataVo v0.4.
+description: Manage databases, inspect schemas, and configure built-in RBAC users, roles, grants, and sessions in DataVo v0.5.
 ---
 
 # Databases & Security

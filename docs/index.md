@@ -31,13 +31,13 @@ features:
     link: /manual/client-interfaces/source-generators
 ---
 
-DataVo is a managed C# embedded database engine that runs directly inside your `.NET 10` process with no external server, no native DLLs, and full Native AOT compatibility. Choose between packed **InMemory** tables and crash-recoverable **LSM** storage, query via SQL, compiled LINQ, ADO.NET, or Dapper, and optionally pair with the commercial **DataVo-Sync** add-on for offline-first PostgreSQL synchronization.
+DataVo is a managed C# embedded database engine that runs directly inside your .NET 8, 9 or 10 process with no external server, no native DLLs, and full Native AOT compatibility. Choose between packed **InMemory** tables and crash-recoverable **LSM** storage, query via SQL, compiled LINQ, ADO.NET, Dapper, or `Microsoft.Extensions.VectorData`, and optionally pair with the commercial **DataVo-Sync** add-on for offline-first PostgreSQL synchronization.
 
 ## Start Here
 
 - [Introduction](/manual/getting-started/introduction): Architecture overview and choose-your-path guide.
 - [Quickstart](/manual/getting-started/quickstart): Create a database, insert rows, and query in 60 seconds.
-- [Choosing an Interface](/manual/getting-started/choosing-an-interface): Compare `DataVoContext`, Compiled LINQ, ADO.NET, Dapper, and EF Core.
+- [Choosing an Interface](/manual/getting-started/choosing-an-interface): Compare `DataVoContext`, Compiled LINQ, ADO.NET, Dapper, EF Core, and `Microsoft.Extensions.VectorData`.
 - [DataVo vs SQLite](/manual/performance/datavo-vs-sqlite): Oracle-verified benchmarks across 28 SQL shapes and filtered vector search.
 - [Status & Roadmap](/manual/getting-started/roadmap): Release scope, durability guarantees, and the milestone history.
 

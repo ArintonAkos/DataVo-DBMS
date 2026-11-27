@@ -106,14 +106,14 @@ Unsupported query shapes fail fast during `Subscribe` / `SubscribeZeroAlloc` wit
 | **Aggregates** (`GROUP BY`, `COUNT`/`SUM`/`AVG`/`MIN`/`MAX`) | Yes | Yes | Single table; O(1) for `COUNT`/`SUM`/`AVG`; no `HAVING` or CTEs |
 | **Top-K** (`ORDER BY ... LIMIT k [OFFSET n]`) | Yes | Yes | Single table with a **primary key** |
 | **Two-table equi-join** (`INNER`/`LEFT`/`RIGHT`/`FULL`) | Yes | Yes | Keyed DBSP arrangements; optional post-join `WHERE` |
-| **Three-table VIP exposure** (`Orders × Accounts × Markets` + `GROUP BY`) | Yes | Yes | Specialized incremental 3-table exposure pipeline |
+| **Join aggregates** (N-way `INNER` equi-join + `WHERE` + `GROUP BY`, `COUNT`/`SUM`/`AVG`/`MIN`/`MAX`) | Yes | Yes | Every table joined once through an `ON` equality; no primary key required; no `HAVING`, `DISTINCT`, CTEs, or `ORDER BY`/`LIMIT` |
 | **Recursive CTE** (`WITH RECURSIVE ... UNION ALL`) | Yes | Yes | Linear reachability over a table with a **primary key** |
-| **Linear filter** (`SELECT ... [WHERE ...]`) | Yes | No | Single table; `=`, `!=`, `<`, `<=`, `>`, `>=`, `LIKE`, `IS [NOT] NULL`, `AND`/`OR` |
-| **`SELECT DISTINCT`** | Yes | No | Single-table distinct multiplicity map |
-| **`UNION` / `UNION ALL`** | Yes | No | Two single-table branches; no branch joins/aggregates or final `ORDER BY`/`LIMIT` |
-| **Subqueries** (`IN`, `NOT IN`, `EXISTS`, `NOT EXISTS`) | Yes | No | Uncorrelated or single-key equality correlation; outer table needs a **primary key** |
+| **Linear filter** (`SELECT ... [WHERE ...]`) | Yes | Yes | Single table; `=`, `!=`, `<`, `<=`, `>`, `>=`, `LIKE`, `IS [NOT] NULL`, `AND`/`OR` |
+| **`SELECT DISTINCT`** | Yes | Yes | Single-table distinct multiplicity map |
+| **`UNION` / `UNION ALL`** | Yes | Yes | Two single-table branches; no branch joins/aggregates or final `ORDER BY`/`LIMIT` |
+| **Subqueries** (`IN`, `NOT IN`, `EXISTS`, `NOT EXISTS`) | Yes | Yes | Uncorrelated or single-key equality correlation; outer table needs a **primary key** |
 
-Window functions (`RANK() OVER`), `HAVING`, arbitrary 3+ table joins, self-joins, and correlated scalar-aggregate subqueries are not supported in reactive views.
+Window functions (`RANK() OVER`), `HAVING`, non-aggregate joins of three or more tables, self-joins (a table joined twice), and correlated scalar-aggregate subqueries are not supported in reactive views. Every operator emits borrowed deltas, so `SubscribeZeroAlloc` accepts every supported shape; owned `QueryChange` objects are built only for `Subscribe` callbacks.
 
 ::: details API Reference
 ```csharp

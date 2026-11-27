@@ -1,24 +1,24 @@
 ---
 title: AI Access & MCP
-description: Consume DataVo v0.4 documentation in LLMs and coding assistants via llms.txt, per-page Markdown exports, and the local stdio MCP server.
+description: Consume DataVo v0.5 documentation in LLMs and coding assistants via llms.txt, per-page Markdown exports, and the local stdio MCP server.
 ---
 
 # AI Access & MCP
 
-DataVo publishes a curated, AI-readable Markdown export of the `v0.4.0-rc.1` manual and Engineering Blog alongside the VitePress site. Only public manual and blog pages are exported; internal architecture notes, audits, and raw source directories are excluded.
+DataVo publishes a curated, AI-readable Markdown export of the `v0.5` (0.5.1) manual and Engineering Blog alongside the VitePress site. Only public manual and blog pages are exported; internal architecture notes, audits, and raw source directories are excluded.
 
 ## Static AI Endpoints
 
 | Endpoint | Purpose |
 | --- | --- |
-| `/llms.txt` | Concise entry point listing all 45 public manual and blog pages |
+| `/llms.txt` | Concise entry point listing every public manual and blog page (47 in 0.5.1) |
 | `/llms-full.txt` | Complete public manual concatenated into a single Markdown file |
 | `/ai/index.json` | Structured JSON index mapping routes to Markdown export paths |
 | `/ai/pages/<route>.md` | Canonical Markdown export for an individual page (e.g., `/ai/pages/manual/getting-started/quickstart.md`) |
 | `/mcp/datavo-docs.json` | Local stdio MCP server discovery config |
 | `/mcp/remote-docs.json` | HTTP-retrievable page index for remote AI tools |
 
-Every manual page also displays a **Copy page for AI** button at the top that copies the canonical Markdown export directly to your clipboard.
+Every exported page also displays a **Copy page for AI** button at the top that copies the canonical Markdown export directly to your clipboard.
 
 ## Local Stdio MCP Server
 
@@ -34,7 +34,7 @@ The MCP server restricts access strictly to the curated public manual:
 
 ```text
 get_doc("/manual/getting-started/quickstart")  -> public Markdown
-get_doc("architecture/index-manager.md")       -> Access Denied
+get_doc("research/feature-bibliography.md")   -> Access Denied
 ```
 
 ::: details MCP Client Configuration Example
@@ -60,9 +60,9 @@ cd docs/mcp-worker
 npx wrangler deploy
 ```
 
-The worker exposes `POST /mcp` (`list_docs`, `get_doc`, `search_docs`, and `datavo-docs://` resources) by reading and caching the hosted `/ai/index.json` and `/ai/pages/*.md` files from GitHub Pages.
+The worker exposes `POST /mcp` (`ping`, `list_docs`, `get_doc`, `search_docs`, and `datavo-docs://` resources, matching the local server) by reading and caching the hosted `/ai/index.json` and `/ai/pages/*.md` files from GitHub Pages.
 
 ## See Also
 
-- [Introduction](/manual/getting-started/introduction): Overview of DataVo v0.4.
+- [Introduction](/manual/getting-started/introduction): Overview of DataVo v0.5.
 - [Quickstart](/manual/getting-started/quickstart): Get started in C# in 60 seconds.

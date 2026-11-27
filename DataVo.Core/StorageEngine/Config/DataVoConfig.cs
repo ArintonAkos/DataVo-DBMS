@@ -338,9 +338,10 @@ public class DataVoConfig
 
     /// <summary>
     /// Gets or sets a value indicating whether the zero-allocation compiled UPDATE fast path is enabled.
-    /// When <see langword="true"/> (the default), eligible fixed-width single-row updates on the LSM engine
-    /// byte-patch the serialized row instead of materializing it as a dictionary. When <see langword="false"/>,
-    /// every update takes the dictionary path. Disabling exists for A/B measurement and as a safety fallback.
+    /// When <see langword="true"/> (the default), eligible fixed-width single-row compiled updates skip dictionary
+    /// materialization: the LSM engine byte-patches the serialized row, and the in-memory engine appends a patched
+    /// copy of the row and re-points its primary key. When <see langword="false"/>, every update takes the
+    /// dictionary path. Disabling exists for A/B measurement and as a safety fallback.
     /// </summary>
     public bool EnableZeroAllocCompiledUpdate { get; set; } = true;
 

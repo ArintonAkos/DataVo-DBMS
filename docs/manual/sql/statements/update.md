@@ -1,6 +1,6 @@
 ---
 title: UPDATE
-description: Modify existing rows using literals, arithmetic expressions, scalar subqueries, and WHERE filters with the DataVo v0.4 UPDATE statement.
+description: Modify existing rows using literals, arithmetic expressions, scalar subqueries, and WHERE filters with the DataVo v0.5 UPDATE statement.
 ---
 
 # UPDATE
@@ -76,7 +76,7 @@ WHERE Id = 1;
 ::: warning No Scalar Functions in `SET`
 `UPDATE ... SET` does **not** evaluate scalar functions such as `LOWER(...)` or `UPPER(...)`. Compute string transformations in application code and bind the result as a literal or `@param` instead.
 
-Additionally, `UPDATE ... FROM` joins and `RETURNING` clauses are not supported in DataVo v0.4.
+Additionally, `UPDATE ... FROM` joins and `RETURNING` clauses are not supported in DataVo v0.5.
 :::
 
 ## Filtering & Full-Table Updates

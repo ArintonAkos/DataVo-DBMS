@@ -1,11 +1,11 @@
 ---
 title: Introduction
-description: Architecture overview of DataVo v0.4, a C#-native embedded database engine for .NET 10 with SQL, LSM storage, vector search, and reactive views.
+description: Architecture overview of DataVo v0.5, a C#-native embedded database engine for .NET 8, 9 and 10 with SQL, LSM storage, vector search, and reactive views.
 ---
 
 # Introduction
 
-DataVo is an embedded database engine written in C# for `.NET 10`. It runs directly inside your application process with no external server, no native DLLs, and full Native AOT compatibility, combining SQL, LSM storage, columnar indexes, vector search, and live reactive views in one library.
+DataVo is an embedded database engine written in C# for .NET 8, 9 and 10 (plus a `netstandard2.1` asset used by Unity evaluation builds). It runs directly inside your application process with no external server, no native DLLs, and full Native AOT compatibility, combining SQL, LSM storage, columnar indexes, vector search, and live reactive views in one library.
 
 ```csharp
 using DataVo.Core;
@@ -72,10 +72,11 @@ Queries are first offered to **typed execution paths** (single-table scans, inte
 | `DataVo.Generators` | Roslyn source generator for `[DataVoTable]`, `[DataVoQuery]`, and compiled LINQ | Yes |
 | `DataVo.Data` | Standard ADO.NET provider (`DataVoConnection`, `DataVoCommand`, `DataVoDataReader`) + Dapper | Yes |
 | `DataVo.EntityFrameworkCore` | Experimental EF Core bridge (`UseDataVo(...)`); not a standalone provider | No |
+| `DataVo.VectorData` | `Microsoft.Extensions.VectorData` vector store (`DataVoVectorStore`) for RAG and Microsoft.Extensions.AI pipelines | Yes |
 
 ## Where DataVo Fits and Where It Doesn't
 
-- **Strong fit:** Local-first `.NET 10` apps, game tooling, simulations, and retrieval workloads that combine relational filtering with vector search. On warm caches, v0.4 outperforms SQLite on key lookups, low-cardinality `GROUP BY`, integer-key joins, columnar aggregates, and filtered vector search.
+- **Strong fit:** Local-first .NET apps, game tooling, simulations, and retrieval workloads that combine relational filtering with vector search. On warm caches, DataVo outperforms SQLite on key lookups, low-cardinality `GROUP BY`, integer-key joins, columnar aggregates, and filtered vector search.
 - **Not a fit:** Client/server deployments, multi-process writes to one directory (`datavo.lock` enforces single-process ownership), stored procedures/triggers, or serializable predicate locking. For whole-table analytics over tens of millions of rows, DuckDB remains orders of magnitude faster.
 - **Need multi-device PostgreSQL sync?** [DataVo-Sync](/manual/fundamentals/datavo-sync) is a separate commercial add-on providing offline-first bidirectional sync over WebSocket/HTTP with wire v2 + Brotli.
 
