@@ -5,7 +5,8 @@ set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 output=""
-version="0.4.0-rc.1"
+# Default to the repository release version (Directory.Build.props <DataVoVersion>); --version overrides it.
+version="$(sed -n 's:.*<DataVoVersion>\(.*\)</DataVoVersion>.*:\1:p' "$root/Directory.Build.props" | head -n 1)"
 
 usage() {
   echo "Usage: $0 --output <new-directory> [--version <semver>]" >&2

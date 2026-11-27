@@ -87,6 +87,10 @@ reject_text \
 reject_text \
   "$ROOT/docs/features/unity-and-godot.md" \
   "StorageMode = StorageMode.Disk"
+# StorageMode.Disk was removed in 0.5.0; the UPM package README must not advertise it.
+reject_text \
+  "$ROOT/integrations/unity/com.datavo.core/README.md" \
+  "StorageMode.Disk"
 reject_text \
   "$ROOT/README.md" \
   "The planned first Unity proof covers in-memory execution in the Editor and a Windows x64 IL2CPP player."

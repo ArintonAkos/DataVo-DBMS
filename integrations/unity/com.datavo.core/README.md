@@ -12,7 +12,7 @@ This is a preview for evaluation. Test save data on every platform you ship to.
 | macOS IL2CPP (6000.5.4f1, Medium stripping) | The portable build has passed a built Player smoke test |
 | Windows, consoles, mobile | Not verified |
 | `StorageMode.InMemory` | Available |
-| `StorageMode.Disk`, `StorageMode.Lsm` | Save, close and reopen pass on macOS (Editor and IL2CPP); other platforms are unverified |
+| `StorageMode.Lsm` | Save, close and reopen pass on macOS (Editor and IL2CPP); other platforms are unverified |
 | Burst | Not supported: DataVo is managed code. Call it from the main thread or a managed thread |
 
 ## Install
