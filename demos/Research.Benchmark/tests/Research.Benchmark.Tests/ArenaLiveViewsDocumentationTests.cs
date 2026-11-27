@@ -3,15 +3,16 @@ using System.Text.RegularExpressions;
 namespace Research.Benchmark.Tests;
 
 /// <summary>
-/// Every page that documents the Arena live-views benchmark must give its reproduction commands and state the
-/// boundaries between the desktop .NET lane and the Unity macOS IL2CPP lane. Commands are checked verbatim; the
-/// lane-boundary facts are checked by meaning, so a page may phrase them in its own words.
+/// Verifies that active documentation pages covering the Arena live-views benchmark and Unity evaluation
+/// state the reproduction commands and the boundaries between the desktop .NET and Unity macOS IL2CPP lanes.
+/// Commands are checked verbatim; lane-boundary facts are checked by meaning.
 /// </summary>
 public sealed class ArenaLiveViewsDocumentationTests
 {
-    private static readonly string[] DocumentationPaths =
+    private const string UnityRoadmapPath = "docs/manual/getting-started/roadmap.md";
+
+    private static readonly string[] BenchmarkDocumentationPaths =
     [
-        "docs/features/unity-and-godot.md",
         "docs/manual/performance/reproducing-benchmarks.md",
         "demos/Research.Benchmark/README.md",
     ];
@@ -36,12 +37,24 @@ public sealed class ArenaLiveViewsDocumentationTests
             new Regex(@"do not compare Unity IL2CPP (values|timings) directly with desktop \.NET (values|timings)", RegexOptions.IgnoreCase)),
     ];
 
+    private static readonly string[] RequiredUnityRoadmapBoundaries =
+    [
+        "Unity is an **evaluation target**, not a supported runtime.",
+        "| Unity 6000.5.4f1 Editor (macOS) | Narrow smoke pass |",
+        "| macOS IL2CPP Player | Narrow smoke pass |",
+        "| Windows x64 IL2CPP | Unverified |",
+        "| Direct Burst calls | Unsupported by design |",
+    ];
+
+    /// <summary>
+    /// Ensures every Arena benchmark reproduction page states the exact CLI commands and lane-comparison rules.
+    /// </summary>
     [Fact]
     public void ArenaDocumentation_StatesReproductionCommandsAndLaneBoundaries()
     {
         string repositoryRoot = FindRepositoryRoot();
 
-        foreach (string documentationPath in DocumentationPaths)
+        foreach (string documentationPath in BenchmarkDocumentationPaths)
         {
             string documentation = File.ReadAllText(Path.Combine(repositoryRoot, documentationPath));
 
@@ -54,6 +67,21 @@ public sealed class ArenaLiveViewsDocumentationTests
             {
                 Assert.True(pattern.IsMatch(documentation), $"{documentationPath} does not state that {fact}.");
             }
+        }
+    }
+
+    /// <summary>
+    /// Ensures the status and roadmap manual page keeps the Unity evaluation boundaries up to date.
+    /// </summary>
+    [Fact]
+    public void UnityEvaluationRoadmap_StatesUnityLaneBoundaries()
+    {
+        string repositoryRoot = FindRepositoryRoot();
+        string roadmap = File.ReadAllText(Path.Combine(repositoryRoot, UnityRoadmapPath));
+
+        foreach (string boundary in RequiredUnityRoadmapBoundaries)
+        {
+            Assert.Contains(boundary, roadmap, StringComparison.Ordinal);
         }
     }
 
